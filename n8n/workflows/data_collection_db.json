@@ -1,0 +1,791 @@
+{
+  "id": "data_collection_db",
+  "name": "BrainBets - Data Collection Pipeline (DB-First)",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "data-collection-db",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "data-collection-db"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot__TELEGRAM_TOKEN__/sendMessage",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "options": {},
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+        "jsonBody": {
+          "chat_id": "__TELEGRAM_CHAT_ID__",
+          "text": "={{ '🚀 <b>BrainBets - Collect INICIADO</b>\\n\\n' + new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' }) + ' (Bogotá)' }}",
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "notify-start",
+      "name": "Notify Start",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        470,
+        120
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst bogotaDate = (d) => d.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });\nconst items = [];\nfor (let offset = -1; offset <= 3; offset++) {\n  const d = new Date(now);\n  d.setDate(d.getDate() + offset);\n  items.push({ json: { date: bogotaDate(d), label: offset === 0 ? 'today' : 'day_' + offset } });\n}\nreturn items;"
+      },
+      "id": "build-football-date-params",
+      "name": "Build Football Date Params",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://backend:8000/api/v1/internal/proxy/football/fixtures",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "dateFrom",
+              "value": "={{ $json.date }}"
+            },
+            {
+              "name": "dateTo",
+              "value": "={{ $json.date }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "continueOnFail": true
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}"
+      },
+      "id": "get-football",
+      "name": "Get Football Live",
+      "onError": "continueRegularOutput",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $('Get Football Live').all();\nconst seen = new Set();\nconst matches = [];\nlet source = 'unknown';\nfor (const item of items) {\n  const data = item.json || {};\n  if (data.source) source = data.source;\n  const itemMatches = data.matches || data.response?.matches || [];\n  for (const match of itemMatches) {\n    if (!match || !match.id || seen.has(match.id)) continue;\n    seen.add(match.id);\n    matches.push(match);\n  }\n}\nreturn [{ json: { matches, count: matches.length, source } }];"
+      },
+      "id": "merge-football-api-responses",
+      "name": "Merge Football API Responses",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        650,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/proxy",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": {
+          "url": "={{ 'https://api.api-tennis.com/tennis/?APIkey=__TENNIS_API_KEY__&method=get_fixtures&date_start=' + new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) + '&date_stop=' + new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) + '&event_type_key=265&timezone=America/Bogota' }}",
+          "method": "GET",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "ttlSeconds": 300,
+          "maxRetries": 3,
+          "unwrap": true
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "options": {
+          "timeout": 60000,
+          "continueOnFail": true
+        }
+      },
+      "id": "get-tennis",
+      "name": "Get Tennis Live",
+      "onError": "continueRegularOutput",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge football and tennis data using explicit node references\nlet query = {};\ntry { query = $('Webhook Trigger').first().json.query || {}; } catch (e) { query = {}; }\nconst requestedSport = (query.sport || '').toLowerCase();\nconst includeFootball = !requestedSport || requestedSport === 'football';\nconst includeTennis = !requestedSport || requestedSport === 'tennis';\n\nlet footballData = {};\nlet footballOddsByMatchId = {};\nlet footballH2hByMatchId = {};\nif (includeFootball) {\n  try {\n    const rawFootball = $('Merge Football API Responses').first().json;\n    footballData = (rawFootball && typeof rawFootball === 'object') ? rawFootball : {};\n    const rawFbOdds = $('Merge Football Odds').first().json;\n    footballOddsByMatchId = (rawFbOdds && rawFbOdds.oddsByMatchId) ? rawFbOdds.oddsByMatchId : {};\n  } catch(e) { footballData = {}; }\n}\nlet tennisEvents = [];\nlet oddsByMatchId = {};\nlet tennisH2hByMatchId = {};\nif (includeTennis) {\n  try {\n    tennisEvents = $('Extract Tennis Events').all().map(item => item.json || {}).filter(ev => ev && ev.eventId);\n    const rawOdds = $('Merge Tennis Odds').first().json;\n    oddsByMatchId = (rawOdds && rawOdds.oddsByMatchId) ? rawOdds.oddsByMatchId : {};\n    const rawTennisH2h = $('Merge Tennis H2H').first().json;\n    tennisH2hByMatchId = (rawTennisH2h && rawTennisH2h.h2hByMatchId) ? rawTennisH2h.h2hByMatchId : {};\n  } catch(e) { tennisEvents = []; }\n}\n\nconst now = new Date();\nconst dateStr = now.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });\nconst yesterday = new Date(now.getTime() - 86400000);\nconst yesterdayStr = yesterday.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });\n\n// --- Football importance tiers ---\n// Lower number = more important. IDs are from free-api-live-football-data.\nconst footballLeagueNames = {\n  894789: 'FIFA World Cup',\n};\nconst footballLeagueTiers = {\n  894789: 1, // FIFA World Cup 2026\n};\nconst topCountries = new Set([\n  'argentina','australia','belgium','brazil','canada','chile','colombia','costa rica','croatia',\n  'denmark','ecuador','egypt','england','france','germany','ghana','iran','italy','ivory coast',\n  'japan','korea','mexico','morocco','netherlands','nigeria','norway','paraguay','peru','poland',\n  'portugal','saudi arabia','senegal','serbia','spain','switzerland','tunisia','ukraine','uruguay',\n  'usa','wales','south africa','algeria','cameroon','scotland'\n]);\n\nfunction getFootballMatchTier(match) {\n  const leagueId = Number(match.leagueId);\n  if (footballLeagueTiers[leagueId] !== undefined) {\n    return footballLeagueTiers[leagueId];\n  }\n  const home = (match.home?.name || match.home?.longName || '').toLowerCase();\n  const away = (match.away?.name || match.away?.longName || '').toLowerCase();\n  if (topCountries.has(home) && topCountries.has(away)) return 2;\n  return 5;\n}\n\n// Format football matches: keep only today's matches, sort by importance, cap at 25\nconst footballMatches = [];\nconst footballMatchesRaw = footballData.matches || [];\nconst sortedFootball = footballMatchesRaw\n  .filter(m => {\n    const utcTime = m.status?.utcTime;\n    if (!utcTime) return true;\n    const d = new Date(utcTime);\n    const localDate = d.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });\n    return localDate === dateStr || localDate === yesterdayStr;\n  })\n  .sort((a, b) => {\n    const tierDiff = getFootballMatchTier(a) - getFootballMatchTier(b);\n    if (tierDiff !== 0) return tierDiff;\n    return (a.status?.utcTime || '').localeCompare(b.status?.utcTime || '');\n  });\n\nfor (const match of sortedFootball.slice(0, 15)) {\n  const status = match.status || {};\n  const utcTime = status.utcTime;\n  const matchDate = utcTime ? new Date(utcTime) : new Date();\n  const eventDate = matchDate.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });\n  const eventTime = matchDate.toLocaleTimeString('en-GB', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit' });\n  const finished = status.finished || (status.reason?.short === 'FT');\n  const started = status.started;\n  let matchStatus = 'SCHEDULED';\n  if (finished) matchStatus = 'FINISHED';\n  else if (started) matchStatus = 'LIVE';\n  else if (status.cancelled) matchStatus = 'CANCELLED';\n\n  const fbMatchId = `FOOTBALL-${match.id}`;\n  const fbOdds = footballOddsByMatchId[fbMatchId] || {};\n  const fbH2h = footballH2hByMatchId[fbMatchId] || null;\n  const leagueId = Number(match.leagueId);\n  footballMatches.push({\n    matchId: fbMatchId,\n    leagueTier: getFootballMatchTier(match),\n    homeTeam: match.home?.name || match.home?.longName || 'Unknown',\n    awayTeam: match.away?.name || match.away?.longName || 'Unknown',\n    league: footballLeagueNames[leagueId] || String(leagueId),\n    eventDate: eventDate,\n    eventTime: eventTime,\n    homePosition: 0,\n    awayPosition: 0,\n    homeForm: 'N/A',\n    awayForm: 'N/A',\n    homeXg: 0,\n    awayXg: 0,\n    homeCorners: 0,\n    awayCorners: 0,\n    homeOdds: fbOdds.homeOdds || null,\n    drawOdds: fbOdds.drawOdds || null,\n    awayOdds: fbOdds.awayOdds || null,\n    headToHead: fbH2h,\n    eventId: match.id,\n    homeScore: match.home?.score || 0,\n    awayScore: match.away?.score || 0,\n    status: matchStatus\n  });\n}\n\n// --- External consensus: ClubElo fixture predictions (football, shadow mode) ---\nfunction normTeamName(name) {\n  return (name || '').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\\s+/g, ' ').trim();\n}\nconst CLUB_TOKENS = new Set(['fc','sc','cf','ac','afc','cd','ud','ec','rc','ca','club','de','fk','sk','bk','if','sv','ssc','as','us','rcd','se','bc']);\nfunction teamTokens(name) {\n  return normTeamName(name).split(' ').filter(t => t && !CLUB_TOKENS.has(t));\n}\nfunction teamsMatch(a, b) {\n  const ta = teamTokens(a);\n  const tb = teamTokens(b);\n  if (!ta.length || !tb.length) return false;\n  const tokenEq = (x, y) => x === y || (x.length >= 5 && y.length >= 5 && (x.startsWith(y) || y.startsWith(x)));\n  const inter = ta.filter(x => tb.some(y => tokenEq(x, y))).length;\n  const union = new Set(ta.concat(tb)).size;\n  if (inter / union >= 0.5) return true;\n  const shorter = ta.length <= tb.length ? ta : tb;\n  const longer = ta.length <= tb.length ? tb : ta;\n  return shorter.every(x => longer.some(y => tokenEq(x, y)));\n}\nfunction parseClubElo(html) {\n  const fixtures = [];\n  if (!html || typeof html !== 'string') return fixtures;\n  const fIdx = html.indexOf('<h2><a href=\"Fixtures\">');\n  const rIdx = html.indexOf('<h2><a href=\"Results\">');\n  let block = html;\n  if (fIdx >= 0 && rIdx > fIdx) {\n    block = html.slice(fIdx, rIdx);\n  } else if (rIdx > 0) {\n    block = html.slice(0, rIdx);\n  }\n  const textRe = /<text\\b[^>]*>([\\s\\S]*?)<\\/text>/g;\n  const rows = {};\n  let m;\n  while ((m = textRe.exec(block)) !== null) {\n    const tag = m[0];\n    const xm = tag.match(/\\bx=\"([\\d.\\-]+)\"/);\n    const ym = tag.match(/\\by=\"([\\d.\\-]+)\"/);\n    if (!xm || !ym) continue;\n    const x = parseFloat(xm[1]);\n    const y = parseFloat(ym[1]);\n    const content = m[1].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').trim();\n    if (!content) continue;\n    const key = String(y);\n    (rows[key] = rows[key] || []).push({ x: x, content: content });\n  }\n  for (const key of Object.keys(rows)) {\n    const cells = rows[key];\n    const homes = cells.filter(c => Math.abs(c.x - 20) < 6);\n    const aways = cells.filter(c => Math.abs(c.x - 235) < 6);\n    const hps = cells.filter(c => Math.abs(c.x - 534) < 8);\n    const aps = cells.filter(c => Math.abs(c.x - 578) < 8);\n    const hes = cells.filter(c => Math.abs(c.x - 180) < 8);\n    const aes = cells.filter(c => Math.abs(c.x - 395) < 8);\n    const n = Math.min(homes.length, aways.length, hps.length, aps.length);\n    for (let i = 0; i < n; i++) {\n      const homePct = parseFloat(hps[i].content);\n      const awayPct = parseFloat(aps[i].content);\n      if (isNaN(homePct) || isNaN(awayPct)) continue;\n      fixtures.push({ home: homes[i].content, away: aways[i].content, homeWinPct: homePct, awayWinPct: awayPct, homeElo: hes[i] ? parseFloat(hes[i].content) : null, awayElo: aes[i] ? parseFloat(aes[i].content) : null });\n    }\n  }\n  return fixtures;\n}\nlet clubeloFixtures = [];\ntry {\n  const clubeloRaw = $('Get ClubElo').first().json;\n  clubeloFixtures = parseClubElo(clubeloRaw && clubeloRaw.data ? clubeloRaw.data : '');\n} catch (e) { clubeloFixtures = []; }\nfor (const fm of footballMatches) {\n  const hit = clubeloFixtures.find(f => teamsMatch(f.home, fm.homeTeam) && teamsMatch(f.away, fm.awayTeam));\n  if (hit) {\n    fm.expertConsensus = { source: 'clubelo', homeTeam: fm.homeTeam, awayTeam: fm.awayTeam, homeWinPct: hit.homeWinPct, awayWinPct: hit.awayWinPct, homeElo: hit.homeElo, awayElo: hit.awayElo };\n  }\n}\n\n// Format tennis matches (from Extract Tennis Events: ATP + WTA parsed)\nconst tennisMatches = [];\nfor (const event of tennisEvents.slice(0, 50)) {\n  const matchId = event.matchId || `TENNIS-${event.eventId}`;\n  const odds = oddsByMatchId[matchId] || {};\n  const surface = event.surface || 'hard';\n  const eventDate = event.eventDate || dateStr;\n  const eventTime = event.eventTime || null;\n  \n  tennisMatches.push({\n    matchId: matchId,\n    player1: event.player1 || 'Unknown',\n    player2: event.player2 || 'Unknown',\n    tournament: event.tournament || 'Unknown',\n    eventDate: eventDate,\n    eventTime: eventTime,\n    rankingPlayer1: event.rankingPlayer1 || 0,\n    rankingPlayer2: event.rankingPlayer2 || 0,\n    surface: surface,\n    groundType: surface,\n    tournamentTier: event.tournamentTier || 0,\n    countryPlayer1: event.countryPlayer1 || null,\n    countryPlayer2: event.countryPlayer2 || null,\n    formPlayer1: 'N/A',\n    formPlayer2: 'N/A',\n    acesAvgPlayer1: 0,\n    acesAvgPlayer2: 0,\n    oddsPlayer1: odds.oddsPlayer1 || event.oddsPlayer1 || null,\n    oddsPlayer2: odds.oddsPlayer2 || event.oddsPlayer2 || null,\n    h2h: tennisH2hByMatchId[matchId] || 'N/A',\n    eventId: event.eventId,\n    status: event.status || 'Not started',\n    seed1: event.seed1 || null,\n    seed2: event.seed2 || null\n  });\n}\n\nconst output = {\n  generatedAt: now.toISOString(),\n  source: 'live_api',\n  tennis: tennisMatches,\n  football: footballMatches,\n  requestedSport: requestedSport || 'all'\n};\n\nreturn [{ json: output }];\n"
+      },
+      "id": "merge-data",
+      "name": "Merge & Format Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/matches/bulk",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "options": {
+          "timeout": 30000,
+          "continueOnFail": true
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "jsonBody": {
+          "generatedAt": "={{ $json.generatedAt }}",
+          "source": "={{ $json.source }}",
+          "tennis": "={{ $json.tennis }}",
+          "football": "={{ $json.football }}"
+        }
+      },
+      "id": "send-to-db",
+      "name": "Send Matches to DB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Merge & Format Data').first().json;\nconst footballCount = data.football?.length || 0;\nconst tennisCount = data.tennis?.length || 0;\nconst count = footballCount + tennisCount;\nconst dbResult = $input.first().json || {};\nconst inserted = dbResult.inserted || 0;\nconst errors = dbResult.errors || [];\nconst telegramMessage = `<b>BrainBets - Datos Recolectados</b>\\n\\nTotal partidos: ${count}\\n- Futbol: ${footballCount}\\n- Tenis: ${tennisCount}\\nInsertados en DB: ${inserted}\\nErrores: ${errors.length}`;\nreturn [{\n  json: {\n    telegramMessage: telegramMessage,\n    dbResult: dbResult\n  }\n}];"
+      },
+      "id": "prepare-notify",
+      "name": "Prepare Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1050,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot__TELEGRAM_TOKEN__/sendMessage",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "options": {},
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+        "jsonBody": {
+          "chat_id": "__TELEGRAM_CHAT_ID__",
+          "text": "={{ $json.telegramMessage || 'BrainBets - Datos recolectados' }}",
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "telegram-notify",
+      "name": "Telegram Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse api-tennis.com fixtures (ATP singles main draw only, event_type_key=265)\n// Single source: fixtures + odds + standings share the same event_key/player names.\nconst fixturesData = $('Get Tennis Live').first().json || {};\nlet oddsData = {}; try { oddsData = $('Get Tennis Odds').first().json || {}; } catch(e) { oddsData = {}; }\nlet standingsData = {}; try { standingsData = $('Get Tennis Rankings').first().json || {}; } catch(e) { standingsData = {}; }\n\nconst allMatches = Array.isArray(fixturesData.result) ? fixturesData.result : [];\nconst oddsByKey = (oddsData.result && typeof oddsData.result === 'object' && !Array.isArray(oddsData.result)) ? oddsData.result : {};\n\n// --- Rankings lookup (get_standings ATP returns full names: 'Jannik Sinner') ---\nfunction normName(name) {\n  return (name || '').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/[^a-z ]/g, ' ').replace(/\\s+/g, ' ').trim();\n}\nconst rankByName = {};\nfor (const r of (Array.isArray(standingsData.result) ? standingsData.result : [])) {\n  const full = normName(r.player || '');\n  const place = parseInt(r.place);\n  if (full && place && !(full in rankByName)) rankByName[full] = place;\n}\nfunction lookupRank(playerName) {\n  const n = normName(playerName);\n  if (!n) return null;\n  if (rankByName[n] !== undefined) return rankByName[n];\n  const parts = n.split(' ').filter(Boolean);\n  if (parts.length < 2) return null;\n  // Fallback 1: surname + first initial ('C. Alcaraz' vs 'Carlos Alcaraz')\n  const surname = parts[parts.length - 1];\n  const firstInitial = parts[0][0];\n  for (const full in rankByName) {\n    const fp = full.split(' ').filter(Boolean);\n    if (fp.length < 2) continue;\n    if (fp[fp.length - 1] === surname && fp[0][0] === firstInitial) return rankByName[full];\n  }\n  // Fallback 2: token-set match for scrambled standings names ('Martin Etcheverry Tomas')\n  const initials = parts.filter(p => p.length === 1);\n  const nameTokens = parts.filter(p => p.length > 1);\n  if (!nameTokens.length) return null;\n  for (const full in rankByName) {\n    const fp = full.split(' ').filter(Boolean);\n    if (fp.length < 2) continue;\n    const tokenSet = new Set(fp);\n    if (!nameTokens.every(t => tokenSet.has(t))) continue;\n    const fullInitials = new Set(fp.map(t => t[0]));\n    if (initials.every(i => fullInitials.has(i))) return rankByName[full];\n  }\n  return null;\n}\n\n// --- Odds: prefer sharp books, fallback to any available ---\nconst BOOKIE_PRIORITY = ['Pncl', 'bet365', 'Betfair', 'WilliamHill', 'Unibet', 'Marathon', '1xBet', '10Bet', 'Bwin', 'bwin', 'Betsson'];\nfunction pickOdd(selection) {\n  if (!selection || typeof selection !== 'object') return null;\n  for (const b of BOOKIE_PRIORITY) {\n    if (selection[b] !== undefined) { const v = parseFloat(selection[b]); if (v > 1.0) return v; }\n  }\n  for (const k of Object.keys(selection)) { const v = parseFloat(selection[k]); if (v > 1.0) return v; }\n  return null;\n}\n\n// --- Surface heuristic (api-tennis fixtures have no surface field) ---\nconst GRASS = ['wimbledon', 'halle', 'queen', 'hertogenbosch', 'den bosch', 'stuttgart', 'eastbourne', 'newport', 'mallorca', 'bad homburg', 'berlin', 'newport'];\nconst CLAY = ['kitzbuhel', 'estoril', 'hamburg', 'bastad', 'gstaad', 'umag', 'geneva', 'lyon', 'bucharest', 'marrakech', 'houston', 'bogota', 'santiago', 'buenos aires', 'rio de janeiro', 'rio open', 'roland', 'french open', 'monte-carlo', 'monte carlo', 'madrid', 'rome', 'roma', 'barcelona', 'belgrade', 'istanbul', 'parma', 'rabat', 'palermo', 'budapest'];\nfunction guessSurface(tName) {\n  const t = (tName || '').toLowerCase();\n  for (const k of GRASS) { if (t.includes(k)) return 'grass'; }\n  for (const k of CLAY) { if (t.includes(k)) return 'clay'; }\n  return 'hard';\n}\n\n// --- Tournament tier (feed is already ATP singles only) ---\nconst SLAMS = ['australian open', 'roland garros', 'french open', 'wimbledon', 'us open'];\nconst MASTERS = ['indian wells', 'miami', 'monte-carlo', 'monte carlo', 'madrid', 'rome', 'roma', 'canada', 'toronto', 'montreal', 'cincinnati', 'shanghai', 'paris'];\nconst ATP500 = ['rotterdam', 'dallas', 'doha', 'rio', 'acapulco', 'dubai', 'barcelona', 'halle', 'queen', 'hamburg', 'washington', 'beijing', 'tokyo', 'vienna', 'basel', 'munich'];\nfunction guessTier(tName, roundName) {\n  const t = (tName || '').toLowerCase();\n  const r = (roundName || '').toLowerCase();\n  for (const k of SLAMS) { if (t.includes(k)) return 100; }\n  for (const k of MASTERS) { if (t.includes(k)) return 80; }\n  for (const k of ATP500) { if (t.includes(k)) return 60; }\n  if (r.includes('olympics') || t.includes('atp finals') || t.includes('next gen') || t.includes('davis') || t.includes('united cup')) return 90;\n  return 40; // ATP 250\n}\n\nfunction mapStatus(m) {\n  const s = (m.event_status || '').toLowerCase();\n  if (m.event_live === '1') return 'LIVE';\n  if (s === 'finished' || s === 'ended') return 'FINISHED';\n  if (s === 'retired' || s === 'walkover' || s === 'cancelled') return 'CANCELLED';\n  if (s === '' || s === 'not started') return 'SCHEDULED';\n  return 'LIVE'; // 'Set 1', 'Set 2', ...\n}\n\nconst items = [];\nfor (const m of allMatches.slice(0, 100)) {\n  // Main draw only: skip qualification rounds\n  if (String(m.event_qualification) === 'True') continue;\n\n  const mkts = oddsByKey[String(m.event_key)] || {};\n  const homeAway = mkts['Home/Away'] || {};\n  const surface = guessSurface(m.tournament_name);\n\n  items.push({ json: {\n    eventId: m.event_key,\n    matchId: 'TENNIS-' + m.event_key,\n    player1: m.event_first_player || 'Unknown',\n    player2: m.event_second_player || 'Unknown',\n    eventDate: m.event_date || null,  // Bogotá local date (timezone param)\n    eventTime: m.event_time || null,  // Bogotá local time 'HH:MM'\n    rankingPlayer1: lookupRank(m.event_first_player),\n    rankingPlayer2: lookupRank(m.event_second_player),\n    surface: surface,\n    groundType: surface,\n    tournamentTier: guessTier(m.tournament_name, m.tournament_round),\n    countryPlayer1: null,\n    countryPlayer2: null,\n    status: mapStatus(m),\n    seed1: null,\n    seed2: null,\n    roundName: m.tournament_round || null,\n    tournament: m.tournament_name || null,\n    oddsPlayer1: pickOdd(homeAway.Home),\n    oddsPlayer2: pickOdd(homeAway.Away),\n    totalSetsLine: null,\n    overTotalOdds: null,\n    underTotalOdds: null,\n    handicap1: null,\n    handicap1Odds: null,\n    handicap2: null,\n    handicap2Odds: null\n  }});\n}\n// Never return zero items: an empty output silently kills the rest of the serial chain (football DB write, notification)\nif (items.length === 0) {\n  items.push({ json: { eventId: '', matchId: '', noMatches: true } });\n}\nreturn items;\n"
+      },
+      "id": "extract-tennis-events",
+      "name": "Extract Tennis Events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        650,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Odds are now included in the new API fixtures response\n// Extract them directly from Extract Tennis Events output\nconst eventItems = $('Extract Tennis Events').all();\nconst oddsByMatchId = {};\n\nfor (const item of eventItems) {\n  const ev = item.json || {};\n  if (!ev.eventId) continue;\n  const matchId = ev.matchId || `TENNIS-${ev.eventId}`;\n  \n  // Odds are already extracted in Extract Tennis Events\n  const o1 = ev.oddsPlayer1;\n  const o2 = ev.oddsPlayer2;\n  \n  if (o1 && o2 && o1 > 1.0 && o2 > 1.0) {\n    oddsByMatchId[matchId] = {\n      oddsPlayer1: Number(o1.toFixed(3)),\n      oddsPlayer2: Number(o2.toFixed(3)),\n      totalSetsLine: ev.totalSetsLine || null,\n      overTotalOdds: ev.overTotalOdds || null,\n      underTotalOdds: ev.underTotalOdds || null,\n      handicap1: ev.handicap1 || null,\n      handicap1Odds: ev.handicap1Odds || null,\n      handicap2: ev.handicap2 || null,\n      handicap2Odds: ev.handicap2Odds || null\n    };\n  }\n}\nreturn [{ json: { oddsByMatchId } }];"
+      },
+      "id": "merge-tennis-odds",
+      "name": "Merge Tennis Odds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1050,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const footballData = $('Merge Football API Responses').first().json || {};\nconst matches = footballData.matches || [];\nconst items = [];\nfor (const match of matches.slice(0, 45)) {\n  items.push({ json: { eventId: match.id, matchId: `FOOTBALL-${match.id}` } });\n}\n// Never return zero items: an empty output silently kills the rest of the serial chain (tennis, DB write, notification)\nif (items.length === 0) {\n  items.push({ json: { eventId: '', matchId: '', noMatches: true } });\n}\nreturn items;"
+      },
+      "id": "extract-football-events",
+      "name": "Extract Football Events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        650,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/proxy",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": {
+          "url": "={{ 'https://free-api-live-football-data.p.rapidapi.com/football-event-odds?eventid=' + $json.eventId + '&countrycode=BR' }}",
+          "method": "GET",
+          "headers": {
+            "Content-Type": "application/json",
+            "x-rapidapi-host": "free-api-live-football-data.p.rapidapi.com",
+            "x-rapidapi-key": "__RAPIDAPI_KEY__"
+          },
+          "ttlSeconds": 120,
+          "maxRetries": 3,
+          "unwrap": true
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "options": {
+          "timeout": 60000,
+          "continueOnFail": true
+        }
+      },
+      "id": "get-football-odds",
+      "name": "Get Football Odds",
+      "onError": "continueRegularOutput",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        850,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const oddsItems = $('Get Football Odds').all();\nconst eventItems = $('Extract Football Events').all();\nconst oddsByMatchId = {};\n\nfunction findOdds(json) {\n  if (!json || typeof json !== 'object') return null;\n  if (json.homeOdds !== undefined && json.drawOdds !== undefined && json.awayOdds !== undefined) {\n    return { homeOdds: json.homeOdds, drawOdds: json.drawOdds, awayOdds: json.awayOdds };\n  }\n  if (json.home_odd !== undefined && json.draw_odd !== undefined && json.away_odd !== undefined) {\n    return { homeOdds: json.home_odd, drawOdds: json.draw_odd, awayOdds: json.away_odd };\n  }\n\n  const oddsRoot = (json.response && json.response.odds) || json.odds;\n  const oddsPayload = (oddsRoot && oddsRoot.odds) || oddsRoot;\n\n  if (oddsPayload && typeof oddsPayload === 'object') {\n    const o = oddsPayload;\n    if (o['1'] !== undefined && o['X'] !== undefined && o['2'] !== undefined) {\n      return { homeOdds: o['1'], drawOdds: o['X'], awayOdds: o['2'] };\n    }\n    if (o.home !== undefined && o.draw !== undefined && o.away !== undefined) {\n      return { homeOdds: o.home, drawOdds: o.draw, awayOdds: o.away };\n    }\n  }\n\n  function extractFromMarket(market) {\n    if (!market || !Array.isArray(market.selections)) return null;\n    const home = market.selections.find(x => String(x.name).toLowerCase() === '1');\n    const draw = market.selections.find(x => String(x.name).toLowerCase() === 'x');\n    const away = market.selections.find(x => String(x.name).toLowerCase() === '2');\n    if (home && draw && away) {\n      return { homeOdds: home.oddsDecimal, drawOdds: draw.oddsDecimal, awayOdds: away.oddsDecimal };\n    }\n    return null;\n  }\n\n  if (oddsPayload && Array.isArray(oddsPayload.matchfactMarkets)) {\n    const m = oddsPayload.matchfactMarkets.find(x => /fulltime|full.time|who.will.win|1x2/i.test(String(x.header || x.headerTranslationKey)));\n    const extracted = extractFromMarket(m);\n    if (extracted) return extracted;\n  }\n  if (oddsPayload && Array.isArray(oddsPayload.oddsTabMarkets)) {\n    for (const tab of oddsPayload.oddsTabMarkets) {\n      const markets = Array.isArray(tab.markets) ? tab.markets : [];\n      const m = markets.find(x => /fulltime|full.time|who.will.win|1x2/i.test(String(x.header || x.headerTranslationKey)));\n      const extracted = extractFromMarket(m);\n      if (extracted) return extracted;\n    }\n  }\n\n  const markets = Array.isArray(json.markets) ? json.markets : (Array.isArray(oddsPayload && oddsPayload.markets) ? oddsPayload.markets : null);\n  if (markets) {\n    const m = markets.find(x => /1x2|fulltime|full.time|who.will.win/i.test(String(x.name || x.marketName || x.market || x.header || x.headerTranslationKey)));\n    if (m) {\n      if (Array.isArray(m.values)) {\n        const home = m.values.find(x => String(x.value).toLowerCase() === 'home' || String(x.value) === '1');\n        const draw = m.values.find(x => String(x.value).toLowerCase() === 'draw' || String(x.value).toLowerCase() === 'x');\n        const away = m.values.find(x => String(x.value).toLowerCase() === 'away' || String(x.value) === '2');\n        return { homeOdds: home && home.odd, drawOdds: draw && draw.odd, awayOdds: away && away.odd };\n      }\n      return extractFromMarket(m);\n    }\n  }\n  return null;\n}\n\nfor (let i = 0; i < oddsItems.length; i++) {\n  const eventId = eventItems[i] && eventItems[i].json.eventId;\n  if (!eventId) continue;\n  const matchId = 'FOOTBALL-' + eventId;\n  const odds = findOdds(oddsItems[i].json);\n  if (odds && odds.homeOdds && odds.drawOdds && odds.awayOdds) {\n    oddsByMatchId[matchId] = {\n      homeOdds: Number(parseFloat(odds.homeOdds).toFixed(3)),\n      drawOdds: Number(parseFloat(odds.drawOdds).toFixed(3)),\n      awayOdds: Number(parseFloat(odds.awayOdds).toFixed(3)),\n    };\n  }\n}\nreturn [{ json: { oddsByMatchId } }];"
+      },
+      "id": "merge-football-odds",
+      "name": "Merge Football Odds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1050,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/matches/football/enrich",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": {
+          "matchIds": "={{ $json.footballMatchIds }}"
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "options": {
+          "timeout": 60000,
+          "continueOnFail": true
+        }
+      },
+      "id": "enrich-football-stats",
+      "name": "Enrich Football Stats",
+      "onError": "continueRegularOutput",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('Merge & Format Data').first().json;\nconst enriched = $('Enrich Football Stats').first().json || {};\nconst statsById = (enriched.stats || {});\n\nconst football = (input.football || []).map(match => {\n  const stats = statsById[match.matchId] || {};\n  const apiH2h = match.headToHead;\n  const dbH2h = stats.headToHead;\n  const headToHead = (apiH2h && apiH2h.matches > 0) ? apiH2h : ((dbH2h && dbH2h.matches > 0) ? dbH2h : null);\n\n  return {\n    ...match,\n    homePosition: stats.homePosition != null ? stats.homePosition : match.homePosition,\n    awayPosition: stats.awayPosition != null ? stats.awayPosition : match.awayPosition,\n    homeForm: stats.homeForm || match.homeForm,\n    awayForm: stats.awayForm || match.awayForm,\n    homeXg: stats.homeXg != null ? stats.homeXg : match.homeXg,\n    awayXg: stats.awayXg != null ? stats.awayXg : match.awayXg,\n    homeXgAgainst: stats.homeXgAgainst != null ? stats.homeXgAgainst : null,\n    awayXgAgainst: stats.awayXgAgainst != null ? stats.awayXgAgainst : null,\n    homeCorners: stats.homeCorners != null ? stats.homeCorners : match.homeCorners,\n    awayCorners: stats.awayCorners != null ? stats.awayCorners : match.awayCorners,\n    headToHead: headToHead,\n    homeFormStats: stats.homeFormStats || null,\n    awayFormStats: stats.awayFormStats || null,\n    leagueStandings: stats.leagueStandings || null,\n    statsDataQuality: stats.dataQuality || 'fallback',\n  };\n});\n\nreturn [{\n  json: {\n    generatedAt: input.generatedAt,\n    source: input.source,\n    tennis: input.tennis || [],\n    football: football,\n  }\n}];"
+      },
+      "id": "merge-football-stats",
+      "name": "Merge Football Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1050,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $('Extract Tennis Events').all();\nconst matches = items.map(item => item.json).filter(j => j.matchId);\nreturn [{ json: { matches } }];"
+      },
+      "id": "build-tennis-h2h-payload",
+      "name": "Build Tennis H2H Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/matches/tennis/enrich",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": {
+          "matches": "={{ $json.matches }}"
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "options": {
+          "timeout": 60000,
+          "continueOnFail": true
+        }
+      },
+      "id": "enrich-tennis-h2h",
+      "name": "Enrich Tennis H2H",
+      "onError": "continueRegularOutput",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1050,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('Enrich Tennis H2H').first().json || {};\nconst h2hByMatchId = {};\nconst statsData = input.stats || {};\nfor (const [matchId, stats] of Object.entries(statsData)) {\n  if (stats && stats.h2h && stats.h2h.h2h_string) {\n    h2hByMatchId[matchId] = stats.h2h.h2h_string;\n  }\n}\nreturn [{ json: { h2hByMatchId } }];"
+      },
+      "id": "merge-tennis-h2h",
+      "name": "Merge Tennis H2H",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/proxy",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": {
+          "url": "https://api.api-tennis.com/tennis/?APIkey=__TENNIS_API_KEY__&method=get_standings&event_type=ATP",
+          "method": "GET",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "ttlSeconds": 21600,
+          "maxRetries": 3,
+          "unwrap": true
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "options": {
+          "timeout": 60000,
+          "continueOnFail": true
+        }
+      },
+      "id": "get-tennis-rankings",
+      "name": "Get Tennis Rankings",
+      "onError": "continueRegularOutput",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 3,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        250,
+        450
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/proxy",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": {
+          "url": "={{ 'https://api.api-tennis.com/tennis/?APIkey=__TENNIS_API_KEY__&method=get_odds&date_start=' + new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) + '&date_stop=' + new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) + '&event_type_key=265' }}",
+          "method": "GET",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "ttlSeconds": 300,
+          "maxRetries": 3,
+          "unwrap": true
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "options": {
+          "timeout": 60000,
+          "continueOnFail": true
+        }
+      },
+      "id": "get-tennis-odds",
+      "name": "Get Tennis Odds",
+      "onError": "continueRegularOutput",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://www.clubelo.com/{{ $now.setZone('America/Bogota').toFormat('yyyy-MM-dd') }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"User-Agent\": \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36\", \"Accept\": \"text/html\"}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "get-clubelo",
+      "name": "Get ClubElo",
+      "onError": "continueRegularOutput",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1450,
+        700
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Football Date Params",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify Start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Football Date Params",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify Start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Football Date Params": {
+      "main": [
+        [
+          {
+            "node": "Get Football Live",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Football Live": {
+      "main": [
+        [
+          {
+            "node": "Merge Football API Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Football API Responses": {
+      "main": [
+        [
+          {
+            "node": "Extract Football Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Football Events": {
+      "main": [
+        [
+          {
+            "node": "Get Football Odds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Football Odds": {
+      "main": [
+        [
+          {
+            "node": "Merge Football Odds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Football Odds": {
+      "main": [
+        [
+          {
+            "node": "Get Tennis Live",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Tennis Live": {
+      "main": [
+        [
+          {
+            "node": "Get Tennis Odds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Tennis Odds": {
+      "main": [
+        [
+          {
+            "node": "Get Tennis Rankings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Tennis Rankings": {
+      "main": [
+        [
+          {
+            "node": "Extract Tennis Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Tennis Events": {
+      "main": [
+        [
+          {
+            "node": "Merge Tennis Odds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Tennis Odds": {
+      "main": [
+        [
+          {
+            "node": "Build Tennis H2H Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Tennis H2H Payload": {
+      "main": [
+        [
+          {
+            "node": "Enrich Tennis H2H",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrich Tennis H2H": {
+      "main": [
+        [
+          {
+            "node": "Merge Tennis H2H",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Tennis H2H": {
+      "main": [
+        [
+          {
+            "node": "Get ClubElo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get ClubElo": {
+      "main": [
+        [
+          {
+            "node": "Merge & Format Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge & Format Data": {
+      "main": [
+        [
+          {
+            "node": "Enrich Football Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrich Football Stats": {
+      "main": [
+        [
+          {
+            "node": "Merge Football Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Football Stats": {
+      "main": [
+        [
+          {
+            "node": "Send Matches to DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Matches to DB": {
+      "main": [
+        [
+          {
+            "node": "Prepare Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Notify": {
+      "main": [
+        [
+          {
+            "node": "Telegram Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "error_notifier"
+  },
+  "staticData": null,
+  "tags": []
+}

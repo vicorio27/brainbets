@@ -1,0 +1,22 @@
+{
+  "sport": "tennis",
+  "model_type": "xgboost",
+  "feature_names": [
+    "elo_diff",
+    "surface_elo_diff",
+    "rank_diff",
+    "p1_recent_win_rate",
+    "p2_recent_win_rate",
+    "surface_p1_recent_win_rate",
+    "surface_p2_recent_win_rate",
+    "p1_days_since_last_match",
+    "p2_days_since_last_match",
+    "p1_matches_last_30_days",
+    "p2_matches_last_30_days"
+  ],
+  "train_accuracy": 0.9981,
+  "test_accuracy": 0.998,
+  "samples": 14761,
+  "max_matches_used": 15000,
+  "trained_at": "2026-07-04T03:29:30.832862+00:00"
+}

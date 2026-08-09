@@ -1,0 +1,295 @@
+{
+  "id": "update_scores_football",
+  "name": "BrainBets - Update Live Scores (Football)",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "update-scores-football",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "update-scores-football"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://backend:8000/api/v1/matches/by-date",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "from",
+              "value": "={{ new Date(Date.now() - 172800000).toISOString().split('T')[0] }}"
+            },
+            {
+              "name": "to",
+              "value": "={{ new Date(Date.now() + 86400000).toISOString().split('T')[0] }}"
+            },
+            {
+              "name": "sport",
+              "value": "football"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "get-matches",
+      "name": "Get Football Matches",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Get Football Matches').first().json || {};\nconst matches = data.football || [];\nfunction isLive(status) {\n  const s = (status || '').toLowerCase();\n  return s === 'live' || s === 'in_play' || s === 'started' || s === 'ongoing' || s === '1h' || s === '2h' || s === 'halftime';\n}\nconst live = [];\nfor (const m of matches) {\n  if (isLive(m.status) && m.eventId) {\n    live.push({ json: m });\n  }\n}\nif (live.length === 0) {\n  return [{ json: { noLive: 1 } }];\n}\nreturn live;"
+      },
+      "id": "filter-live",
+      "name": "Filter Live Football",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "if-no-live-condition",
+              "leftValue": "={{ $json.noLive ? 'nolive' : '' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-live",
+      "name": "If No Live",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/proxy",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": {
+          "url": "https://free-api-live-football-data.p.rapidapi.com/football-current-live",
+          "method": "GET",
+          "headers": {
+            "Content-Type": "application/json",
+            "x-rapidapi-host": "free-api-live-football-data.p.rapidapi.com",
+            "x-rapidapi-key": "__RAPIDAPI_KEY__"
+          },
+          "ttlSeconds": 60,
+          "maxRetries": 3,
+          "unwrap": true
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "get-football-live",
+      "name": "Get Football Live API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1250,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const pendingItems = $('Filter Live Football').all();\nconst liveData = $('Get Football Live API').first().json;\nconst liveMatches = liveData.response?.live || [];\nconst byId = {};\nfor (const m of liveMatches) {\n  byId[String(m.id)] = m;\n}\n\nconst snapshots = [];\nfor (const item of pendingItems) {\n  const p = item.json;\n  const eventId = String(p.eventId);\n  const live = byId[eventId];\n  if (!live || !live.status?.liveTime) continue;\n  const longTime = live.status.liveTime.long || '0:00';\n  const minute = parseInt(longTime.split(':')[0]) || 0;\n  snapshots.push({\n    matchId: p.matchId,\n    minute: minute,\n    periodLabel: live.status.liveTime.short || `${minute}'`,\n    homeScore: live.home?.score ?? 0,\n    awayScore: live.away?.score ?? 0,\n    notes: `Football ${live.status.scoreStr || ''} @${minute}'`\n  });\n}\n\nreturn [{ json: { snapshots: snapshots, count: snapshots.length, sport: 'football' } }];"
+      },
+      "id": "build-snapshots",
+      "name": "Build Football Snapshots",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/predictions/progress",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": {
+          "snapshots": "={{ $json.snapshots }}"
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "send-progress",
+      "name": "Send Progress to Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1750,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const snapData = $('Build Football Snapshots').first().json;\nconst dbResult = $('Send Progress to Backend').first().json || {};\nconst total = snapData.count || 0;\nconst updated = dbResult.predictions_updated || 0;\nconst errors = (dbResult.errors || []).length;\nconst message = total === 0 ? 'No hay partidos de futbol en vivo.' : `Futbol: ${updated} pronosticos en ${total} partidos en vivo.`;\nreturn [{ json: { sport: 'football', message: message, snapshotsCount: total, overallAvgFulfillment: dbResult.overall_avg_fulfillment || 0, errors: errors, dbResult: dbResult } }];"
+      },
+      "id": "prepare-result",
+      "name": "Prepare Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { sport: 'football', message: 'No hay partidos de futbol en vivo.', snapshotsCount: 0, overallAvgFulfillment: 0, errors: 0, dbResult: {} } }];"
+      },
+      "id": "empty-result",
+      "name": "Empty Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Football Matches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Football Matches": {
+      "main": [
+        [
+          {
+            "node": "Filter Live Football",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Live Football": {
+      "main": [
+        [
+          {
+            "node": "If No Live",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If No Live": {
+      "main": [
+        [
+          {
+            "node": "Empty Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Football Live API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Football Live API": {
+      "main": [
+        [
+          {
+            "node": "Build Football Snapshots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Football Snapshots": {
+      "main": [
+        [
+          {
+            "node": "Send Progress to Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Progress to Backend": {
+      "main": [
+        [
+          {
+            "node": "Prepare Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": []
+}

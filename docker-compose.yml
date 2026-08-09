@@ -1,0 +1,153 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: brainbets-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=brainbets
+      - POSTGRES_PASSWORD=brainbets123
+      - POSTGRES_DB=brainbets
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/alembic/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - brainbets-network
+
+  migration_worker:
+    build: ./backend
+    container_name: brainbets-migration-worker
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://brainbets:brainbets123@postgres:5432/brainbets
+      - STORAGE_PATH=/storage
+      - WORKER_POLL_INTERVAL=10
+      - WORKER_DELETE_AFTER_MIGRATE=true
+      - WORKER_MIN_FILE_AGE_SECONDS=300
+    volumes:
+      - ./storage:/storage
+    depends_on:
+      - postgres
+      - backend
+    networks:
+      - brainbets-network
+    command: ["python", "-m", "src.infrastructure.migration_worker"]
+
+  n8n:
+    build: ./n8n
+    container_name: brainbets-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=brainbets123
+      - N8N_USER_MANAGEMENT_DISABLED=true
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=America/Bogota
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - FOOTBALL_DATA_ORG_TOKEN=${FOOTBALL_DATA_ORG_TOKEN:-}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./storage:/storage
+      - ./n8n/workflows:/workflows
+      - ./n8n/prediction_engine:/prediction-engine:ro
+    networks:
+      - brainbets-network
+
+  backend:
+    build: ./backend
+    container_name: brainbets-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - STORAGE_PATH=/storage
+      - CACHE_REFRESH_INTERVAL=60
+      - DATABASE_URL=postgresql://brainbets:brainbets123@postgres:5432/brainbets
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - RAPIDAPI_KEY=${RAPIDAPI_KEY:-}
+      - FOOTBALL_DATA_ORG_TOKEN=${FOOTBALL_DATA_ORG_TOKEN:-}
+    volumes:
+      - ./storage:/storage
+      - ./storage/historical_raw:/tmp/historical_raw
+    networks:
+      - brainbets-network
+    depends_on:
+      - postgres
+      - n8n
+    command: ["sh", "-c", "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"]
+
+  file_writer:
+    build: ./services/file_writer
+    container_name: brainbets-file-writer
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - STORAGE_PATH=/storage
+    volumes:
+      - ./storage:/storage
+    networks:
+      - brainbets-network
+    depends_on:
+      - n8n
+
+  telegram_bot:
+    build: ./services/telegram_bot
+    container_name: brainbets-telegram-bot
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - CHAT_ID=${TELEGRAM_CHAT_ID}
+      - WORKFLOW_EXECUTOR_URL=http://workflow_executor:5001
+      - STORAGE_PATH=/storage
+    volumes:
+      - ./storage:/storage
+    networks:
+      - brainbets-network
+    depends_on:
+      - workflow_executor
+
+  workflow_executor:
+    build: ./services/workflow_executor
+    container_name: brainbets-workflow-executor
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    environment:
+      - STORAGE_PATH=/storage
+      - N8N_BASE_URL=http://n8n:5678
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - CHAT_ID=${TELEGRAM_CHAT_ID}
+    volumes:
+      - ./storage:/storage
+    networks:
+      - brainbets-network
+    depends_on:
+      - n8n
+      - file_writer
+
+  frontend:
+    build: ./frontend
+    container_name: brainbets-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    networks:
+      - brainbets-network
+    depends_on:
+      - backend
+
+volumes:
+  n8n_data:
+  postgres_data:
+
+networks:
+  brainbets-network:
+    driver: bridge

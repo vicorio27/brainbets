@@ -1,0 +1,684 @@
+{
+    "id": "data_collection_db",
+    "name": "BrainBets - Data Collection Pipeline (DB-First)",
+    "active": true,
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "data-collection-db",
+                "responseMode": "lastNode"
+            },
+            "id": "webhook-trigger",
+            "name": "Webhook Trigger",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                250,
+                300
+            ],
+            "webhookId": "data-collection-db"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "http://backend:8000/api/v1/internal/proxy",
+                "sendBody": true,
+                "contentType": "json",
+                "specifyBody": "json",
+                "jsonBody": {
+                    "url": "https://free-api-live-football-data.p.rapidapi.com/football-current-live",
+                    "method": "GET",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "x-rapidapi-host": "free-api-live-football-data.p.rapidapi.com",
+                        "x-rapidapi-key": "__RAPIDAPI_KEY__"
+                    },
+                    "ttlSeconds": 120,
+                    "maxRetries": 3,
+                    "unwrap": true
+                },
+                "sendHeaders": true,
+                "specifyHeaders": "json",
+                "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+                "options": {
+                    "timeout": 60000,
+                    "continueOnFail": true
+                }
+            },
+            "id": "get-football",
+            "name": "Get Football Live",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                450,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "http://backend:8000/api/v1/internal/proxy",
+                "sendBody": true,
+                "contentType": "json",
+                "specifyBody": "json",
+                "jsonBody": {
+                    "url": "https://tennisapi1.p.rapidapi.com/api/tennis/events/live",
+                    "method": "GET",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "x-rapidapi-host": "tennisapi1.p.rapidapi.com",
+                        "x-rapidapi-key": "__RAPIDAPI_KEY__"
+                    },
+                    "ttlSeconds": 120,
+                    "maxRetries": 3,
+                    "unwrap": true
+                },
+                "sendHeaders": true,
+                "specifyHeaders": "json",
+                "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+                "options": {
+                    "timeout": 60000,
+                    "continueOnFail": true
+                }
+            },
+            "id": "get-tennis",
+            "name": "Get Tennis Live",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                450,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Merge football and tennis data using explicit node references\nconst query = $('Webhook Trigger').first().json.query || {};\nconst requestedSport = (query.sport || '').toLowerCase();\nconst includeFootball = !requestedSport || requestedSport === 'football';\nconst includeTennis = !requestedSport || requestedSport === 'tennis';\n\nlet footballData = {};\nlet footballOddsByMatchId = {};\nlet footballH2hByMatchId = {};\nif (includeFootball) {\n  try {\n    const rawFootball = $('Get Football Live').first().json;\n    footballData = (rawFootball && typeof rawFootball === 'object') ? rawFootball : {};\n    const rawFbOdds = $('Merge Football Odds').first().json;\n    footballOddsByMatchId = (rawFbOdds && rawFbOdds.oddsByMatchId) ? rawFbOdds.oddsByMatchId : {};\n    const rawFbH2h = $('Merge Football H2H').first().json;\n    footballH2hByMatchId = (rawFbH2h && rawFbH2h.h2hByMatchId) ? rawFbH2h.h2hByMatchId : {};\n  } catch(e) { footballData = {}; }\n}\nlet tennisData = {};\nlet oddsByMatchId = {};\nlet tennisH2hByMatchId = {};\nif (includeTennis) {\n  try {\n    const rawTennis = $('Get Tennis Live').first().json;\n    tennisData = (rawTennis && typeof rawTennis === 'object') ? rawTennis : {};\n    const rawOdds = $('Merge Tennis Odds').first().json;\n    oddsByMatchId = (rawOdds && rawOdds.oddsByMatchId) ? rawOdds.oddsByMatchId : {};\n    const rawTennisH2h = $('Merge Tennis H2H').first().json;\n    tennisH2hByMatchId = (rawTennisH2h && rawTennisH2h.h2hByMatchId) ? rawTennisH2h.h2hByMatchId : {};\n  } catch(e) { tennisData = {}; }\n}\n\nconst now = new Date();\nconst dateStr = now.toISOString().split('T')[0];\n\n// Format football matches\nconst footballMatches = [];\nconst footballLive = footballData.response?.live || [];\nfor (const match of footballLive.slice(0, 5)) {\n  const fbMatchId = `FOOTBALL-${match.id}`;\n  const fbOdds = footballOddsByMatchId[fbMatchId] || {};\n  const fbH2h = footballH2hByMatchId[fbMatchId] || null;\n  footballMatches.push({\n    matchId: fbMatchId,\n    homeTeam: match.home?.name || 'Unknown',\n    awayTeam: match.away?.name || 'Unknown',\n    league: 'Live Match',\n    eventDate: dateStr,\n    homePosition: 0,\n    awayPosition: 0,\n    homeForm: 'N/A',\n    awayForm: 'N/A',\n    homeXg: 0,\n    awayXg: 0,\n    homeCorners: 0,\n    awayCorners: 0,\n    homeOdds: fbOdds.homeOdds || null,\n    drawOdds: fbOdds.drawOdds || null,\n    awayOdds: fbOdds.awayOdds || null,\n    headToHead: fbH2h,\n    eventId: match.id,\n    homeScore: match.home?.score || 0,\n    awayScore: match.away?.score || 0,\n    status: match.status?.description || match.status?.scoreStr || 'Not started'\n  });\n}\n\n// Format tennis matches\nconst tennisMatches = [];\nconst tennisLive = tennisData.events || [];\nfor (const event of tennisLive.slice(0, 5)) {\n  const startTs = event.startTimestamp || event.tournament?.startTimestamp;\n  const startDate = startTs ? new Date(startTs * 1000) : null;\n  const eventDate = startDate ? startDate.toISOString().split('T')[0] : dateStr;\n  const eventTime = startDate ? startDate.toISOString().slice(11, 16) : null;\n  const matchId = `TENNIS-${event.id}`;\n  const odds = oddsByMatchId[matchId] || {};\n  const ground = event.tournament?.uniqueTournament?.groundType || event.tournament?.groundType || '';\n  const surfaceRaw = ground.toLowerCase();\n  let surface = 'hard';\n  if (surfaceRaw.includes('clay')) surface = 'clay';\n  else if (surfaceRaw.includes('grass')) surface = 'grass';\n  const tier = event.tournament?.uniqueTournament?.tennisPoints || event.tournament?.uniqueTournament?.category?.priority || 0;\n  tennisMatches.push({\n    matchId: matchId,\n    player1: event.homeTeam?.name || 'Unknown',\n    player2: event.awayTeam?.name || 'Unknown',\n    tournament: event.tournament?.name || 'Unknown',\n    eventDate: eventDate,\n    eventTime: eventTime,\n    rankingPlayer1: event.homeTeam?.ranking || 0,\n    rankingPlayer2: event.awayTeam?.ranking || 0,\n    surface: surface,\n    groundType: ground,\n    tournamentTier: Number(tier) || 0,\n    countryPlayer1: event.homeTeam?.country?.name,\n    countryPlayer2: event.awayTeam?.country?.name,\n    formPlayer1: 'N/A',\n    formPlayer2: 'N/A',\n    acesAvgPlayer1: 0,\n    acesAvgPlayer2: 0,\n    oddsPlayer1: odds.oddsPlayer1 || null,\n    oddsPlayer2: odds.oddsPlayer2 || null,\n    h2h: tennisH2hByMatchId[matchId] || 'N/A',\n    eventId: event.id,\n    status: event.status?.description || 'Not started'\n  });\n}\n\nconst output = {\n  generatedAt: now.toISOString(),\n  source: 'live_api',\n  tennis: tennisMatches,\n  football: footballMatches,\n  requestedSport: requestedSport || 'all'\n};\n\nreturn [{ json: output }];"
+            },
+            "id": "merge-data",
+            "name": "Merge & Format Data",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                650,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "http://backend:8000/api/v1/internal/matches/bulk",
+                "sendBody": true,
+                "contentType": "json",
+                "specifyBody": "json",
+                "options": {
+                    "timeout": 30000,
+                    "continueOnFail": true
+                },
+                "sendHeaders": true,
+                "specifyHeaders": "json",
+                "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+                "jsonBody": {
+                    "generatedAt": "={{ $json.generatedAt }}",
+                    "source": "={{ $json.source }}",
+                    "tennis": "={{ $json.tennis }}",
+                    "football": "={{ $json.football }}"
+                }
+            },
+            "id": "send-to-db",
+            "name": "Send Matches to DB",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                850,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const data = $('Merge & Format Data').first().json;\nconst footballCount = data.football?.length || 0;\nconst tennisCount = data.tennis?.length || 0;\nconst count = footballCount + tennisCount;\nconst dbResult = $input.first().json || {};\nconst inserted = dbResult.inserted || 0;\nconst errors = dbResult.errors || [];\nconst telegramMessage = `<b>BrainBets - Datos Recolectados</b>\\n\\nTotal partidos: ${count}\\n- Futbol: ${footballCount}\\n- Tenis: ${tennisCount}\\nInsertados en DB: ${inserted}\\nErrores: ${errors.length}`;\nreturn [{\n  json: {\n    telegramMessage: telegramMessage,\n    dbResult: dbResult\n  }\n}];"
+            },
+            "id": "prepare-notify",
+            "name": "Prepare Notify",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1050,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.telegram.org/bot__TELEGRAM_TOKEN__/sendMessage",
+                "sendBody": true,
+                "contentType": "json",
+                "specifyBody": "json",
+                "options": {},
+                "sendHeaders": true,
+                "specifyHeaders": "json",
+                "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+                "jsonBody": {
+                    "chat_id": "__TELEGRAM_CHAT_ID__",
+                    "text": "={{ $json.telegramMessage || 'BrainBets - Datos recolectados' }}",
+                    "parse_mode": "HTML"
+                }
+            },
+            "id": "telegram-notify",
+            "name": "Telegram Notification",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                1250,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const tennisData = $('Get Tennis Live').first().json || {};\nconst events = tennisData.events || [];\nconst items = [];\nfor (const event of events.slice(0, 5)) {\n  const startTs = event.startTimestamp || event.tournament?.startTimestamp;\n  const startDate = startTs ? new Date(startTs * 1000) : null;\n  const eventDate = startDate ? startDate.toISOString().split('T')[0] : null;\n  const ground = event.tournament?.uniqueTournament?.groundType || event.tournament?.groundType || '';\n  const surfaceRaw = ground.toLowerCase();\n  let surface = 'hard';\n  if (surfaceRaw.includes('clay')) surface = 'clay';\n  else if (surfaceRaw.includes('grass')) surface = 'grass';\n  const tier = event.tournament?.uniqueTournament?.tennisPoints || event.tournament?.uniqueTournament?.category?.priority || 0;\n  items.push({ json: {\n    eventId: event.id,\n    matchId: `TENNIS-${event.id}`,\n    player1: event.homeTeam?.name || 'Unknown',\n    player2: event.awayTeam?.name || 'Unknown',\n    eventDate: eventDate,\n    rankingPlayer1: event.homeTeam?.ranking,\n    rankingPlayer2: event.awayTeam?.ranking,\n    surface: surface,\n    groundType: ground,\n    tournamentTier: Number(tier) || 0,\n    countryPlayer1: event.homeTeam?.country?.name,\n    countryPlayer2: event.awayTeam?.country?.name,\n    status: event.status?.description || 'SCHEDULED'\n  }});\n}\nreturn items;"
+            },
+            "id": "extract-tennis-events",
+            "name": "Extract Tennis Events",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                650,
+                520
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "http://backend:8000/api/v1/internal/proxy",
+                "sendBody": true,
+                "contentType": "json",
+                "specifyBody": "json",
+                "jsonBody": {
+                    "url": "={{ 'https://tennisapi1.p.rapidapi.com/api/tennis/event/' + $json.eventId + '/odds' }}",
+                    "method": "GET",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "x-rapidapi-host": "tennisapi1.p.rapidapi.com",
+                        "x-rapidapi-key": "__RAPIDAPI_KEY__"
+                    },
+                    "ttlSeconds": 120,
+                    "maxRetries": 3,
+                    "unwrap": true
+                },
+                "sendHeaders": true,
+                "specifyHeaders": "json",
+                "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+                "options": {
+                    "timeout": 60000,
+                    "continueOnFail": true
+                }
+            },
+            "id": "get-tennis-odds",
+            "name": "Get Tennis Odds",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                850,
+                520
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const oddsItems = $('Get Tennis Odds').all();\nconst oddsByMatchId = {};\nfor (const item of oddsItems) {\n  const eventId = item.json.eventId;\n  const matchId = `TENNIS-${eventId}`;\n  const markets = item.json.markets || [];\n  const fullTime = markets.find(m => m.marketName === 'Full time' && !m.isLive) || markets.find(m => m.marketName === 'Full time');\n  if (fullTime && fullTime.choices) {\n    const p1Choice = fullTime.choices.find(c => c.name === '1');\n    const p2Choice = fullTime.choices.find(c => c.name === '2');\n    const parseFractional = (frac) => {\n      if (!frac) return null;\n      const parts = frac.split('/').map(Number);\n      if (parts.length !== 2 || !parts[1] || isNaN(parts[0]) || isNaN(parts[1])) return null;\n      return Number((parts[0] / parts[1] + 1).toFixed(3));\n    };\n    oddsByMatchId[matchId] = {\n      oddsPlayer1: parseFractional(p1Choice && p1Choice.fractionalValue),\n      oddsPlayer2: parseFractional(p2Choice && p2Choice.fractionalValue),\n    };\n  }\n}\nreturn [{ json: { oddsByMatchId } }];"
+            },
+            "id": "merge-tennis-odds",
+            "name": "Merge Tennis Odds",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1050,
+                520
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const footballData = $('Get Football Live').first().json || {};\nconst matches = footballData.response?.live || [];\nconst items = [];\nfor (const match of matches.slice(0, 5)) {\n  items.push({ json: { eventId: match.id, matchId: `FOOTBALL-${match.id}` } });\n}\nreturn items;"
+            },
+            "id": "extract-football-events",
+            "name": "Extract Football Events",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                650,
+                120
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "http://backend:8000/api/v1/internal/proxy",
+                "sendBody": true,
+                "contentType": "json",
+                "specifyBody": "json",
+                "jsonBody": {
+                    "url": "={{ 'https://free-api-live-football-data.p.rapidapi.com/football-event-odds?eventid=' + $json.eventId + '&countrycode=BR' }}",
+                    "method": "GET",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "x-rapidapi-host": "free-api-live-football-data.p.rapidapi.com",
+                        "x-rapidapi-key": "__RAPIDAPI_KEY__"
+                    },
+                    "ttlSeconds": 120,
+                    "maxRetries": 3,
+                    "unwrap": true
+                },
+                "sendHeaders": true,
+                "specifyHeaders": "json",
+                "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+                "options": {
+                    "timeout": 60000,
+                    "continueOnFail": true
+                }
+            },
+            "id": "get-football-odds",
+            "name": "Get Football Odds",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                850,
+                120
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const oddsItems = $('Get Football Odds').all();\nconst eventItems = $('Extract Football Events').all();\nconst oddsByMatchId = {};\n\nfunction findOdds(json) {\n  if (!json || typeof json !== 'object') return null;\n  if (json.homeOdds !== undefined && json.drawOdds !== undefined && json.awayOdds !== undefined) {\n    return { homeOdds: json.homeOdds, drawOdds: json.drawOdds, awayOdds: json.awayOdds };\n  }\n  if (json.home_odd !== undefined && json.draw_odd !== undefined && json.away_odd !== undefined) {\n    return { homeOdds: json.home_odd, drawOdds: json.draw_odd, awayOdds: json.away_odd };\n  }\n\n  const oddsRoot = (json.response && json.response.odds) || json.odds;\n  const oddsPayload = (oddsRoot && oddsRoot.odds) || oddsRoot;\n\n  if (oddsPayload && typeof oddsPayload === 'object') {\n    const o = oddsPayload;\n    if (o['1'] !== undefined && o['X'] !== undefined && o['2'] !== undefined) {\n      return { homeOdds: o['1'], drawOdds: o['X'], awayOdds: o['2'] };\n    }\n    if (o.home !== undefined && o.draw !== undefined && o.away !== undefined) {\n      return { homeOdds: o.home, drawOdds: o.draw, awayOdds: o.away };\n    }\n  }\n\n  function extractFromMarket(market) {\n    if (!market || !Array.isArray(market.selections)) return null;\n    const home = market.selections.find(x => String(x.name).toLowerCase() === '1');\n    const draw = market.selections.find(x => String(x.name).toLowerCase() === 'x');\n    const away = market.selections.find(x => String(x.name).toLowerCase() === '2');\n    if (home && draw && away) {\n      return { homeOdds: home.oddsDecimal, drawOdds: draw.oddsDecimal, awayOdds: away.oddsDecimal };\n    }\n    return null;\n  }\n\n  if (oddsPayload && Array.isArray(oddsPayload.matchfactMarkets)) {\n    const m = oddsPayload.matchfactMarkets.find(x => /fulltime|full.time|who.will.win|1x2/i.test(String(x.header || x.headerTranslationKey)));\n    const extracted = extractFromMarket(m);\n    if (extracted) return extracted;\n  }\n  if (oddsPayload && Array.isArray(oddsPayload.oddsTabMarkets)) {\n    for (const tab of oddsPayload.oddsTabMarkets) {\n      const markets = Array.isArray(tab.markets) ? tab.markets : [];\n      const m = markets.find(x => /fulltime|full.time|who.will.win|1x2/i.test(String(x.header || x.headerTranslationKey)));\n      const extracted = extractFromMarket(m);\n      if (extracted) return extracted;\n    }\n  }\n\n  const markets = Array.isArray(json.markets) ? json.markets : (Array.isArray(oddsPayload && oddsPayload.markets) ? oddsPayload.markets : null);\n  if (markets) {\n    const m = markets.find(x => /1x2|fulltime|full.time|who.will.win/i.test(String(x.name || x.marketName || x.market || x.header || x.headerTranslationKey)));\n    if (m) {\n      if (Array.isArray(m.values)) {\n        const home = m.values.find(x => String(x.value).toLowerCase() === 'home' || String(x.value) === '1');\n        const draw = m.values.find(x => String(x.value).toLowerCase() === 'draw' || String(x.value).toLowerCase() === 'x');\n        const away = m.values.find(x => String(x.value).toLowerCase() === 'away' || String(x.value) === '2');\n        return { homeOdds: home && home.odd, drawOdds: draw && draw.odd, awayOdds: away && away.odd };\n      }\n      return extractFromMarket(m);\n    }\n  }\n  return null;\n}\n\nfor (let i = 0; i < oddsItems.length; i++) {\n  const eventId = eventItems[i] && eventItems[i].json.eventId;\n  if (!eventId) continue;\n  const matchId = 'FOOTBALL-' + eventId;\n  const odds = findOdds(oddsItems[i].json);\n  if (odds && odds.homeOdds && odds.drawOdds && odds.awayOdds) {\n    oddsByMatchId[matchId] = {\n      homeOdds: Number(parseFloat(odds.homeOdds).toFixed(3)),\n      drawOdds: Number(parseFloat(odds.drawOdds).toFixed(3)),\n      awayOdds: Number(parseFloat(odds.awayOdds).toFixed(3)),\n    };\n  }\n}\nreturn [{ json: { oddsByMatchId } }];"
+            },
+            "id": "merge-football-odds",
+            "name": "Merge Football Odds",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1050,
+                120
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "http://backend:8000/api/v1/internal/matches/football/enrich",
+                "sendBody": true,
+                "contentType": "json",
+                "specifyBody": "json",
+                "jsonBody": {
+                    "matchIds": "={{ $json.footballMatchIds }}"
+                },
+                "sendHeaders": true,
+                "specifyHeaders": "json",
+                "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+                "options": {
+                    "timeout": 60000,
+                    "continueOnFail": true
+                }
+            },
+            "id": "enrich-football-stats",
+            "name": "Enrich Football Stats",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                850,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const input = $('Merge & Format Data').first().json;\nconst enriched = $('Enrich Football Stats').first().json || {};\nconst statsById = (enriched.stats || {});\n\nconst football = (input.football || []).map(match => {\n  const stats = statsById[match.matchId] || {};\n  const apiH2h = match.headToHead;\n  const dbH2h = stats.headToHead;\n  const headToHead = (apiH2h && apiH2h.matches > 0) ? apiH2h : ((dbH2h && dbH2h.matches > 0) ? dbH2h : null);\n\n  return {\n    ...match,\n    homePosition: stats.homePosition != null ? stats.homePosition : match.homePosition,\n    awayPosition: stats.awayPosition != null ? stats.awayPosition : match.awayPosition,\n    homeForm: stats.homeForm || match.homeForm,\n    awayForm: stats.awayForm || match.awayForm,\n    homeXg: stats.homeXg != null ? stats.homeXg : match.homeXg,\n    awayXg: stats.awayXg != null ? stats.awayXg : match.awayXg,\n    homeXgAgainst: stats.homeXgAgainst != null ? stats.homeXgAgainst : null,\n    awayXgAgainst: stats.awayXgAgainst != null ? stats.awayXgAgainst : null,\n    homeCorners: stats.homeCorners != null ? stats.homeCorners : match.homeCorners,\n    awayCorners: stats.awayCorners != null ? stats.awayCorners : match.awayCorners,\n    headToHead: headToHead,\n    homeFormStats: stats.homeFormStats || null,\n    awayFormStats: stats.awayFormStats || null,\n    leagueStandings: stats.leagueStandings || null,\n    statsDataQuality: stats.dataQuality || 'fallback',\n  };\n});\n\nreturn [{\n  json: {\n    generatedAt: input.generatedAt,\n    source: input.source,\n    tennis: input.tennis || [],\n    football: football,\n  }\n}];"
+            },
+            "id": "merge-football-stats",
+            "name": "Merge Football Stats",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1050,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "http://backend:8000/api/v1/internal/proxy",
+                "sendBody": true,
+                "contentType": "json",
+                "specifyBody": "json",
+                "jsonBody": {
+                    "url": "={{ 'https://free-api-live-football-data.p.rapidapi.com/football-get-head-to-head?eventid=' + $json.eventId }}",
+                    "method": "GET",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "x-rapidapi-host": "free-api-live-football-data.p.rapidapi.com",
+                        "x-rapidapi-key": "__RAPIDAPI_KEY__"
+                    },
+                    "ttlSeconds": 86400,
+                    "maxRetries": 3,
+                    "unwrap": true
+                },
+                "sendHeaders": true,
+                "specifyHeaders": "json",
+                "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+                "options": {
+                    "timeout": 60000,
+                    "continueOnFail": true
+                }
+            },
+            "id": "get-football-h2h",
+            "name": "Get Football H2H",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                850,
+                -80
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const h2hItems = $('Get Football H2H').all();\nconst eventItems = $('Extract Football Events').all();\nconst h2hByMatchId = {};\n\nfunction parseScoreStr(scoreStr) {\n  if (!scoreStr) return null;\n  const parts = String(scoreStr).split(/[-–]/).map(s => s.trim());\n  if (parts.length !== 2) return null;\n  const home = parseInt(parts[0], 10);\n  const away = parseInt(parts[1], 10);\n  if (isNaN(home) || isNaN(away)) return null;\n  return { home, away };\n}\n\nfor (let i = 0; i < h2hItems.length; i++) {\n  const eventId = eventItems[i] && eventItems[i].json && eventItems[i].json.eventId;\n  if (!eventId) continue;\n  const matchId = `FOOTBALL-${eventId}`;\n  const data = h2hItems[i].json || {};\n  const lineup = (data.response && data.response.lineup) || data.lineup || {};\n  const summary = Array.isArray(lineup.summary) ? lineup.summary : [];\n  const matches = Array.isArray(lineup.matches) ? lineup.matches : [];\n\n  const home_wins = summary[0] || 0;\n  const draws = summary[1] || 0;\n  const away_wins = summary[2] || 0;\n  const total = home_wins + draws + away_wins;\n\n  let home_goals = 0;\n  let away_goals = 0;\n  const details = [];\n\n  for (const m of matches) {\n    const score = parseScoreStr((m.status && m.status.scoreStr) || m.scoreStr);\n    if (!score) continue;\n    const homeTeam = (m.home && m.home.name) || 'Unknown';\n    const awayTeam = (m.away && m.away.name) || 'Unknown';\n    const utcTime = (m.time && m.time.utcTime) || m.utcTime || null;\n    home_goals += score.home;\n    away_goals += score.away;\n    details.push({\n      date: utcTime,\n      home_team: homeTeam,\n      away_team: awayTeam,\n      home_score: score.home,\n      away_score: score.away,\n    });\n  }\n\n  h2hByMatchId[matchId] = {\n    matches: total,\n    home_wins: home_wins,\n    away_wins: away_wins,\n    draws: draws,\n    home_goals: home_goals,\n    away_goals: away_goals,\n    source: 'rapidapi_h2h',\n    details: details.slice(0, 5),\n  };\n}\n\nreturn [{ json: { h2hByMatchId } }];"
+            },
+            "id": "merge-football-h2h",
+            "name": "Merge Football H2H",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1050,
+                -80
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const items = $('Extract Tennis Events').all();\nconst matches = items.map(item => item.json).filter(j => j.matchId);\nreturn [{ json: { matches } }];"
+            },
+            "id": "build-tennis-h2h-payload",
+            "name": "Build Tennis H2H Payload",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                850,
+                700
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "http://backend:8000/api/v1/internal/matches/tennis/enrich",
+                "sendBody": true,
+                "contentType": "json",
+                "specifyBody": "json",
+                "jsonBody": {
+                    "matches": "={{ $json.matches }}"
+                },
+                "sendHeaders": true,
+                "specifyHeaders": "json",
+                "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+                "options": {
+                    "timeout": 60000,
+                    "continueOnFail": true
+                }
+            },
+            "id": "enrich-tennis-h2h",
+            "name": "Enrich Tennis H2H",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                1050,
+                700
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const input = $('Enrich Tennis H2H').first().json || {};\nconst h2hByMatchId = {};\nconst h2hData = input.h2h || {};\nfor (const [matchId, h2h] of Object.entries(h2hData)) {\n  if (h2h && h2h.h2h_string) {\n    h2hByMatchId[matchId] = h2h.h2h_string;\n  }\n}\nreturn [{ json: { h2hByMatchId } }];"
+            },
+            "id": "merge-tennis-h2h",
+            "name": "Merge Tennis H2H",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1250,
+                700
+            ]
+        }
+    ],
+    "connections": {
+        "Webhook Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Get Football Live",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Get Tennis Live",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Football Live": {
+            "main": [
+                [
+                    {
+                        "node": "Merge & Format Data",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Extract Football Events",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Tennis Live": {
+            "main": [
+                [
+                    {
+                        "node": "Merge & Format Data",
+                        "type": "main",
+                        "index": 1
+                    },
+                    {
+                        "node": "Extract Tennis Events",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Merge & Format Data": {
+            "main": [
+                [
+                    {
+                        "node": "Enrich Football Stats",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Send Matches to DB": {
+            "main": [
+                [
+                    {
+                        "node": "Prepare Notify",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Prepare Notify": {
+            "main": [
+                [
+                    {
+                        "node": "Telegram Notification",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Extract Tennis Events": {
+            "main": [
+                [
+                    {
+                        "node": "Get Tennis Odds",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Build Tennis H2H Payload",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Tennis Odds": {
+            "main": [
+                [
+                    {
+                        "node": "Merge Tennis Odds",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Merge Tennis Odds": {
+            "main": [
+                [
+                    {
+                        "node": "Merge & Format Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Extract Football Events": {
+            "main": [
+                [
+                    {
+                        "node": "Get Football Odds",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Get Football H2H",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Football Odds": {
+            "main": [
+                [
+                    {
+                        "node": "Merge Football Odds",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Merge Football Odds": {
+            "main": [
+                [
+                    {
+                        "node": "Merge & Format Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Enrich Football Stats": {
+            "main": [
+                [
+                    {
+                        "node": "Merge Football Stats",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Merge Football Stats": {
+            "main": [
+                [
+                    {
+                        "node": "Send Matches to DB",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Football H2H": {
+            "main": [
+                [
+                    {
+                        "node": "Merge Football H2H",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Merge Football H2H": {
+            "main": [
+                [
+                    {
+                        "node": "Merge & Format Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Build Tennis H2H Payload": {
+            "main": [
+                [
+                    {
+                        "node": "Enrich Tennis H2H",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Enrich Tennis H2H": {
+            "main": [
+                [
+                    {
+                        "node": "Merge Tennis H2H",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Merge Tennis H2H": {
+            "main": [
+                [
+                    {
+                        "node": "Merge & Format Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1"
+    },
+    "staticData": null,
+    "tags": []
+}

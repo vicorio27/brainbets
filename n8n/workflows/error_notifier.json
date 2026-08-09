@@ -1,0 +1,62 @@
+{
+  "id": "error_notifier",
+  "name": "BrainBets - Error Notifier",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot__TELEGRAM_TOKEN__/sendMessage",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "options": {},
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+        "jsonBody": {
+          "chat_id": "__TELEGRAM_CHAT_ID__",
+          "text": "={{ '❌ BrainBets - ERROR en workflow\\n\\nWorkflow: ' + (($json.workflow && ($json.workflow.name || $json.workflow.id)) || '?') + '\\nNodo: ' + (($json.execution && $json.execution.lastNodeExecuted) || '?') + '\\nError: ' + String(($json.execution && $json.execution.error && $json.execution.error.message) || 'desconocido').substring(0, 700) }}"
+        }
+      },
+      "id": "telegram-notify",
+      "name": "Telegram Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        470,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Telegram Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": []
+}

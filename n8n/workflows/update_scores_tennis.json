@@ -1,0 +1,245 @@
+{
+  "id": "update_scores_tennis",
+  "name": "BrainBets - Update Live Scores (Tennis)",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "update-scores-tennis",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "update-scores-tennis"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://backend:8000/api/v1/matches/by-date",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "from",
+              "value": "={{ new Date(Date.now() - 172800000).toISOString().split('T')[0] }}"
+            },
+            {
+              "name": "to",
+              "value": "={{ new Date(Date.now() + 86400000).toISOString().split('T')[0] }}"
+            },
+            {
+              "name": "sport",
+              "value": "tennis"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "get-matches",
+      "name": "Get Tennis Matches",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/proxy",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": {
+          "url": "={{ 'https://api.api-tennis.com/tennis/?APIkey=__TENNIS_API_KEY__&method=get_fixtures&date_start=' + new Date(Date.now() - 172800000).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) + '&date_stop=' + new Date(Date.now() + 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) + '&event_type_key=265&timezone=America/Bogota' }}",
+          "method": "GET",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "ttlSeconds": 120,
+          "maxRetries": 2,
+          "unwrap": true
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "fetch-tennis-detail",
+      "name": "Fetch ATP Results",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1250,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cross DB matches with api-tennis results by event_key (same source, no name matching).\nconst dbData = $('Get Tennis Matches').first().json || {};\nconst matches = dbData.tennis || [];\nconst feed = $input.first().json || {};\nconst events = Array.isArray(feed.result) ? feed.result : [];\n\nconst byKey = {};\nfor (const ev of events) { byKey[String(ev.event_key)] = ev; }\n\nfunction completedSets(ev) {\n  // Count sets won from the scores array. For live matches the last entry is the set in play.\n  const scores = Array.isArray(ev.scores) ? ev.scores : [];\n  const isLive = ev.event_live === '1';\n  const completed = isLive ? scores.slice(0, -1) : scores;\n  let s1 = 0, s2 = 0;\n  for (const s of completed) {\n    const a = parseInt(s.score_first) || 0;\n    const b = parseInt(s.score_second) || 0;\n    if (a > b) s1++; else if (b > a) s2++;\n  }\n  return [s1, s2];\n}\n\nfunction finalSets(ev) {\n  const fr = (ev.event_final_result || '').trim();\n  const m2 = fr.match(/^(\\d+)\\s*-\\s*(\\d+)$/);\n  if (m2) return [parseInt(m2[1]), parseInt(m2[2])];\n  return completedSets(ev);\n}\n\nfunction pointsPerSet(ev) {\n  // Per-set points from statistics (\"Total Points Won\", stat_period set1/set2/...).\n  const stats = Array.isArray(ev.statistics) ? ev.statistics : [];\n  if (!stats.length) return [];\n  const p1Key = String(ev.first_player_key || '');\n  const bySet = {};\n  for (const s of stats) {\n    if (s.stat_name !== 'Total Points Won' || s.stat_won == null) continue;\n    const m2 = /^set(\\d+)$/.exec(String(s.stat_period || ''));\n    if (!m2) continue;\n    const idx = m2[1];\n    bySet[idx] = bySet[idx] || {};\n    bySet[idx][String(s.player_key) === p1Key ? 'p1' : 'p2'] = Number(s.stat_won) || 0;\n  }\n  return Object.keys(bySet).sort().map(k => ({ set: Number(k), p1: bySet[k].p1 ?? 0, p2: bySet[k].p2 ?? 0 }));\n}\n\nfunction matchAces(ev) {\n  // Match-level aces per player from statistics (stat_name \"Aces\", period \"match\").\n  const stats = Array.isArray(ev.statistics) ? ev.statistics : [];\n  const p1Key = String(ev.first_player_key || '');\n  let home = null, away = null;\n  for (const s of stats) {\n    if (s.stat_name !== 'Aces' || s.stat_period !== 'match' || s.stat_value == null) continue;\n    const v = parseInt(s.stat_value);\n    if (isNaN(v)) continue;\n    if (String(s.player_key) === p1Key) home = v; else away = v;\n  }\n  return (home == null || away == null) ? null : { home, away };\n}\n\nfunction serveStats(ev) {\n  // Serve/return game counts and 1st/2nd serve point counts per player (period \"match\").\n  const stats = Array.isArray(ev.statistics) ? ev.statistics : [];\n  if (!stats.length) return null;\n  const p1Key = String(ev.first_player_key || '');\n  const out = { home: {}, away: {} };\n  const fields = {\n    'Service games won': ['serveGamesWon', 'serveGamesTotal'],\n    'Return games won': ['returnGamesWon', 'returnGamesTotal'],\n    '1st serve points won': ['firstServeWon', 'firstServeTotal'],\n    '2nd serve points won': [null, 'secondServeTotal'],\n    'Service Points Won': [null, 'servePtsTotal']\n  };\n  for (const s of stats) {\n    if (s.stat_period !== 'match') continue;\n    const f = fields[s.stat_name];\n    if (!f) continue;\n    const side = String(s.player_key) === p1Key ? 'home' : 'away';\n    if (f[0] && s.stat_won != null) out[side][f[0]] = Number(s.stat_won);\n    if (f[1] && s.stat_total != null) out[side][f[1]] = Number(s.stat_total);\n  }\n  return (out.home.serveGamesTotal != null && out.away.serveGamesTotal != null) ? out : null;\n}\n\nconst scores = [];\nconst snapshots = [];\nfor (const m of matches) {\n  if (!m.eventId) continue;\n  const ev = byKey[String(m.eventId)];\n  if (!ev) continue;\n  const st = (ev.event_status || '').toLowerCase();\n  const isFinished = st === 'finished' || st === 'ended';\n  const isDead = st === 'retired' || st === 'walkover' || st === 'cancelled';\n  const isLive = ev.event_live === '1' || /^set\\s*[1-5]/.test(st);\n\n  if (isFinished || isDead) {\n    const [s1, s2] = finalSets(ev);\n    const item = {\n      matchId: m.matchId,\n      homeScore: s1,\n      awayScore: s2,\n      status: isFinished ? 'FINISHED' : 'CANCELLED'\n    };\n    // Per-set games (for tournament load / fatigue stats)\n    const setRows = (Array.isArray(ev.scores) ? ev.scores : [])\n      .map(s => ({ p1: parseInt(s.score_first) || 0, p2: parseInt(s.score_second) || 0 }))\n      .filter(r => r.p1 || r.p2);\n    if (isFinished && setRows.length) {\n      item.extraData = { sets: setRows };\n      const pointRows = pointsPerSet(ev);\n      if (pointRows.length) item.extraData.points = pointRows;\n      const aces = matchAces(ev);\n      if (aces) { item.extraData.homeAces = aces.home; item.extraData.awayAces = aces.away; }\n      const serve = serveStats(ev);\n      if (serve) item.extraData.serve = serve;\n    }\n    scores.push(item);\n    continue;\n  }\n\n  if (isLive && (m.status || '').toUpperCase() !== 'FINISHED') {\n    const [s1, s2] = completedSets(ev);\n    const arr = Array.isArray(ev.scores) ? ev.scores : [];\n    const cur = arr.length ? arr[arr.length - 1] : {};\n    const period = Math.min(s1 + s2 + 1, 5);\n    const pts = (ev.event_game_result || '').split('-').map(x => x.trim());\n    const p1 = pts[0] && pts[0] !== '-' ? pts[0] : '0';\n    const p2 = pts[1] && pts[1] !== '-' ? pts[1] : '0';\n    snapshots.push({\n      matchId: m.matchId,\n      minute: period,\n      periodLabel: ev.event_status || ('Set ' + period),\n      homeScore: s1,\n      awayScore: s2,\n      homeSets: s1,\n      awaySets: s2,\n      homeGamesCurrent: parseInt(cur.score_first) || 0,\n      awayGamesCurrent: parseInt(cur.score_second) || 0,\n      homePoint: p1,\n      awayPoint: p2,\n      bestOf: 3,\n      notes: `Tenis ${s1}-${s2} sets, ${cur.score_first || 0}-${cur.score_second || 0} games (${ev.event_status || 'live'})`\n    });\n  }\n}\nreturn [{ json: { scores, snapshots, scoresCount: scores.length, snapshotsCount: snapshots.length, sport: 'tennis' } }];\n"
+      },
+      "id": "build-snapshots",
+      "name": "Build Tennis Updates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/predictions/progress",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": {
+          "snapshots": "={{ $('Build Tennis Updates').first().json.snapshots }}"
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "send-progress",
+      "name": "Send Progress to Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1750,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const upd = $('Build Tennis Updates').first().json || {};\nconst scoresRes = $('Send Scores to DB').first().json || {};\nconst progRes = $input.first().json || {};\nconst scoresCount = upd.scoresCount || 0;\nconst snapsCount = upd.snapshotsCount || 0;\nconst scoresUpdated = (scoresRes.inserted || 0) + (scoresRes.updated || 0);\nconst predsUpdated = progRes.predictions_updated || 0;\nconst parts = [];\nif (scoresCount > 0) parts.push(`${scoresUpdated}/${scoresCount} scores finales guardados`);\nif (snapsCount > 0) parts.push(`${predsUpdated} pronosticos en ${snapsCount} partidos en vivo`);\nconst message = parts.length === 0 ? 'Tenis: sin partidos en vivo ni finalizados nuevos.' : ('Tenis: ' + parts.join(' | '));\nreturn [{ json: { sport: 'tennis', message, scoresCount, scoresUpdated, snapshotsCount: snapsCount, predictionsUpdated: predsUpdated, overallAvgFulfillment: progRes.overall_avg_fulfillment || 0, errors: (progRes.errors || []).length + (scoresRes.errors || []).length, dbResult: progRes } }];\n"
+      },
+      "id": "prepare-result",
+      "name": "Prepare Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/matches/scores/bulk",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": {
+          "scores": "={{ $json.scores }}"
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "options": {
+          "timeout": 30000,
+          "continueOnFail": true
+        }
+      },
+      "id": "send-scores",
+      "name": "Send Scores to DB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1700,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Tennis Matches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Tennis Matches": {
+      "main": [
+        [
+          {
+            "node": "Fetch ATP Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Progress to Backend": {
+      "main": [
+        [
+          {
+            "node": "Prepare Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch ATP Results": {
+      "main": [
+        [
+          {
+            "node": "Build Tennis Updates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Tennis Updates": {
+      "main": [
+        [
+          {
+            "node": "Send Scores to DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Scores to DB": {
+      "main": [
+        [
+          {
+            "node": "Send Progress to Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": []
+}

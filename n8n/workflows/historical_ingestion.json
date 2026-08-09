@@ -1,0 +1,155 @@
+{
+  "id": "historical_ingestion",
+  "name": "BrainBets - Historical Data Ingestion",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "historical-ingestion",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "historical-ingestion"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/ingest/historical",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "options": {
+          "timeout": 300000
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "jsonBody": {
+          "tennis_years": "={{ $json.tennis_years || [2010, 2011, 2012] }}",
+          "football_seasons": "={{ $json.football_seasons || [['1011','E0'],['1112','E0']] }}",
+          "force_download": "={{ $json.force_download || false }}"
+        }
+      },
+      "id": "trigger-ingestion",
+      "name": "Trigger Historical Ingestion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nconst tennis = result.tennis || {};\nconst football = result.football || {};\nconst tennisTotal = Object.values(tennis).reduce((a, b) => a + (b.inserted || 0) + (b.updated || 0), 0);\nconst footballTotal = Object.values(football).reduce((a, b) => a + (b.inserted || 0) + (b.updated || 0), 0);\nconst msg = `<b>BrainBets - Ingesta Historica</b>\\n\\nTenis: ${tennisTotal} partidos\\nFutbol: ${footballTotal} partidos\\nJob ID: ${result.job_id || 'N/A'}`;\nreturn [{ json: { telegramMessage: msg, result: result } }];"
+      },
+      "id": "prepare-notify",
+      "name": "Prepare Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot__TELEGRAM_TOKEN__/sendMessage",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "options": {},
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\"}",
+        "jsonBody": {
+          "chat_id": "__TELEGRAM_CHAT_ID__",
+          "text": "={{ $json.telegramMessage || 'BrainBets - Ingestion completada' }}",
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "telegram-notify",
+      "name": "Telegram Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "options": {}
+      },
+      "id": "respond-to-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1050,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Trigger Historical Ingestion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Historical Ingestion": {
+      "main": [
+        [
+          {
+            "node": "Prepare Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Notify": {
+      "main": [
+        [
+          {
+            "node": "Telegram Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Notification": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": []
+}

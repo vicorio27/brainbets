@@ -1,0 +1,415 @@
+{
+  "id": "update_tennis_scores",
+  "name": "BrainBets - Update Tennis Scores",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "update-tennis-scores",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "update-tennis-scores"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 12
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        250,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://backend:8000/api/v1/matches/by-date",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "from",
+              "value": "={{ new Date(Date.now() - 172800000).toISOString().split('T')[0] }}"
+            },
+            {
+              "name": "to",
+              "value": "={{ new Date().toISOString().split('T')[0] }}"
+            },
+            {
+              "name": "sport",
+              "value": "tennis"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "get-tennis-matches",
+      "name": "Get Tennis Matches",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst matches = data.tennis || [];\nconst filtered = [];\n\nfor (const match of matches) {\n  const status = (match.status || '').toLowerCase();\n  const eventId = match.eventId || match.matchId?.replace('TENNIS-', '');\n  if (eventId && status !== 'finished' && status !== 'ended' && status !== 'cancelled' && status !== 'walkover') {\n    filtered.push({\n      json: {\n        matchId: match.matchId,\n        eventId: String(eventId),\n        player1: match.player1,\n        player2: match.player2,\n        status: match.status\n      }\n    });\n  }\n}\n\nif (filtered.length === 0) {\n  return [{ json: { scores: [], message: 'No pending tennis matches to update' } }];\n}\n\nreturn filtered;"
+      },
+      "id": "filter-pending",
+      "name": "Filter Pending Matches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "if-has-pending-condition",
+              "leftValue": "={{ String($json.eventId || '') }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-has-pending",
+      "name": "Has Pending Matches",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/proxy",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": {
+          "url": "={{ 'https://api.api-tennis.com/tennis/?APIkey=__TENNIS_API_KEY__&method=get_fixtures&date_start=' + new Date(Date.now() - 259200000).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) + '&date_stop=' + new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) + '&event_type_key=265&timezone=America/Bogota' }}",
+          "method": "GET",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "ttlSeconds": 300,
+          "maxRetries": 3,
+          "unwrap": true
+        },
+        "sendHeaders": true,
+        "options": {
+          "timeout": 60000
+        },
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}"
+      },
+      "id": "fetch-event",
+      "name": "Fetch Event Detail",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cross pending DB matches with api-tennis results by event_key.\nconst feed = $input.first().json || {};\nconst events = Array.isArray(feed.result) ? feed.result : [];\nconst pendingItems = $('Filter Pending Matches').all();\n\nconst byKey = {};\nfor (const ev of events) { byKey[String(ev.event_key)] = ev; }\n\nfunction finalSets(ev) {\n  const fr = (ev.event_final_result || '').trim();\n  const m2 = fr.match(/^(\\d+)\\s*-\\s*(\\d+)$/);\n  if (m2) return [parseInt(m2[1]), parseInt(m2[2])];\n  let s1 = 0, s2 = 0;\n  for (const s of (Array.isArray(ev.scores) ? ev.scores : [])) {\n    const a = parseInt(s.score_first) || 0;\n    const b = parseInt(s.score_second) || 0;\n    if (a > b) s1++; else if (b > a) s2++;\n  }\n  return [s1, s2];\n}\n\nfunction pointsPerSet(ev) {\n  // Per-set points from statistics (\"Total Points Won\", stat_period set1/set2/...).\n  const stats = Array.isArray(ev.statistics) ? ev.statistics : [];\n  if (!stats.length) return [];\n  const p1Key = String(ev.first_player_key || '');\n  const bySet = {};\n  for (const s of stats) {\n    if (s.stat_name !== 'Total Points Won' || s.stat_won == null) continue;\n    const m2 = /^set(\\d+)$/.exec(String(s.stat_period || ''));\n    if (!m2) continue;\n    const idx = m2[1];\n    bySet[idx] = bySet[idx] || {};\n    bySet[idx][String(s.player_key) === p1Key ? 'p1' : 'p2'] = Number(s.stat_won) || 0;\n  }\n  return Object.keys(bySet).sort().map(k => ({ set: Number(k), p1: bySet[k].p1 ?? 0, p2: bySet[k].p2 ?? 0 }));\n}\n\nfunction matchAces(ev) {\n  // Match-level aces per player from statistics (stat_name \"Aces\", period \"match\").\n  const stats = Array.isArray(ev.statistics) ? ev.statistics : [];\n  const p1Key = String(ev.first_player_key || '');\n  let home = null, away = null;\n  for (const s of stats) {\n    if (s.stat_name !== 'Aces' || s.stat_period !== 'match' || s.stat_value == null) continue;\n    const v = parseInt(s.stat_value);\n    if (isNaN(v)) continue;\n    if (String(s.player_key) === p1Key) home = v; else away = v;\n  }\n  return (home == null || away == null) ? null : { home, away };\n}\n\nfunction serveStats(ev) {\n  // Serve/return game counts and 1st/2nd serve point counts per player (period \"match\").\n  const stats = Array.isArray(ev.statistics) ? ev.statistics : [];\n  if (!stats.length) return null;\n  const p1Key = String(ev.first_player_key || '');\n  const out = { home: {}, away: {} };\n  const fields = {\n    'Service games won': ['serveGamesWon', 'serveGamesTotal'],\n    'Return games won': ['returnGamesWon', 'returnGamesTotal'],\n    '1st serve points won': ['firstServeWon', 'firstServeTotal'],\n    '2nd serve points won': [null, 'secondServeTotal'],\n    'Service Points Won': [null, 'servePtsTotal']\n  };\n  for (const s of stats) {\n    if (s.stat_period !== 'match') continue;\n    const f = fields[s.stat_name];\n    if (!f) continue;\n    const side = String(s.player_key) === p1Key ? 'home' : 'away';\n    if (f[0] && s.stat_won != null) out[side][f[0]] = Number(s.stat_won);\n    if (f[1] && s.stat_total != null) out[side][f[1]] = Number(s.stat_total);\n  }\n  return (out.home.serveGamesTotal != null && out.away.serveGamesTotal != null) ? out : null;\n}\n\nconst scores = [];\nfor (const item of pendingItems) {\n  const m = item.json || {};\n  if (!m.eventId) continue;\n  const ev = byKey[String(m.eventId)];\n  if (!ev) continue;\n  const st = (ev.event_status || '').toLowerCase();\n  const isFinished = st === 'finished' || st === 'ended';\n  const isDead = st === 'retired' || st === 'walkover' || st === 'cancelled';\n  if (!isFinished && !isDead) continue;\n  const [s1, s2] = finalSets(ev);\n  const item = {\n    matchId: m.matchId,\n    homeScore: s1,\n    awayScore: s2,\n    status: isFinished ? 'FINISHED' : 'CANCELLED'\n  };\n  // Per-set games (for tournament load / fatigue stats)\n  const setRows = (Array.isArray(ev.scores) ? ev.scores : [])\n    .map(s => ({ p1: parseInt(s.score_first) || 0, p2: parseInt(s.score_second) || 0 }))\n    .filter(r => r.p1 || r.p2);\n  if (isFinished && setRows.length) {\n    item.extraData = { sets: setRows };\n    const pointRows = pointsPerSet(ev);\n    if (pointRows.length) item.extraData.points = pointRows;\n    const aces = matchAces(ev);\n    if (aces) { item.extraData.homeAces = aces.home; item.extraData.awayAces = aces.away; }\n    const serve = serveStats(ev);\n    if (serve) item.extraData.serve = serve;\n  }\n  scores.push(item);\n}\nreturn [{ json: { scores, count: scores.length } }];\n"
+      },
+      "id": "build-scores",
+      "name": "Build Scores Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1350,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/matches/scores/bulk",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "options": {
+          "timeout": 30000
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "jsonBody": {
+          "scores": "={{ $json.scores }}"
+        }
+      },
+      "id": "send-scores",
+      "name": "Send Scores to DB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1550,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const scoresData = $('Build Scores Payload').first().json;\nconst dbResult = $input.first().json || {};\nconst count = scoresData.count || 0;\nconst inserted = dbResult.inserted || 0;\nconst updated = dbResult.updated || 0;\nconst errors = dbResult.errors ? dbResult.errors.length : 0;\nconst message = count === 0 ? 'No hay partidos de tenis finalizados para actualizar.' : `Actualizados ${count} partidos de tenis finalizados.`;\nconst telegramMessage = `<b>BrainBets - Scores de Tenis</b>\\n\\n${message}\\nInsertados: ${inserted}\\nActualizados: ${updated}\\nErrores: ${errors}`;\nreturn [{\n  json: {\n    telegramMessage: telegramMessage,\n    dbResult: dbResult,\n    scoresCount: count\n  }\n}];"
+      },
+      "id": "prepare-notify",
+      "name": "Prepare Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1750,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot__TELEGRAM_TOKEN__/sendMessage",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "options": {},
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+        "jsonBody": {
+          "chat_id": "__TELEGRAM_CHAT_ID__",
+          "text": "={{ $json.telegramMessage || 'BrainBets - Scores de tenis actualizados' }}",
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "telegram-notify",
+      "name": "Telegram Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1950,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-notify",
+              "leftValue": "={{ (($json.scoresCount || 0) > 0 || (($json.dbResult.errors || []).length) > 0) ? 'notify' : '' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-news",
+      "name": "If News",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1950,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let upd = {}; try { upd = $('Build Scores Payload').first().json || {}; } catch(e) { upd = {}; }\nreturn [{ json: { sport: 'tennis', message: 'Sin novedades de tenis (0 scores guardados, 0 errores).', scoresCount: upd.count || 0, notified: false } }];"
+      },
+      "id": "silent-result",
+      "name": "Silent Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2150,
+        520
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Tennis Matches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Tennis Matches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Tennis Matches": {
+      "main": [
+        [
+          {
+            "node": "Filter Pending Matches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Pending Matches": {
+      "main": [
+        [
+          {
+            "node": "Has Pending Matches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Pending Matches": {
+      "main": [
+        [
+          {
+            "node": "Fetch Event Detail",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Silent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Event Detail": {
+      "main": [
+        [
+          {
+            "node": "Build Scores Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Scores Payload": {
+      "main": [
+        [
+          {
+            "node": "Send Scores to DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Scores to DB": {
+      "main": [
+        [
+          {
+            "node": "Prepare Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Notify": {
+      "main": [
+        [
+          {
+            "node": "If News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Notification": {
+      "main": [
+        []
+      ]
+    },
+    "If News": {
+      "main": [
+        [
+          {
+            "node": "Telegram Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Silent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": []
+}

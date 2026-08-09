@@ -1,0 +1,224 @@
+{
+  "id": "telegram_bot",
+  "name": "BrainBets - Telegram Bot Commands",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "telegram-bot",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "telegram-bot"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the command from query parameters\nconst query = $input.first().json.query || {};\nconst command = query.command || 'help';\nconst chatId = query.chat_id || '__TELEGRAM_CHAT_ID__';\n\nreturn [{\n  json: {\n    command: command.toLowerCase(),\n    chatId: chatId\n  }\n}];"
+      },
+      "id": "parse-command",
+      "name": "Parse Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "condition-collect",
+              "leftValue": "={{ $json.command }}",
+              "rightValue": "collect",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
+      },
+      "id": "switch-command",
+      "name": "Switch Command",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect data from real APIs\nconst https = require('https');\nconst http = require('http');\n\nfunction fetchData(url, headers) {\n  return new Promise((resolve, reject) => {\n    const urlObj = new URL(url);\n    const options = {\n      hostname: urlObj.hostname,\n      port: urlObj.port,\n      path: urlObj.pathname + urlObj.search,\n      method: 'GET',\n      headers: headers\n    };\n    \n    const client = urlObj.protocol === 'https:' ? https : http;\n    const req = client.request(options, (res) => {\n      let data = '';\n      res.on('data', (chunk) => data += chunk);\n      res.on('end', () => {\n        try {\n          resolve(JSON.parse(data));\n        } catch(e) {\n          resolve(null);\n        }\n      });\n    });\n    req.on('error', reject);\n    req.end();\n  });\n}\n\nconst RAPIDAPI_KEY = '__RAPIDAPI_KEY__';\nconst now = new Date();\nconst dateStr = now.toISOString().split('T')[0];\n\n// Get football live\nlet footballMatches = [];\ntry {\n  const footballData = await fetchData(\n    'https://free-api-live-football-data.p.rapidapi.com/football-current-live',\n    {'Content-Type': 'application/json', 'x-rapidapi-host': 'free-api-live-football-data.p.rapidapi.com', 'x-rapidapi-key': RAPIDAPI_KEY}\n  );\n  const live = footballData?.response?.live || [];\n  footballMatches = live.slice(0, 5).map(m => ({\n    matchId: `FOOTBALL-${m.id}`,\n    homeTeam: m.home?.name || 'Unknown',\n    awayTeam: m.away?.name || 'Unknown',\n    league: 'Live Match',\n    eventDate: dateStr,\n    eventId: m.id,\n    homeScore: m.home?.score || 0,\n    awayScore: m.away?.score || 0,\n    status: m.status?.scoreStr || 'Not started'\n  }));\n} catch(e) {}\n\n// Get tennis live\nlet tennisMatches = [];\ntry {\n  const tennisData = await fetchData(\n    'https://tennisapi1.p.rapidapi.com/api/tennis/events/live',\n    {'Content-Type': 'application/json', 'x-rapidapi-host': 'tennisapi1.p.rapidapi.com', 'x-rapidapi-key': RAPIDAPI_KEY}\n  );\n  const events = tennisData?.events || [];\n  tennisMatches = events.slice(0, 5).map(e => ({\n    matchId: `TENNIS-${e.id}`,\n    player1: e.homeTeam?.name || 'Unknown',\n    player2: e.awayTeam?.name || 'Unknown',\n    tournament: e.tournament?.name || 'Unknown',\n    eventDate: dateStr,\n    eventId: e.id,\n    status: e.status?.description || 'Not started'\n  }));\n} catch(e) {}\n\nconst output = {\n  generatedAt: now.toISOString(),\n  source: 'live_api',\n  tennis: tennisMatches,\n  football: footballMatches\n};\n\nconst jsonString = JSON.stringify(output, null, 2);\nconst timestamp = now.toISOString().replace(/[-:]/g, '').replace(/\\\\..*/, '');\nconst filename = `matches_${timestamp}.json`;\n\nreturn [{\n  json: {\n    data: jsonString,\n    filename: filename,\n    filepath: `/storage/matches/${filename}`,\n    tennisCount: tennisMatches.length,\n    footballCount: footballMatches.length\n  }\n}];"
+      },
+      "id": "collect-data",
+      "name": "Collect Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://file_writer:5000/api/v1/write-file",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "body": "={\"filepath\": $json.filepath, \"content\": $json.data}",
+        "options": {}
+      },
+      "id": "write-collect",
+      "name": "Write Collect File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1050,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot__TELEGRAM_TOKEN__/sendMessage",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "body": "={\"chat_id\": \"__TELEGRAM_CHAT_ID__\", \"text\": \"✅ Data Collection Complete\\n\\nTenis: {{ $json.tennisCount }} partidos\\nFutbol: {{ $json.footballCount }} partidos\\n\\nArchivo: {{ $json.filename }}\", \"parse_mode\": \"HTML\"}",
+        "options": {}
+      },
+      "id": "telegram-collect",
+      "name": "Telegram Collect",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1250,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return help message\nreturn [{\n  json: {\n    message: \"🤖 BrainBets Bot Commands:\\n\\n📊 /collect - Recolectar datos de partidos\\n🎯 /predict - Generar predicciones\\n✅ /validate - Validar predicciones\\n🔄 /pipeline - Ejecutar pipeline completo\\n❓ /help - Mostrar esta ayuda\"\n  }\n}];"
+      },
+      "id": "help-command",
+      "name": "Help Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot__TELEGRAM_TOKEN__/sendMessage",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "body": "={\"chat_id\": \"__TELEGRAM_CHAT_ID__\", \"text\": {{ JSON.stringify($json.message) }}, \"parse_mode\": \"HTML\"}",
+        "options": {}
+      },
+      "id": "telegram-help",
+      "name": "Telegram Help",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1050,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Command": {
+      "main": [
+        [
+          {
+            "node": "Switch Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Command": {
+      "main": [
+        [
+          {
+            "node": "Collect Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Help Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Data": {
+      "main": [
+        [
+          {
+            "node": "Write Collect File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Collect File": {
+      "main": [
+        [
+          {
+            "node": "Telegram Collect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Help Command": {
+      "main": [
+        [
+          {
+            "node": "Telegram Help",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": []
+}

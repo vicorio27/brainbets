@@ -1,0 +1,456 @@
+# AGENTS.md — Sports Betting Intelligence Platform
+
+## Current State
+
+Repo is **implemented and functional**. The stack runs via Docker Compose:
+- `n8n` (workflow automation) - DB-first workflows imported and active; legacy file-based workflows removed
+- `Prediction Engine` - Python scripts (Elo, Poisson, XGBoost-like, CatBoost-like) executed inside n8n workflows
+- `PostgreSQL` - Fuente de verdad para matches, predictions, results, estadísticas y feature store
+- `FastAPI` (BFF backend, read-only público) - Endpoints working with real API data
+- `Vue.js` (dashboard frontend) - Serving on port 80
+- `Nginx` (reverse proxy)
+- `Telegram Bot` - Interactive bot for executing pipelines via commands
+- `Workflow Executor` - Thin HTTP proxy that triggers n8n webhooks (defaults to DB-first webhooks)
+- `File Writer` - HTTP service for writing files from n8n (deprecated, mantenido por compatibilidad)
+- `migration_worker` - CDC que migra archivos JSON desde `storage/` a PostgreSQL
+
+**Recent updates (2026-08-07):**
+- **CORRECCIÓN: api-tennis SÍ publica puntos por partido y por set**: el claim documentado el 2026-08-01 ("puntos NO existen en la fuente") era falso. `get_fixtures` devuelve `statistics` (por jugador, con `stat_period` = `match`/`set1`/`set2`...: **Total Points Won** con `stat_won`/`stat_total`, Aces, Winners, puntos de saque/resto, etc.) y `pointbypoint` (punto a punto por game). Ahora los workflows `update_scores_tennis` y `update_tennis_scores` extraen los puntos por set de `ev.statistics` (helper `pointsPerSet`: filtra `Total Points Won` con period `setN`, mapea `player_key`→p1/p2 vía `first_player_key`) y los envían como `extraData.points` → `matches.extra_data['score_stats']['points']` (`[{set, p1, p2}]`; el bulk mergea genérico, sin cambio de storage). Backfill one-off de 14 días: 117 partidos con puntos. `compute_player_set_stats` y `compute_tournament_load` agregan puntos W-L por set/partido; la UI los muestra (notas corregidas). **Aces conectados (mismo día)**: los workflows también extraen `Aces` (stat_period `match`) → `score_stats.homeAces/awayAces` (backfill: 118 partidos); `FeatureService._compute_tennis_features` expone `aces_avg`/`aces_matches` por jugador (últimos 20 con datos) y el motor emite el mercado **Total Aces** (Over/Under 15.5, Poisson sobre promedio combinado × multiplicador de superficie grass 1.15/hard 1.0/clay 0.9) SOLO cuando ambos jugadores tienen `aces_avg` real. La validación ya leía `homeAces/awayAces` — el mercado dejó de fallar por falta de datos. Ojo: con pocas semanas de data los promedios tienen muestras pequeñas (ej. Rinderknech 21.0 aces/match) — ruido que la calibración irá corrigiendo. **Serve/return stats conectados (mismo día)**: los workflows extraen además `Service games won`, `Return games won`, `1st/2nd serve points won` y `Service Points Won` (stat_period `match`) → `score_stats.serve = {home: {...}, away: {...}}` (backfill: 119 partidos). `tennis_stats_service.aggregate_serve_stats` (helper compartido) computa hold%, break%, 1er saque % (derivado: 1 − 2ndServeTotal/servePtsTotal — la fuente no da el conteo directo), % puntos ganados con 1ero y récord de tiebreaks (sets 7-6 desde `score_stats.sets`). Nuevo endpoint `GET /api/v1/matches/{matchId}/serve-stats` (overall últimos 20 con datos + hold/break por superficie) y sección "Saque, resto y tiebreaks" en PredictionDetail. `FeatureService._compute_tennis_features` expone `hold_pct`/`break_pct`/`first_serve_pct`/`first_serve_won_pct`/`surface_hold_pct`/`surface_break_pct`/`tiebreaks_played`/`tiebreaks_won` — disponibles para el motor (aún no alteran probabilidades; integración al modelo game-level es el siguiente paso candidato).
+- **Mercados nuevos de tenis por set**: `Exact Set Score` (4 outcomes binomiales: `X 2-0`/`X 2-1` por jugador) y `Set 1 Winner`. El motor deriva la probabilidad por set del ensemble invirtiendo `P_partido = p²(3−2p)` por bisección (`_match_prob_to_set_prob` en `tennis.py`). Sin EV/Kelly (no hay cuotas de estos mercados). Validación en `_validate_tennis`: `Set 1 Winner` usa el primer set de `score_stats.sets` (chequeado ANTES del branch genérico "winner" porque el nombre lo contiene); sin datos por set → failed con nota. `Exact Set Score` compara "ganador + sets". Progress live: fulfillment propio para Set 1 Winner (95/5 con set 1 cerrado, proxy por games en curso, 50 con 2+ sets). Workflows sin cambios (genéricos por mercado). E2E: 8 partidos × 4 mercados = 32 predicciones.
+- **Esfuerzo por superficie y descanso**: `GET /api/v1/matches/{matchId}/surface-load` (`compute_surface_load`): games/partidos por superficie últimos 30 días (cualquier torneo) + días de descanso desde el último FINISHED (fecha/torneo/superficie). UI: sección en PredictionDetail con badge de descanso (rojo ≤1, amarillo 2, verde ≥3 días).
+- **Sección Dashboard "Games y puntos por set"**: `GET /api/v1/matches/player-set-stats?date=` (default hoy Bogotá, `compute_player_set_stats`): para cada jugador con partido hoy, promedios de games y puntos W-L por set por superficie (matches FINISHED con `score_stats`, prefiltrado con `extra_data['score_stats'].isnot(None)` — JSONB). Frontend: store `matches.playerSetStats` + tabla en tab Hoy (columnas arcilla/dura/hierba, superficie del partido resaltada).
+- **Fix navegación Dashboard→predicciones→detalle**: `PredictionTable` propaga `matchId`/`date` de la query actual al link del detalle; `PredictionDetail` "← Volver a predicciones" regresa a `/predictions?matchId=X&date=Y` (antes perdía el filtro del partido).
+- **Limpieza de datos + fix de raíz en `/matches/bulk`**: auditoría de DB (sin duplicados ni huérfanos; validación ya exigía FINISHED+score). Hallazgo: `Merge & Format Data` (data_collection_db) envía `homeScore: 0`/`awayScore: 0` para fútbol no jugado y `/matches/bulk` lo persistía como FULL_TIME sin mirar status → 66 scores falsos en partidos SCHEDULED/LIVE (53 eran 0-0 placeholder). Borrados (los CANCELLED con parciales se conservan por diseño). Fix de raíz: `/matches/bulk` solo escribe score FULL_TIME si `raw.status == 'FINISHED'` (la ingesta histórica y migration_worker escriben MatchScore por su propio camino, no afectados). Inerte y conservado: 253 tenis históricos FINISHED sin score (la ingesta vieja), 6 tenis con sets incompletos (huecos de la fuente), 13 fútbol viejos con score real pero status atascado (features/validación los ignoran). **Pendiente**: 86 tenis con puntos-sin-sets no se pudieron reparar porque api-tennis empezó a devolver `{"error":"1","result":[{"cod":1006,"msg":"Please make the payment for your account!"}]}` (cuota free agotada tras los backfills del día) — re-ejecutar el backfill de sets (script patrón: `backfill_points.py` con `sets` desde `ev.scores`) cuando vuelva la cuota; los workflows de tenis fallarán mientras tanto.
+
+**Recent updates (2026-08-01):**
+- **Carga de torneo (fatiga) de jugadores de tenis**: nuevo endpoint público `GET /api/v1/matches/{matchId}/tournament-load` (`tennis_stats_service.compute_tournament_load`) que acumula, para cada jugador del partido, sus partidos FINISHED del MISMO torneo (mismo `league_id`, ventana 10 días, estrictamente ANTERIORES al partido): partidos jugados, sets W-L (FULL_TIME scores vía `_scores_for_side`) y games W-L (por set desde `matches.extra_data['score_stats']['sets']`), con `totalGames`, `loadLevel` (leve<25/media<50/alta≥50 games) y `loadPct` (games/70). Los games por set se guardan en `score_stats.sets` vía `extraData` del `/matches/scores/bulk` (sin migración; los workflows `update_scores_tennis` y `update_tennis_scores` ahora lo envían desde `ev.scores` de api-tennis) + backfill one-off de la semana (31 partidos, script en /tmp del backend). **~~Puntos ganados/perdidos NO existen en la fuente~~ CORREGIDO el 2026-08-07: la fuente SÍ los publica** (ver entrada de 2026-08-07); en su momento se mostraron games como dato más fino con nota en la UI. Frontend: store `predictions.tournamentLoad` + `fetchTournamentLoad(matchId)`; `PredictionDetail` (tab estadística, tenis) muestra la sección **"Carga en el torneo"**: por jugador, chips de partidos/sets W-L/games W-L, badge y barra de carga con color por nivel, línea comparativa ("X llega con N games más de carga que Y") y la nota sobre puntos. Verificado con data real (Gea 18-7 games carga media 36% vs Shapovalov 29-20 media 70% en Los Cabos).
+- **Consenso externo ClubElo (shadow mode, solo fútbol)**: fuente externa de predicciones integrada con **peso 0** en el ensemble (solo se registra y se muestra; se medirá su accuracy standalone antes de darle peso — misma lección del ML de tenis). Flujo: nodo `Get ClubElo` en `data_collection_db` (GET `clubelo.com/{fecha Bogotá}`, UA browser, `responseFormat: text`) → `Merge & Format Data` parsea el SVG de fixtures (elementos `<text>` agrupados por `y`, zip por índice porque cada fila tiene 2 tablas lado a lado; solo la sección entre `<h2><a href="Fixtures">` y `<h2><a href="Results">` — el primer `>Results<` del doc es un link de nav) → fuzzy match de equipos (normalizar + stopwords FC/SC/... + Jaccard ≥0.5 o contención, con igualdad de tokens por prefijo len≥5 para variantes tipo Ferencváros/Ferencvárosi) → `expertConsensus` en el partido → `matches.extra_data['expert_consensus']` → schema `FootballMatch.expertConsensus` → engine `football.py` lo expone en `reasoningData.expertConsensus` y agrega frase al reasoning (sin tocar probabilidades) → `PredictionDetail` (tab "Explicación sencilla") muestra la sección **"🌐 ¿Qué dicen otros sitios?"** en lenguaje llano: quién es ClubElo, qué % le da a cada equipo (sin empate), comparación con nuestro favorito (✅/⚠️) y nota de que no cambia la predicción (shadow). Fuentes descartadas por bloqueo: Forebet/PredictZ/Windrawwin/Sofascore (403 Cloudflare/DNS/TLS). Tenis sin fuente viable por ahora. **Cobertura**: ClubElo es Europa-céntrico — hoy no hay solape con el free tier de football-data.org (Brasileirao); el solape real llega con la temporada europea o renovando RapidAPI (cubre clasificatorias UEFA). Verificado offline con HTML real (6/6 fixtures parseados, 3/3 matches fuzzy correctos) y engine CLI (reasoningData + frase OK, probabilidades intactas).
+
+**Recent updates (2026-07-31):**
+- **Fix API de fútbol (doble falla apilada)**: (1) football-data.org `/v4/matches` exige `dateTo > dateFrom` — con span de 0 días (`dateFrom == dateTo`, como envía el loop por fecha de n8n) SIEMPRE devuelve 0 partidos → el proxy caía al fallback en cada llamada desde la migración (2026-07-24); (2) la suscripción de RapidAPI `free-api-live-football-data` venció (403 "You are not subscribed to this API") y el `except: pass` lo ocultaba. Fix en `/proxy/football/fixtures`: extiende `dateTo` +1 día para el primario (además captura partidos de noche Bogotá cuyo utcDate cae al día siguiente UTC) y logging de errores en ambos proveedores (ya no fallan en silencio). Verificado: proxy same-day devuelve `source: football-data.org` con partidos; collect E2E 2 fútbol (Brasileirao) + 7 tenis, 0 errores. **Ojo**: el free tier de football-data.org solo cubre ciertas ligas (Brasileirao + top europeas en temporada); para MLS/LigaMX/Clasificatorias UCL hace falta renovar la suscripción RapidAPI. Detalles en gotcha #42.
+
+- **Fix flujo predict programado (Schedule Trigger)**: el run de las 03:45 Bogotá moría con "Referenced node is unexecuted" porque `Get Matches from DB` y `Build Features` referenciaban `$('Webhook Trigger').first()` cuando disparaba el Schedule Trigger. Las 6 expresiones ahora usan `$('Webhook Trigger').isExecuted ? ... : ''`. Detalles en gotcha #40.
+- **Fix collect con 0 fixtures de fútbol (cadena serial rota)**: `data_collection_db` es una cadena 100% serial; cuando `Extract Football Events` devolvía 0 items (sin fútbol, ej. pretemporada), TODA la rama aguas abajo moría silenciosamente (status success, 0 partidos, sin notificación final) → nunca se recolectaba tenis. Fix: sentinel item (`{eventId:'', matchId:'', noMatches:true}`) cuando hay 0 partidos en `Extract Football Events` y `Extract Tennis Events`; `Merge & Format Data` filtra sentineles (`.filter(ev => ev && ev.eventId)`) y su referencia al Webhook Trigger ahora va en try/catch (crash latente en runs programados). Verificado E2E: 0 fútbol + 7 tenis (Los Cabos/Washington) insertados, 0 errores, Telegram OK. Detalles en gotcha #41.
+- **Dashboard ordena partidos por confianza de predicción**: `Dashboard.vue` ahora carga `/predictions/latest` (tab Hoy e Histórico) y ordena cada lista (tenis/fútbol) de mayor a menor usando la **mejor confianza del partido** (`calibratedConfidence ?? confidence`, máximo entre sus predicciones). Partidos sin predicciones van al final en su orden original (sort estable). En Histórico el orden aplica sobre la página actual (paginación server-side).
+- **Badges de predicción en MatchCard (Dashboard)**: cada tarjeta muestra un indicador de estado de predicción: `🔥 {conf}%` (naranja) para los **top 3 partidos del día por confianza** (global, ambos deportes), `🎯 {conf}%` (verde) para partidos con predicción fuera del top 3, y `⏳ Sin predicción` (gris) para los que aún no tienen. `MatchCard` recibe props nuevas `bestConfidence` (Number|null) e `isTop` (Boolean), con defaults retrocompatibles. El top 3 se computa en `Dashboard.vue` (`top3MatchIds`) sobre el mismo mapa `bestConfidenceByMatch` del ordenamiento.
+
+**Recent updates (2026-07-26):**
+- **Auditoría del ML de tenis: el 99.86% era un artefacto (leer antes de confiar en tennis_ml)**: la ingesta histórica escribió los partidos con **Winner = player1/home** (98.71% de 37k partidos) → el dataset tiene label balance 99.77% y el XGBoost aprendió "predecir siempre player1" (baseline trivial 99.76% ≈ accuracy 99.80%; temporal split 99.29% == baseline; elo_diff solo == baseline). En producción el modelo emite ~99.9% para player1 siempre (verificado en reasoning_data) y sesga el ensemble — las cuotas vivas de api-tennis sí tienen lados naturales. Fix pendiente recomendado: reentrenar con side-flip sintético (duplicar filas p1↔p2 invirtiendo labels → 50/50 sin re-ingesta), Elo `elo_after` del registro previo (hoy usa `elo_before` de hace 2 partidos), split temporal, y reportar accuracy honesto esperado ~68-72%. Script de auditoría reproducible en /tmp/audit_ml.py del contenedor backend.
+- **Calibración de confianza con outcomes reales**: nuevo `backend/src/application/calibration_service.py` — curvas por bins ([0-60)…[90-100]) con suavizado Laplace (α=10, prior=base rate de la curva) por (sport|market) con fallback sport → global; mínimo 30 muestras, skip curvas single-class. Artefacto JSON en `/storage/models/calibration.json` (sin migración; mismo patrón que tennis_xgb). Endpoint retrain `POST /api/v1/internal/train/calibration` (key interna). `_prediction_to_schema` agrega `calibratedConfidence` (int) y `calibratedExpectedValue` (recalcula p×cuota−1 con la prob calibrada y las odds de `reasoning_data.oddsDecimal`, mapeando outcome→lado vía homeName/awayName). Frontend: tabla y detalle muestran la confianza calibrada como principal (badge "cal" + tooltip con la cruda) y el edge usa el calibrado cuando existe. **Impacto real verificado**: Bublik cruda 79%→cal 52% y su EV +14.6%→−25.1% (la apuesta "buena" era mala). Tenis sport curve: 60-69→32.6% real, 90-100→53.5% real (sobre-confianza severa documentada).
+- **EV/Kelly en predicciones Match Winner (selección por valor, no por confianza)**: nuevo helper `ev_and_kelly(prob, decimal_odds)` en `n8n/prediction_engine/common.py` → `EV = p×cuota−1`, `Kelly = (b·p−q)/b` con floor en 0. `tennis.py` y `football.py` emiten `expectedValue`/`kellyFraction` SOLO en Match Winner (único mercado con odds recolectadas: 1X2 fútbol y Home/Away tenis; O/U, BTTS, Total Sets quedan en null). Cadena: engine → `Build Predictions Output` (workflow re-importado) → `/predictions/bulk` (insert y update condicional `if raw.get(...) is not None`) → columnas `expected_value`/`kelly_fraction` (antes 0/1,157 pobladas) → schema `expectedValue`/`kellyFraction` → frontend: columna **Edge** en `PredictionTable` (badge verde ≥5%, amarillo 0-5%, rojo <0, "-" sin odds; tooltip con Kelly y "edge <5%: no apostar") y tarjeta "Valor de la apuesta" en `PredictionDetail` con EV + **stake sugerido = ¼ Kelly** del bankroll. Regla de usuario documentada en la propia UI: solo apostar edge > 5%. Verificado E2E: predict sobre 2026-07-25 → 3 partidos con odds poblaron EV (Bublik A. EV +14.6%, Kelly 32.5%), los 8 sin odds quedan null correctamente. **Nota**: confidence y EV pueden divergir (un 53% conf a cuota 2.65 da +38% EV) — por eso la selección es por edge.
+- **Búsqueda por nombre en Histórico (`q` server-side)**: `GET /api/v1/predictions/history` acepta `q` (substring case-insensitive) que filtra predicciones cuyo partido tenga CUALQUIER competidor con ese nombre (jugador o equipo) vía EXISTS correlacionado contra `match_competitors`+`competitors` (evita duplicar filas vs join directo). Decisión documentada: filtrar en front era inviable por paginación server-side (20 de 1,157+) y payloads pesados (reasoning por fila). La respuesta de predicciones ahora incluye `homeName`/`awayName` (de `match.competitors`, con `joinedload` para evitar N+1) → `PredictionTable` las prefiere sobre el cruce con la página de matches (que antes rompía nombres al buscar). Frontend: input "Nombre" en filtros de Histórico con debounce 400ms → `fetchHistory(..., nameQuery)` → `params.q`. **Bug latente corregido de paso**: sin filtros de fecha/sport, el filtro de PENDING obsoletas referenciaba `Match.match_date` sin join → producto cartesiano predictions×matches (total inflado a ~196k); ahora `/history` SIEMPRE hace `join(Prediction.match)` (many-to-one, no duplica). Verificado: q=bublik→4, q=arsenal→18 (también mayúsculas), sin params→387.
+- **Fix CRÍTICO win rates de features (afectaba predicciones)**: `feature_service` leía los resultados desde `match_competitors.score` (columna no poblada, siempre 0) en vez de `match_scores` → `last_5/last_10/last_20/surface_last_20` y season stats salían con 0 victorias para TODOS los competidores (Bublik #11 aparecía 0-20) y `tennis.py` convertía eso en `form = -1` para ambos jugadores (señal de forma muerta). Nuevo helper module-level `_scores_for_side(mc, score)` (player1=home / player2=away); corregidos `_tennis_aggregate`, `_aggregate` (fútbol) y `_football_season_stats`; filas sin MatchScore se saltan en vez de contar 0-0. Verificado: Bublik clay 16V/20 (0.8), last_20 0.7. Para regenerar features de un día: `POST /api/v1/internal/features/build?from=YYYY-MM-DD&to=YYYY-MM-DD` (features_created/updated cambian in-place vía upsert).
+- **Rendimiento por superficie en frontend (tenis)**: nuevo endpoint público `GET /api/v1/matches/{matchId}/surface-stats` (matchId external, ej. TENNIS-123) que devuelve para ambos jugadores: career W-L/win%/sets por superficie (hard/clay/grass, normalizadas vía `normalize_surface` de `tennis_stats_service` — 'Hardcourt outdoor'/'Red clay'/'carpet' mapean a las 3) + Elo actual por superficie y overall (último `elo_after` de `competitor_elo_history`). Lógica en `tennis_stats_service.compute_surface_career` / `get_match_surface_stats` (reusan `_scores_for_side` de feature_service). Frontend: store `predictions.surfaceStats` + `fetchSurfaceStats(matchId)`; `PredictionDetail.vue` muestra la sección "Rendimiento por superficie" (solo si `sport === 'tennis'`): barras de win% por superficie (clay=naranja, hard=azul, grass=verde) con récord W-L y Elo, resaltando la superficie del partido con badge "hoy". Dato de cobertura: ~37.6k partidos ATP históricos con superficie (Hard 21.7k / Clay 11.5k / Grass 4.4k), Elo por superficie para 894/741/566 jugadores.
+
+**Recent updates (2026-07-25):**
+- **Notificaciones Telegram "si o si" para collect/predict**: `data_collection_db` y `prediction_pipeline_db` tienen un nodo `Notify Start` (HTTP a Telegram, `onError: continueRegularOutput`) colgado directo de AMBOS triggers (Webhook + Schedule) → avisa "🚀 Collect/Predict INICIADO" apenas arranca la ejecución, además del resumen final ya existente. Nuevo workflow `error_notifier` (Error Trigger → Telegram, texto plano sin `parse_mode` para evitar 400 por entidades HTML en stack traces) referenciado vía `settings.errorWorkflow` en collect y predict: si cualquier nodo falla, llega "❌ ERROR en workflow" con workflow/nodo/mensaje. **Debe quedar INACTIVO** (n8n 1.44 no puede activarlo, ver gotcha #39); aun inactivo n8n lo ejecuta vía `executeErrorWorkflow`. Verificado E2E: ejecución de collect con error disparó el error_notifier y entregó el Telegram.
+- **Fix nodos HTTP que morían ante errores transitorios**: `/collect` fallaba completo cuando UNA llamada de odds de fútbol a RapidAPI hacía "socket hang up" (vía proxy interno). Causa raíz: los nodos httpRequest v4.1 tenían `options.continueOnFail: true`, opción que n8n 1.44 IGNORA (formato legacy); el flag efectivo es `onError: "continueRegularOutput"` a nivel de nodo (gotcha #38). Aplicado a los 7 nodos HTTP externos de `data_collection_db`: `Get Football Live`, `Get Football Odds`, `Get Tennis Live`, `Get Tennis Odds`, `Get Tennis Rankings`, `Enrich Football Stats`, `Enrich Tennis H2H`. Los merge downstream ya eran null-safe con error items (verificado en código y E2E).
+- **Fix `/api/v1/internal/features/build` 422 con params vacíos**: predict venía fallando desde ~2026-07-25 porque n8n envía `from=&to=&sport=` y FastAPI intentaba parsear `""` como datetime → 422. El endpoint ahora acepta strings (mismo patrón `_parse_date` de `/matches/by-date`), y sin ids ni fechas defaultea a hoy Bogotá (rango aware con `BOGOTA_TZ`, usando `datetime.min.time()` porque `internal.py` importa el módulo stdlib `time`). Además: si `external_match_ids` no matchea nada en DB retorna early con ceros (evita scan completo de features). Requiere rebuild del backend (código va en la imagen, no en volumen).
+- **Fix Predictions.vue tab "Hoy" vacío después de las 19:00 Bogotá**: la vista calculaba `todayStr` con `new Date().toISOString().split('T')[0]` (fecha UTC) mientras `eventDate` de las predicciones usa fecha Bogotá → cuando UTC pasa al día siguiente (19:00 Bogotá) el filtro `eventDate === todayStr` devolvía 0 predicciones aunque el predict hubiera corrido bien. Corregido a `toLocaleDateString('en-CA', {timeZone: 'America/Bogota'})` (mismo patrón que `Dashboard.vue getUtcTodayStr()`). Era el único lugar del frontend que aún usaba fecha UTC; requiere rebuild del frontend.
+- **Filtro `matchId` server-side en `/predictions/history`**: al hacer click en un partido del Dashboard, el tab "Histórico" filtraba por matchId en el cliente sobre la página actual de 20 items (server-side pagination) → si las predicciones del partido caían fuera de la página, se veía vacío y la paginación quedaba rota (`totalItems` usaba el count filtrado). Ahora `GET /api/v1/predictions/history` acepta `matchId` (external, ej. `TENNIS-123`) y filtra en SQL por `Match.external_id`; cuando se filtra por matchId explícito se OMITE el ocultamiento de PENDING/LOW_CONFIDENCE obsoletas (una consulta por partido debe devolver todas sus predicciones). Frontend: `fetchHistory` acepta `matchId` y lo envía como query param; `Predictions.vue` ya no filtra por matchId en el cliente y `totalItems` usa el `total` del servidor también en modo matchId. Requiere rebuild de backend y frontend.
+
+**Recent updates (2026-07-24):**
+- **Migración del proveedor de fútbol a football-data.org con fallback RapidAPI**: El workflow `data_collection_db` ahora consume fixtures de fútbol desde un nuevo endpoint interno `GET /api/v1/internal/proxy/football/fixtures`. La lógica de circuit breaker vive en el backend: intenta `api.football-data.org/v4/matches` (gratis para ligas top) y, si falla o no hay token configurado, cae automáticamente a `free-api-live-football-data.p.rapidapi.com/football-get-matches-by-date`. Se eliminó el nodo `Get Football H2H` de RapidAPI; el H2H ahora proviene del enriquecimiento interno (`/matches/football/enrich`) basado en histórico DB. El token de football-data.org se lee desde la variable de entorno `FOOTBALL_DATA_ORG_TOKEN`.
+- **Notificaciones Telegram solo con novedad**: `validation_db` (horaria) y `update_tennis_scores` (12h) ya no spamean cuando no hay trabajo. Compuerta `If Validated` (notifica solo si `summary.validated > 0`; rama false → `Respond to Webhook`) y compuerta `If News` (notifica solo si `scoresCount > 0` o `errors > 0`; rama false → nodo `Silent Result` que devuelve 200 con `notified: false` para que el webhook no falle con "No item to return got found"). `collect`, `predict`, `update_scores`, `train_models` e `historical_ingestion` siguen notificando siempre.
+- **Fix formato nodo If (bug latente en TODO el repo)**: los nodos `If` usaban `combineOperation` (formato viejo) que n8n 1.44 no parsea → siempre enrutaban por la rama true. Corregido a `combinator` dentro de `conditions` en `validation_db`, `update_tennis_scores` y `update_scores_football`. Al activarse la evaluación real surgieron errores de `typeValidation: strict` con valores numéricos (`noLive: 1`); las expresiones ahora devuelven string explícito. Detalles en gotcha #34.
+
+**Recent updates (2026-07-23):**
+- **Migración completa de tenis a api-tennis.com (fuente única)**:
+  - Predict y validate ahora usan la MISMA API con el MISMO `event_key`: `get_fixtures` (fixtures+resultados), `get_odds` (cuotas por fecha), `get_standings` (rankings ATP), `get_livescore`. Adiós `tennis-api-atp-wta-itf` y `tennisapi1` en workflows.
+  - **Solo ATP singles main draw**: `event_type_key=265` server-side + skip de `event_qualification == 'True'`. WTA eliminada del pipeline (nodo `Get WTA Live` borrado); los modelos (entrenados con histórico ATP) quedan alineados train/inference.
+  - **Verificación previa de tennisapi1 (por qué se descartó)**: `events/{d}/{m}/{a}` y `team/{id}/events/next/0` devuelven siempre 204 (bloqueados por plan), `events/live` solo trae `inprogress`, `search/all` está roto. No podía dar fixtures por fecha ni resultados → validate débil estructural.
+  - `data_collection_db`: `Get Tennis Live` → `get_fixtures` (fecha Bogotá, `timezone=America/Bogota`), nuevo nodo `Get Tennis Odds` → `get_odds` por fecha, `Get Tennis Rankings` → `get_standings?event_type=ATP` (2,277 jugadores, nombres completos). `Extract Tennis Events` parsea formato api-tennis, superficie/tier por heurística de nombre de torneo, odds con prioridad de casas (Pncl > bet365 > ...). Ranking lookup con 3 niveles: exacto, apellido+inicial, token-set (para nombres desordenados tipo "Martin Etcheverry Tomas").
+  - `update_scores_tennis`: reescrito. Una sola llamada `get_fixtures` (ayer→mañana) → cruza por `eventId` (event_key crudo, sin matching por apellido) → partidos FINISHED escribe `match_scores` vía `/matches/scores/bulk` (nuevo, antes solo hacía progreso) + partidos LIVE genera snapshots de progreso con contrato completo (`homeSets`, `homeGamesCurrent`, `homePoint`, `bestOf` — antes faltaban y el fulfillment de tenis siempre veía 0 sets). Retired/walkover/cancelled → status `CANCELLED`.
+  - `update_tennis_scores` (backfill 12h): `get_fixtures` últimos 3 días, mismo cruce por event_key.
+  - **Backend — resolución fuzzy de competidores**: api-tennis envía nombres abreviados ("T. M. Etcheverry") y el histórico tiene nombres completos ("Tomas Martin Etcheverry"). Nuevo `tennis_stats_service.resolve_competitor_fuzzy` (exacto → ilike → normalizado → token-subset con desempate por iniciales; maneja guiones tipo "J-L. Struff"). `_ensure_competitor` en `internal.py` ahora enlaza jugadores abreviados al competidor histórico (Elo/forma/H2H conectan con el histórico). `_find_competitor_by_name` delega en el nuevo resolvedor (H2H por nombre también mejora).
+  - **E2E verificado (2026-07-23, 8 QF ATP)**: collect 8 partidos con odds+ranking+superficie → update-scores 8/8 scores finales → predict 16 predicciones → validate **16/16 validadas, 0 pendientes** (Match Winner 87.5%, Total Sets 75%). Collect completo (fútbol+tenis): 23 insertados, 0 errores.
+  - api-tennis.com NO requiere User-Agent especial ni headers; la API key va en query param `APIkey`. Los fixtures NO traen superficie ni país (heurística por torneo); `get_odds` no filtra por `event_type_key` en la práctica pero el payload es manejable (~255 partidos/día con todos los tipos).
+
+**Recent updates (2026-07-18):**
+- **Fix API de tenis completo**:
+  - `data_collection_db`: Las URLs de tenis (`Get Tennis Live`, `Get WTA Live`) tenían la fecha hardcodeada `2026-07-12`; ahora usan fecha dinámica con `toLocaleDateString('en-CA', {timeZone: 'America/Bogota'})`.
+  - `Merge & Format Data` ahora lee tenis desde `Extract Tennis Events` (ATP+WTA parseado) en lugar del JSON crudo de `Get Tennis Live` (solo ATP). Esto habilita partidos WTA en el pipeline.
+  - `Extract Tennis Events` ahora expone `eventTime` (hora Bogotá) y usa status `SCHEDULED`/`LIVE` en lugar del nombre de la ronda.
+  - Eliminado nodo huérfano `Get Tennis Odds` (las odds ya vienen en fixtures).
+  - `update_scores_tennis`: Reemplazada API no suscrita `tennis-live-api` (403) por `tennisapi1` `/api/tennis/events/live`. Los partidos se cruzan por apellido normalizado (sin acentos) porque los eventId de ambas APIs no coinciden. Maneja orden local/visitante invertido (swapped).
+  - `update_tennis_scores`: El endpoint viejo `event/{id}` devolvía 204 con IDs de la API nueva; ahora también usa `events/live` con matching por nombre y solo envía scores cuando `status.type === 'finished'`.
+  - **Limitación conocida**: La API nueva (`tennis-api-atp-wta-itf`) no expone scores ni resultados (solo fixtures+odds). Los scores en vivo/finales dependen de `tennisapi1` `events/live`, que solo cubre partidos en curso. Partidos que terminan sin pasar por el live feed no reciben score automático.
+
+**Recent updates (2026-07-12):**
+- **Timezone fix completo (America/Bogota)**: Todos los componentes ahora usan UTC-5 para operaciones de fecha:
+  - Frontend: `Dashboard.vue` `getUtcTodayStr()` usa `toLocaleDateString('en-CA', {timeZone: 'America/Bogota'})`
+  - Workflow Executor: `_today_str()` usa `datetime.now(bogota_tz)` con UTC-5
+  - Backend: Nuevo módulo `src/timezone.py` con helpers `today_bogota()`, `today_start_bogota()`, `yesterday_start_bogota()`
+  - Backend matches.py: `date.today()` → `today_bogota()`
+  - Backend services.py: Dashboard summary usa `today_start_bogota()` / `yesterday_start_bogota()`
+  - n8n workflows: Ya usaban `timeZone: 'America/Bogota'` en `Build Football Date Params` y `Merge & Format Data`
+  - **Problema resuelto**: El frontend buscaba partidos por fecha UTC, perdiendo partidos de la timezone del usuario
+
+- **Nueva API de tenis (ATP/WTA/ITF)**:
+  - API anterior: `tennisapi1.p.rapidapi.com` (solo ITF, limitada)
+  - API nueva: `tennis-api-atp-wta-itf.p.rapidapi.com` (ATP + WTA + ITF con odds incluidas)
+  - **Requiere header `User-Agent`** (protección Cloudflare, error 1010 sin él)
+  - Odds incluidas directamente en la respuesta de fixtures (k1, k2, total, ktm, ktb, f1, kf1, f2, kf2)
+  - Workflow `data_collection_db` actualizado con nuevos nodos y parsing
+
+- **Workflow de tenis actualizado**:
+  - Nuevo nodo `Get WTA Live` para partidos WTA
+  - `Extract Tennis Events` parsea formato nuevo (player1/player2 en lugar de homeTeam/awayTeam)
+  - `Merge Tennis Odds` simplificado: lee odds directamente de fixtures (sin llamada API separada)
+  - `Merge & Format Data` actualizado para manejar nuevo formato de datos de tenis
+  - Conexiones: Webhook Trigger → Get WTA Live → Extract Tennis Events
+
+- **Límite de fútbol reducido**: De 25 a 15 eventos para reducir carga de API y evitar timeouts/socket hang up
+
+- **Pipeline automático con Schedule Triggers**: Los workflows `data_collection_db`, `prediction_pipeline_db` y `validation_db` tienen Schedule Triggers para ejecutarse automáticamente:
+  - `data_collection_db`: **Una vez al día a las 03:00 Bogotá** (fixtures+odds publicados la noche anterior; predicciones listas antes del primer saque en Europa)
+  - `prediction_pipeline_db`: **Una vez al día a las 03:45 Bogotá** (después de collect)
+  - `validation_db`: Cada hora (para validar partidos en vivo)
+  - `update_scores`: Cada 12 horas (ya existía)
+  - Nota: n8n corre con `GENERIC_TIMEZONE=America/Bogota`, así que los Schedule Triggers disparan en hora Bogotá. Formato diario: `{"field": "days", "daysInterval": 1, "triggerAtHour": H, "triggerAtMinute": M}`.
+
+- **Fix backend logging**: Agregado `import logging` faltante en `internal.py`
+
+**Recent updates (2026-07-06):**
+- **Análisis experto con OpenAI**: El `Prediction Engine` (`predict.py`) ahora enriquece cada batch de predicciones con un análisis de experto en apuestas generado por GPT-4o-mini. El prompt incluye coeficientes Elo, Poisson, XGBoost, ML y odds para cada partido; la respuesta se guarda en `predictions.natural_language_reasoning` y se muestra en el frontend (`PredictionDetail`). El procesamiento se hace en chunks de 12 partidos para respetar límites de tokens. Si OpenAI falla, se conserva el reasoning local como fallback.
+
+**Recent updates (2026-07-01):**
+- **Optimizaciones de pipeline de tenis**:
+  - El workflow `data_collection_db` ahora extrae hasta 50 eventos de tenis en lugar de 5 (`Extract Tennis Events`), aumentando el volumen de partidos disponibles para predicción.
+  - Se corrigió el workflow `update_scores_tennis` para cruzar correctamente los items originales con las respuestas de detalle de evento (`event = p.event || p`), evitando snapshots vacíos cuando el proxy devuelve el body desenvuelto.
+  - Se agregó inferencia batch para el modelo ML de tenis: nuevo endpoint `POST /api/v1/internal/predict/tennis-ml/batch` y función `predict_tennis_ml_batch`. El `Prediction Engine` (`predict.py`) precalcula las probabilidades ML para todos los partidos de tenis del batch en una sola llamada, reduciendo latencia.
+  - El `Prediction Engine` de tenis (`tennis.py`) ahora consume el bloque `features` generado por `FeatureService`, usando win rates reales de últimos 20 partidos, win rates por superficie y H2H histórico para ajustar forma y H2H. Los valores se exponen en `reasoningData.featureService` para el frontend.
+  - Se normalizan nombres de jugadores en `tennis_stats_service.compute_tennis_h2h` para matchear variantes como "C. Alcaraz" contra "Carlos Alcaraz".
+  - El endpoint `POST /api/v1/internal/matches/tennis/enrich` ahora devuelve H2H más el bloque completo de `FeatureService` (forma, forma por superficie, descanso, partidos recientes). El workflow `data_collection_db` fue actualizado para leer `stats` en lugar de `h2h`.
+  - Se mejoró el parser de odds de tenis (`Merge Tennis Odds`): soporta cuotas decimales, fraccionales y americanas; busca mercados por regex (`Full time`, `Match Winner`, etc.); y empareja respuestas con eventos por índice.
+  - El cache de detalle de eventos de tenis (`update_scores_tennis` y `update_tennis_scores`) subió de 60s a 300s para reducir llamadas a RapidAPI.
+  - El modelo ML de tenis (Feature Store v2) incorpora features de fatiga: `days_since_last_match` y `matches_last_30_days` para cada jugador. El servicio mantiene compatibilidad con modelos antiguos entrenados con 7 features.
+
+**Recent updates (2026-06-28):**
+- **Nuevos datos históricos 2025**: Se ingirió la temporada ATP 2025 desde tennis-data.co.uk (2,644 partidos) y La Liga 2024-25 desde openfootball/Wayback Machine (380 partidos). Los modelos Elo, Poisson y XGBoost de tenis se reentrenaron con esta data ampliada.
+- **H2H por evento para fútbol**: El workflow `data_collection_db` ahora consulta `football-get-head-to-head?eventid={id}` de RapidAPI para cada evento de fútbol y enriquece el partido con H2H real (últimos enfrentamientos, goles, resultados). Se emparejan respuestas con eventos por índice porque el nodo HTTP no preserva los campos del item de entrada. El backend aplica H2H solo a partidos **nuevos**; los partidos existentes conservan su valor actual para no gastar llamadas de API. El `Prediction Engine` (`n8n/prediction_engine/football.py`) usa el H2H API cuando está disponible, fallback al H2H de DB histórica.
+- **H2H para tenis desde histórico DB**: Se agregó `backend/src/application/tennis_stats_service.py` que calcula el head-to-head entre jugadores a partir de partidos terminados en PostgreSQL. El endpoint `POST /api/v1/internal/matches/tennis/enrich` expone los registros H2H como cadena "wins-losses". El workflow `data_collection_db` ahora agrupa eventos de tenis, consulta el endpoint y mergea `h2h` en cada partido antes de guardarlo. El `Prediction Engine` (`n8n/prediction_engine/tennis.py`) ya utilizaba H2H como feature en el modelo XGBoost-like; ahora recibe datos reales en lugar del placeholder "N/A".
+- **Opción C - Stats reales para fútbol**: Se agregó `backend/src/application/football_stats_service.py` que calcula forma (últimos 5 partidos), posición en tabla, head-to-head y xG proxy a partir de los partidos históricos en PostgreSQL. El endpoint `POST /api/v1/internal/matches/football/enrich` expone estos datos. El workflow `data_collection_db` ahora enriquece cada partido de fútbol con estos stats reales antes de guardarlo. El `Prediction Engine` (`n8n/prediction_engine/football.py`) usa forma real, xG defensivo y H2H en el ensemble. Los schemas `FootballMatch`, `DataService._match_to_football_schema`, el endpoint `/matches/bulk` y la respuesta pública incluyen los nuevos campos (`homeXgAgainst`, `awayXgAgainst`, `headToHead`, `homeFormStats`, `awayFormStats`, `leagueStandings`, `statsDataQuality`).
+- **Modelo ML real para tenis (XGBoost)**: Se agregó `backend/src/application/tennis_ml_service.py` que entrena un clasificador XGBoost con features de Elo, Elo por superficie, ranking y forma sobre partidos históricos 2010-2024. El endpoint `POST /api/v1/internal/predict/tennis-ml` expone inferencia para el `Prediction Engine`. `tennis.py` ahora integra el modelo ML en el ensemble con peso dinámico. El entrenamiento se dispara desde `POST /api/v1/internal/train/models` con `run_tennis_ml: true`. Se corrigieron N+1 queries y la lectura de scores desde `match_scores` (no desde `match_competitors.score`), logrando entrenar ~15k filas en ~10s con 99.86% test accuracy.
+- **Fix en `tennis_ml_service.py`**: Se cargan datos de entrenamiento solo hasta la fecha máxima disponible en `competitor_elo_history`, evitando filas vacías cuando los partidos recientes (2026) aún no tienen Elo histórico. Se optimizó la carga de Elo y récents con índices en memoria.
+- **Fix montaje backend para modelos**: El volumen `./storage:/storage` del backend cambió de `:ro` a lectura/escritura para permitir la persistencia de modelos entrenados en `/storage/models`.
+- **Fix parser de odds de fútbol**: El nodo `Merge Football Odds` ahora maneja correctamente la forma real de respuesta de RapidAPI (`response.odds.odds.matchfactMarkets` y `oddsTabMarkets`) con selecciones `1`/`x`/`2` y `oddsDecimal`. También empareja eventos de entrada con respuestas de odds por índice, ya que el nodo HTTP no preserva los campos del item de entrada.
+- **Verificación odds fútbol con suscripción renovada**: Se confirmó que el endpoint `/football-event-odds` responde 200 y el parser extrae cuotas correctamente para eventos que las exponen. Los eventos sin cuotas se almacenan sin odds de forma graceful.
+- **Odds para fútbol integradas**: El workflow `data_collection_db` consulta el endpoint `/football-event-odds?eventid={id}&countrycode=BR` de RapidAPI y almacena las cuotas 1X2 (`homeOdds`/`drawOdds`/`awayOdds`). Los schemas `FootballMatch`, `DataService._match_to_football_schema`, el endpoint `/matches/bulk` y el `Prediction Engine` (`n8n/prediction_engine/football.py`) fueron actualizados. Se agregó un modelo de cuotas con normalización de margen al ensemble y se rebalancearon dinámicamente los pesos según disponibilidad de datos reales.
+- **Odds para tenis integradas**: El workflow `data_collection_db` consulta el endpoint `/api/tennis/event/{id}/odds` de RapidAPI y almacena las cuotas en `match_competitors.pre_match_odds`. Los schemas `TennisMatch`, `DataService._match_to_tennis_schema` y el `Prediction Engine` (`n8n/prediction_engine/tennis.py`) fueron actualizados para consumir `oddsPlayer1`/`oddsPlayer2`. Se agregó un modelo de cuotas con normalización de margen al ensemble, se mejoró el fallback de Elo con escala logarítmica y se rebalancearon dinámicamente los pesos según disponibilidad de Elo real/superficie y odds.
+- **Filtrado de predicciones PENDING obsoletas**: El endpoint público `/api/v1/predictions/history` (`DataService.get_predictions_history`) ahora oculta predicciones en estado `PENDING` cuyo partido es anterior al día de ayer. Esto evita que predicciones abandonadas de semanas/meses atrás sigan apareciendo en el frontend, alineándose con la ventana de validación (hoy + ayer).
+- **Fix en `FeatureService.build_features_for_matches`**: Se corrigió un bug de indentación que hacía que los filtros de `sport`/`from_date`/`to_date` se aplicasen solo cuando se enviaban `match_ids`. Cuando el workflow de predicciones llamaba al endpoint solo con rango de fechas, se cargaban todos los partidos de la base de datos y el pipeline se colgaba.
+- **Fix de flujos n8n (prediction, update_scores, by-date)**: Se reactivaron todos los workflows tras la importación. Se arregló el endpoint `/matches/by-date` para aceptar parámetros `from`/`to` vacíos. Se corrigió el workflow `update_scores` para encadenar `Update Football → Update Tennis → Prepare Response` (antes `Update Tennis` nunca se ejecutaba). Se cambió el paso de JSON al `Prediction Engine` en los workflows `prediction_pipeline_db` y `prediction_pipeline_db_all`: ahora se codifica en base64 (`$json.toJsonString().base64Encode()`), se decodifica a `/tmp/predict_input.json` y `predict.py` lee desde archivo, evitando errores por comillas simples en nombres de torneos/jugadores.
+
+**Próximos pasos en curso / planificados:**
+- **Opción A (completada)**: Agregar odds al fútbol (paralelo al trabajo de tenis) para mejorar el ensemble de fútbol.
+- **Opción B (completada)**: Entrenar modelo XGBoost real para tenis usando datos históricos 2010+; integrado en el ensemble.
+- **Opción C (completada)**: Mejorar la recolección de datos de fútbol con estadísticas reales (xG, forma, posición, partidos programados) en lugar de placeholders. Para equipos y ligas no cubiertas por el histórico cargado, el sistema sigue usando placeholders con data quality `fallback`.
+
+**Recent updates (2026-06-23):**
+- **Validación por ventana de fecha**: `validate_pending_predictions` ahora solo valida predicciones PENDING cuyo partido es del día actual; además incluye partidos del día anterior si y solo si aún están PENDING. Las predicciones más antiguas se saltan y se reportan en `summary.skipped`. Esto evita que `/validate` intente validar partidos futuros o colgados de días anteriores.
+- **Cache de APIs externas para tenis**: Los workflows `update_scores_tennis` y `update_tennis_scores` ahora llaman a `POST /api/v1/internal/proxy` en lugar de RapidAPI directamente, aprovechando el cache PostgreSQL y el backoff ante `429`. El fútbol ya usaba el proxy; ahora todo el tráfico de scores en vivo pasa por el cache. Además se corrigió el proxy para que, con `unwrap: true`, los cache hits devuelvan el body original desenvuelto (no el wrapper `{cached, data}`).
+- **Match schemas con eventId y status**: `TennisMatch` y `FootballMatch` ahora incluyen `eventId` y `status`, extraídos desde `match.external_id` y `match.status`. Esto permite que los workflows de live scores identifiquen y filtren partidos correctamente.
+- **Frontend responsive**: Menú hamburguesa en la navbar para móvil, `MatchCard` y `PredictionTable` adaptados a pantallas pequeñas (tabla con scroll horizontal, columnas ocultas progresivamente, padding reducido) y ajustes de espaciado en `PredictionDetail`.
+
+**Recent updates (2026-06-21):**
+- **External API proxy/cache + 429 backoff**: Nuevo modelo `ExternalApiCache`, tabla y endpoints `GET/POST /api/v1/internal/cache` y `POST /api/v1/internal/proxy`. El proxy cachea respuestas 2xx en PostgreSQL y reintenta con backoff exponencial ante `429`. Cuando `unwrap: true` y la API upstream responde con error, el proxy devuelve HTTP 200 con el body original para que los workflows de n8n no se detengan por rate-limit. Los workflows de fútbol ahora llaman al proxy en vez de RapidAPI directamente, reduciendo rate-limit hits.
+- **Live prediction progress tracking**: Nuevo modelo `PredictionProgress` y columna `predictions.live_fulfillment_percent`. Servicio `progress_service` calcula fulfillment % por deporte/mercado (Poisson para fútbol, heurística set/game/punto para tenis). Endpoint `POST /api/v1/internal/predictions/progress` recibe snapshots y `GET /api/v1/predictions/{id}/progress` devuelve la timeline. El frontend `PredictionDetail` muestra la tabla de progreso en vivo.
+- **Update live scores por deporte**: Workflows `update_scores` (orquestador), `update_scores_football` y `update_scores_tennis` operativos con `Webhook Trigger` y `responseMode: lastNode`. El orquestador `update_scores` se ejecuta cada 12 horas y también vía endpoints `/execute/update_scores`, `/execute/update_scores/<sport>` y comandos Telegram `/update_scores`, `/update_scores_football`, `/update_scores_tennis`.
+- **Integración validación → live scores**: `validation_db` ahora llama a `update-scores-football` y `update-scores-tennis` antes de `POST /api/v1/internal/validate/predictions`, asegurando que las validaciones usen el estado más reciente.
+- **Batch prediction estable**: `n8n/prediction_engine/predict.py` acepta batches; el workflow genera IDs estables por `matchId|market` y el endpoint bulk actualiza `match_id` para evitar colisiones entre deportes.
+- **Update de scores de tenis operativo**: Workflow `update_tennis_scores` activo con Schedule Trigger cada 12 horas; endpoint `/execute/update_tennis_scores` y comando `/update_tennis_scores` en Telegram. Actualiza scores finales vía `POST /api/v1/internal/matches/scores/bulk`.
+- **Validación de tenis mejorada**: Valida `Match Winner` y `Total Sets` (over/under 2.5); `Total Aces` se marca como fallido por ausencia de datos de la API.
+- **Pipeline por deporte verificado**: `/execute/pipeline/football` y `/execute/pipeline/tennis` funcionan end-to-end. Football alcanzó 66.67% accuracy con 0 predicciones pendientes; tennis 11.11% por falta de datos Elo/ranking para los jugadores actuales.
+- **Comandos /update_scores***: Agregados al bot de Telegram y documentados en `/help`.
+- **UI improvements**: Dashboard paginado por deporte con selector de partidos por página. Predicciones con filtro por deporte (todos/fútbol/tenis), paginación y contador de resultados. `MatchCard` y `PredictionTable` ahora muestran fecha + hora del partido cuando `eventTime` está disponible; si la hora es un placeholder (`00:00`) se muestra "Hora por confirmar". `PredictionDetail` muestra una sección "¿Por qué esta confianza?" con justificación, peso de modelos y probabilidades; los "Datos utilizados" se renderizan como tarjetas y barras en lugar de JSON crudo. `PredictionDetail` también muestra la hora real de cada snapshot de progreso en vivo.
+
+**Recent updates (2026-06-20):**
+- **Migración a PostgreSQL**: Toda la data persiste en PostgreSQL con SQLAlchemy 2.0 y Alembic.
+- **DB-first workflows**: n8n ahora lee/escribe directamente desde/hacia PostgreSQL a través de los endpoints internos de FastAPI. Los workflows legacy basados en archivos fueron eliminados.
+- **CDC worker**: `migration_worker` detecta archivos JSON en `storage/`, los migra a PostgreSQL y los borra después de `WORKER_MIN_FILE_AGE_SECONDS`.
+- **Endpoints internos**: FastAPI expone `/api/v1/internal/*` protegidos con `INTERNAL_API_KEY` para escritura desde n8n/migration_worker.
+- **Refactor DataService**: Ahora lee desde PostgreSQL en vez de archivos JSON.
+- **UUIDs internos**: Todos los IDs de DB son UUID excepto `predictions.id` que usa el `predictionId` legado (PRED001, etc.).
+- **Esquema listo para histórico**: Tablas `competitor_stats`, `competitor_elo_history`, `feature_store`, `model_training_runs` preparadas para entrenar con datos históricos 2010+.
+- **Ingesta histórica implementada**: Nuevo servicio `backend/src/application/historical_ingestion.py`, endpoint `/api/v1/internal/ingest/historical` y workflow n8n `historical_ingestion`. Carga datos 2010+ desde tennis-data.co.uk (ATP) y football-data.co.uk (Premier League) directamente a PostgreSQL.
+- **Modelos Elo y Poisson entrenados**: Nuevos servicios `backend/src/application/elo_service.py` y `poisson_service.py`. Entrenan ratings Elo (overall + superficie para tenis) y parámetros Poisson de ataque/defensa para fútbol desde los datos históricos. Endpoint `/api/v1/internal/train/models` y workflow n8n `train_models`.
+- **Enriquecimiento de partidos**: `/api/v1/matches/latest` ahora expone `homeElo`, `awayElo`, `homeAttack`, `homeDefense`, `awayAttack`, `awayDefense`, `expectedHomeGoals`, `expectedAwayGoals` para fútbol y `eloPlayer1/2`, `eloSurfacePlayer1/2` para tenis.
+- **Prediction Engine con datos reales**: Scripts `n8n/prediction_engine/football.py` y `tennis.py` usan Elo/Poisson reales cuando están disponibles, con fallback a proxies basados en ranking/forma.
+- **Prediction Engine batch**: `n8n/prediction_engine/predict.py` ahora acepta un array de partidos (`{"matches": [...]}`) y devuelve predicciones para todos en una sola invocación. El workflow DB-first ya no usa `Split in Batches`/`Item Lists`; ejecuta el motor una vez.
+- **Razonamiento local + enriquecimiento OpenAI**: El pipeline genera reasoning estadístico en español dentro de `football.py`/`tennis.py` y luego enriquece todo el batch con un análisis de experto vía GPT-4o-mini en `predict.py`. Si OpenAI no está disponible, se conserva el reasoning local como fallback.
+- **Validación por backend**: El workflow `validation_db` delega la validación al endpoint `POST /api/v1/internal/validate/predictions`, que compara predicciones pendientes contra `match_scores` en PostgreSQL.
+- **Mejora de accuracy**: El motor de fútbol detecta cuando no hay datos reales (Elo/Poisson/ranking) y usa parámetros conservadores por defecto, con umbrales más exigentes para Over/BTTS Yes. Esto elevó el accuracy de ~24% a ~74% en el lote de prueba.
+- **Fix n8n user/permissions**: El contenedor n8n ahora corre como usuario `node` para que la base de datos SQLite y el registro de webhooks persistan correctamente en el volumen `n8n_data`.
+- Project structure: services moved to `services/` directory.
+- Removed unused Python scripts (workflow generators, old bot versions, debug utilities, standalone tests).
+- Cleaned up root directory: only `backend/`, `frontend/`, `services/`, `scripts/`, `n8n/`, `schemas/`, `storage/`, `docs/` remain.
+- Integrated real sports APIs (RapidAPI) for football and tennis live data.
+- Telegram bot uses `services/telegram_bot/bot.py`.
+- Workflow executor uses `services/workflow_executor/main.py` and only triggers n8n webhooks.
+- File writer uses `services/file_writer/main.py` (deprecated).
+- Implemented real validation pipeline that compares predictions against live match results.
+- Added Prediction Engine inside n8n (`n8n/prediction_engine/`) with Elo, Poisson, XGBoost-like and CatBoost-like models.
+- OpenAI (GPT-4o-mini) enriches prediction reasoning instead of generating raw predictions.
+- Converted main n8n workflows to use `Webhook Trigger` so they can be triggered by the workflow executor.
+- All files use same timestamp for easy matching (matches, predictions, results).
+
+**README.md** has the full setup instructions. This file contains the hard-earned context for future agents.
+
+## Quick Commands
+
+```bash
+# Start everything
+docker-compose up -d --build
+
+# Stop everything
+docker-compose down
+
+# Activate n8n DB-first workflows after restart (legacy file-based workflows stay inactive)
+docker exec brainbets-n8n n8n update:workflow --id=data_collection_db --active=true
+docker exec brainbets-n8n n8n update:workflow --id=prediction_pipeline_db --active=true
+docker exec brainbets-n8n n8n update:workflow --id=prediction_pipeline_db_all --active=true
+docker exec brainbets-n8n n8n update:workflow --id=validation_db --active=true
+docker exec brainbets-n8n n8n update:workflow --id=update_scores --active=true
+docker exec brainbets-n8n n8n update:workflow --id=update_scores_football --active=true
+docker exec brainbets-n8n n8n update:workflow --id=update_scores_tennis --active=true
+docker exec brainbets-n8n n8n update:workflow --id=telegram_bot --active=true
+docker exec brainbets-n8n n8n update:workflow --id=historical_ingestion --active=true
+docker exec brainbets-n8n n8n update:workflow --id=train_models --active=true
+# NOTA: error_notifier NO se activa (queda inactivo a propósito, ver gotcha #39)
+docker restart brainbets-n8n
+
+# Run database migrations manually
+docker exec brainbets-backend alembic upgrade head
+
+# Dev backend (no Docker)
+cd backend && DATABASE_URL=postgresql://brainbets:brainbets123@localhost:5432/brainbets STORAGE_PATH=../storage PYTHONPATH=. uvicorn main:app --reload
+
+# Dev frontend (no Docker)
+cd frontend && npm run dev
+```
+
+## Telegram Bot Commands
+
+The Telegram bot (@coriousreybey_bot) accepts these commands:
+
+**General (all sports):**
+- `/collect` - Collect live matches from sports APIs
+- `/predict` - Generate predictions for today's matches
+- `/predict_all` - Generate predictions for all available matches (legacy `/matches/latest` behavior)
+- `/validate` - Validate predictions against live results
+- `/pipeline` - Execute complete pipeline for today's matches (collect → predict → validate)
+
+**Football-only:**
+- `/collect_football` - Collect live football matches
+- `/predict_football` - Generate football predictions for today's matches
+- `/predict_all_football` - Generate predictions for all available football matches
+- `/validate_football` - Validate football predictions
+- `/pipeline_football` - Execute football pipeline for today's matches
+
+**Tennis-only:**
+- `/collect_tennis` - Collect live tennis matches
+- `/predict_tennis` - Generate tennis predictions for today's matches
+- `/predict_all_tennis` - Generate predictions for all available tennis matches
+- `/validate_tennis` - Validate tennis predictions
+- `/pipeline_tennis` - Execute tennis pipeline for today's matches
+- `/update_tennis_scores` - Update finished tennis match scores from the API
+
+**Live scores / progress:**
+- `/update_scores` - Update live scores for all sports and compute prediction progress
+- `/update_scores_football` - Update live football scores and progress
+- `/update_scores_tennis` - Update live tennis scores and progress
+
+**Other:**
+- `/train` - Train Elo and Poisson models from historical data
+- `/update_tennis_scores` - Update finished tennis match scores from the API
+- `/help` - Show available commands
+
+The bot responds immediately with status updates and sends notifications when each step completes.
+
+## Architecture Boundaries (Critical)
+
+| Layer | Responsibility | Must NOT Do |
+|-------|---------------|-------------|
+| **n8n flows** | Web scraping, data normalization, JSON generation, workflow orchestration | Run Python backend logic or invoke OpenCode Go directly from custom Python code |
+| **OpenCode Go** | AI-powered prediction generation based on structured JSON input | Consume raw HTML or unprocessed web data. It only receives validated, normalized JSON prompts |
+| **Python FastAPI** | Read from PostgreSQL, expose REST API, serve Vue.js frontend. Internal endpoints write to PostgreSQL. | Run scraping, generate predictions, or expose internal endpoints publicly |
+| **Vue.js** | Dashboard UI, consume FastAPI endpoints | Direct scraping or prediction logic |
+| **Telegram Bot** | Interactive commands for executing pipelines, status updates | Direct API calls or file operations |
+| **Workflow Executor** | HTTP service that triggers n8n webhooks (collect, predict, validate) | Direct file operations or business logic |
+| **File Writer** | HTTP service for writing files from n8n workflows (deprecated) | Read operations or business logic |
+| **migration_worker** | CDC: detect JSON files, migrate to PostgreSQL, delete old files | Run scraping, generate predictions, or expose HTTP endpoints |
+
+## Key Design Decisions
+
+- **PostgreSQL as source of truth (v2)**: Toda la data persiste en PostgreSQL. Los archivos JSON en `storage/` son solo un puente temporal durante la transición.
+- **File-based storage (v1 legacy)**: JSON files in `storage/` subdirectories (`matches/`, `predictions/`, `results/`, `audit/`). Timestamped filenames: `matches_20260609_060000.json`. El `migration_worker` migra estos archivos a PostgreSQL.
+- **Backend is read-only**: FastAPI solo exp endpoints públicos de lectura. La escritura ocurre a través de `/api/v1/internal/*` protegidos con `INTERNAL_API_KEY`.
+- **CDC con migration_worker**: Detecta archivos JSON, los migra a PostgreSQL y los borra después de `WORKER_MIN_FILE_AGE_SECONDS` (default 300s) para no llenar el disco.
+- **Cache strategy**: FastAPI carga desde PostgreSQL. En esta versión no hay cache en memoria; se puede agregar Redis más adelante.
+- **Prediction Engine input contract**: n8n must normalize all scraped data into structured JSON before sending it to the prediction engine scripts. Never send raw HTML or unstructured text.
+- **Backend imports**: Use `from src.infrastructure...` and `from src.application...` (absolute imports with `src` package). `PYTHONPATH` must include `backend/` for these to resolve.
+- **Real sports APIs**: Football ahora usa football-data.org como proveedor primario (a través del endpoint interno `/api/v1/internal/proxy/football/fixtures`) con RapidAPI `free-api-live-football-data` como circuit-breaker fallback. Tennis usa `api.api-tennis.com/tennis/` (single source para fixtures, odds, resultados, standings y livescore; ATP singles main draw solo vía `event_type_key=265`).
+- **Tennis API format**: api-tennis returns `{success, result: [...]}` with `event_key`, `event_first_player`/`event_second_player` (abbreviated names like "D. Altmaier"), `event_date`/`event_time` (in the requested timezone), `event_status` ('', 'Set 1'..., 'Finished', 'Retired', 'Cancelled'), `event_final_result` ('2 - 0' sets), `scores` (per-set array), `tournament_name`, `tournament_round`, `event_qualification`. Also `statistics` (per player_key, `stat_period` match/set1/set2...: Total Points Won con `stat_won`/`stat_total`, Aces, Winners, serve/return points) y `pointbypoint` (punto a punto por game). Odds via `get_odds` keyed by `match_key` → markets (`Home/Away` → per-bookmaker decimals). No surface field (heuristic by tournament name).
+- **OpenAI integration**: Uses GPT-4o-mini to enrich prediction reasoning. Raw probabilities come from the Prediction Engine inside n8n.
+- **Real validation**: Validation pipeline compares predictions against live match results from APIs. Pending predictions have `success: null` (not false).
+- **Same timestamp**: All pipeline files (matches, predictions, results) use the same timestamp for easy matching.
+
+## Project Structure (Agent-Relevant)
+
+```
+backend/main.py              # FastAPI entry point (NOT in src/)
+backend/alembic/             # Database migrations
+  versions/001_initial_schema.py
+  init.sql                   # PostgreSQL extensions
+backend/alembic.ini          # Alembic configuration
+backend/src/                 # All source code
+  timezone.py               # Timezone helpers (America/Bogota UTC-5)
+  domain/
+    models.py                # SQLAlchemy ORM models
+  infrastructure/
+    database.py              # Engine + SessionLocal
+    repositories/            # SQLAlchemy repositories
+      match_repo.py
+      prediction_repo.py
+      competitor_repo.py
+    migration_worker.py      # CDC filesystem → PostgreSQL
+    file_store.py            # REMOVED: legacy JSON file reader
+    cache.py                 # REMOVED: legacy in-memory cache
+  application/
+    services.py              # DataService (orchestrates reads)
+    historical_ingestion.py  # Download/parse historical match data
+    elo_service.py           # Compute Elo ratings from finished matches
+    poisson_service.py       # Compute Poisson attack/defense parameters
+    progress_service.py      # Live prediction fulfillment calculation
+  presentation/
+    schemas.py               # Pydantic models
+    routers/                 # FastAPI routers
+      internal.py            # Protected write endpoints for n8n
+      predictions.py         # Public prediction endpoints (incl. /{id}/progress)
+  frontend/
+  src/stores/api.js          # Axios instance (baseURL: /api/v1)
+  src/stores/                # Pinia stores (matches, predictions, analytics)
+  src/views/                 # Dashboard, Predictions, History, Analytics
+  src/components/            # MatchCard, PredictionTable, KpiCard, Pagination
+  src/utils/format.js        # Date/time formatting helpers
+  vite.config.js             # Proxy: /api → http://localhost:8000
+  nginx.conf                 # Proxy: /api → http://backend:8000
+services/
+  file_writer/
+    main.py                  # HTTP service for writing files from n8n
+    Dockerfile
+  workflow_executor/
+    main.py                  # HTTP service for executing pipeline logic
+    Dockerfile
+  telegram_bot/
+    bot.py                   # Interactive Telegram bot
+    Dockerfile
+n8n/
+  Dockerfile                 # Custom n8n image with Python installed
+  prediction_engine/         # Python scripts executed by n8n workflows
+    common.py
+    football.py
+    tennis.py
+    predict.py
+  workflows/                 # JSON exports for n8n import
+    data_collection_db.json
+    prediction_pipeline_db.json
+    error_notifier.json      # Error Trigger → Telegram; referenciado vía settings.errorWorkflow, mantener INACTIVO (gotcha #39)
+    validation_db.json
+    update_scores.json
+    update_scores_football.json
+    update_scores_tennis.json
+    historical_ingestion.json
+    train_models.json
+    telegram_bot.json
+schemas/                     # JSON schemas (matches, predictions, results)
+storage/                     # File-based data (shared Docker volume)
+docker-compose.yml           # Orchestrates all services
+```
+
+## Developer Gotchas
+
+1. **Backend imports**: All internal imports use `from src.xxx...` prefix. `main.py` is in `backend/` (not `src/`) and sets up the app. When running locally, `PYTHONPATH` must include `backend/`.
+2. **Docker backend**: The Dockerfile copies `src/` and `main.py` to `/app/`. `PYTHONPATH=/app` is set. The command is `uvicorn main:app` (not `src.main:app`). The container now runs `alembic upgrade head && uvicorn main:app` on startup.
+3. **Frontend proxy**: In dev (`vite.config.js`), `/api` proxies to `http://localhost:8000`. In production (`nginx.conf`), `/api` proxies to `http://backend:8000` (Docker service name). `nginx.conf` uses Docker's embedded DNS resolver (`127.0.0.11`) with a variable-based `proxy_pass` so nginx re-resolves `backend` if the backend container gets a new IP after restart/rebuild.
+4. **Storage path**: In Docker, `storage/` is mounted at `/storage` for both n8n and backend. Locally, set `STORAGE_PATH=../storage` when running backend.
+5. **n8n workflows**: The workflows in `n8n/workflows/` are JSON exports. They can be imported via CLI: `n8n import:workflow --separate --input=/workflows` or via UI (Settings → Workflows → Import). The default credentials are `admin` / `brainbets123`.
+6. **n8n activation**: After importing or after restarting n8n, activate DB-first workflows via CLI: `n8n update:workflow --id=data_collection_db --active=true` (and similarly for `prediction_pipeline_db`, `validation_db`, `telegram_bot`) and then `docker restart brainbets-n8n`. Webhooks only register after activation + restart.
+7. **Prediction Engine integration**: The Prediction Pipeline uses an `Execute Command` node to run `python3 /prediction-engine/predict.py -` once with a batch payload (`{"matches": [...]}`). The script returns probabilities, ensemble data and local Spanish reasoning for all matches in one shot.
+8. **n8n file writing**: `WriteBinaryFile` node fails with "The file is not writable" even with root permissions. Use `Execute Command` node with `echo` and output redirection instead. Example: `mkdir -p /storage/matches && echo '{{ $json.data }}' > '{{ $json.filepath }}'`.
+9. **n8n workflow execution**: To run workflows via CLI, use a temporary container **with the same image version as the Dockerfile** (`n8nio/n8n:1.44.0`): `docker run --rm -v brainbets_n8n_data:/home/node/.n8n n8nio/n8n:1.44.0 execute --id=<workflow_id>`. The workflow must contain an `Execute Workflow Trigger` node for CLI execution. Note: main workflows now use `Webhook Trigger` for execution from the workflow executor. **Do not use `n8nio/n8n:latest` for temporary operations** — it can apply newer migrations that break n8n 1.44.0 on the next startup.
+10. **n8n user management**: User management is disabled (`N8N_USER_MANAGEMENT_DISABLED=true`) so workflows can be imported and activated via CLI without manual UI setup. Activation is done with `n8n update:workflow --id=<id> --active=true` followed by `docker restart brainbets-n8n`; webhooks only register after restart.
+11. **n8n API authentication**: n8n API keys created via database don't work for API authentication. Use webhook triggers or the workflow executor service instead.
+12. **n8n webhook registration**: n8n doesn't register webhooks automatically when workflows are imported via CLI. Webhooks only get registered when workflows are activated through the UI (or via CLI activation + restart).
+13. **Telegram bot integration**: The Telegram bot uses the workflow executor service (http://workflow_executor:5001) to execute pipeline logic. The bot listens for commands and calls the executor service, which in turn triggers n8n webhooks.
+14. **Prediction Engine location**: The prediction engine lives under `n8n/prediction_engine/` and is mounted read-only at `/prediction-engine` inside the n8n container. It is invoked by the Prediction Pipeline workflow via `Execute Command` nodes.
+15. **Service locations after refactor**: Custom Python services live under `services/`. Each service has its own `Dockerfile` and is built directly from its directory in `docker-compose.yml`.
+16. **n8n 1.44 HTTP Request JSON body/headers**: Use `jsonBody` (not `body`) together with `specifyBody: "json"`, and `jsonHeaders` (not `headerParametersUi`) together with `specifyHeaders: "json"`. Expression values inside these objects must be prefixed with `={{ ... }}`.
+17. **Prediction pipeline batch parsing**: The engine returns a JSON array (one entry per match). The `Parse Engine Output` code node parses the array and fans it out so `Build Predictions Output` can flatten all predictions into the bulk write payload.
+18. **Validation pipeline backend-first**: The workflow calls `POST /api/v1/internal/validate/predictions` to compare pending predictions against `match_scores` in PostgreSQL. Live APIs are a secondary source for matches not yet scored in the DB.
+19. **Pipeline endpoint**: `workflow_executor` exposes `/execute/pipeline` which runs collect → predict → validate. If collect fails it continues with existing data so predict/validate can still be tested.
+20. **Latest file selection**: `Read Matches File` and `Read Predictions File` return multiple files (wildcards). Code nodes `Validate Matches` and `Parse Predictions` sort by `generatedAt` and pick the latest so predictions and validation always use the most recent real data.
+21. **Validation live data**: Do **not** fetch live APIs inside a Code node — `require('https')` crashes n8n 1.44's vm2 sandbox. Use dedicated `HTTP Request` nodes if live fallback data is needed.
+22. **PostgreSQL migrations**: The backend container runs `alembic upgrade head` before starting uvicorn. If you change `src/domain/models.py`, create a new migration with `alembic revision --autogenerate -m "description"` and commit it.
+23. **Internal API key**: Endpoints under `/api/v1/internal/*` require header `X-Internal-Api-Key: <INTERNAL_API_KEY>` (set via env var `INTERNAL_API_KEY` in `.env`; no default in code).
+24. **migration_worker**: Polls `storage/` cada `WORKER_POLL_INTERVAL` segundos. Migra archivos a PostgreSQL y los borra solo si superan `WORKER_MIN_FILE_AGE_SECONDS` (default 300s). Esto da tiempo a n8n para leer los archivos durante la transición.
+25. **prediction IDs**: La tabla `predictions` usa `id VARCHAR(50)` para preservar los `predictionId` legados. El pipeline DB-first genera IDs con prefijo de fecha (`PRED-YYYYMMDD-001`) para evitar conflictos entre ejecuciones. Los workflows legacy usan `PRED001`, `PRED002`, etc.
+26. **n8n user/permissions**: El contenedor n8n debe correr como usuario `node` para que `/home/node/.n8n/database.sqlite` persista en el volumen `n8n_data`. No usar `user: root` en `docker-compose.yml`.
+27. **workflow executor webhooks**: El servicio apunta por defecto a los webhooks DB-first (`/webhook/data-collection-db`, `/webhook/predictions-db`, `/webhook/predictions-db-all`, `/webhook/validation-db`, `/webhook/historical-ingestion`, `/webhook/train-models`, `/webhook/update-tennis-scores`, `/webhook/update-scores`, `/webhook/update-scores-football`, `/webhook/update-scores-tennis`). Para usar los workflows legacy basados en archivos, sobrescribir las variables de entorno `WEBHOOK_COLLECT`, `WEBHOOK_PREDICT`, `WEBHOOK_PREDICT_ALL`, `WEBHOOK_VALIDATE`, `WEBHOOK_HISTORICAL`, `WEBHOOK_TRAIN` y `WEBHOOK_UPDATE_SCORES`. Todos los endpoints `/execute/<workflow>` soportan una variante por deporte: `/execute/<workflow>/<sport>` donde `sport` es `football` o `tennis` (ej. `/execute/collect/tennis`). Además existe `/execute/predict_all` y `/execute/predict_all/<sport>` para predecir sobre todos los partidos disponibles usando `/matches/latest`.
+33. **Live scores / progress webhooks**: Los workflows `update_scores`, `update_scores_football` y `update_scores_tennis` usan `Webhook Trigger` con `responseMode: lastNode` (evita problemas con `Respond to Webhook` cuando hay nodos `Code` referenciando otros nodos). El workflow principal `update_scores` llama a los webhooks hijos vía `HTTP Request` y envía una notificación consolidada por Telegram.
+34. **n8n 1.44 If node syntax (CORREGIDO 2026-07-24)**: El nodo `If` v2 requiere `combinator: "and"|"or"` DENTRO del objeto `conditions`, NO `combineOperation` a nivel de `parameters` (ese formato viejo hace que el nodo SIEMPRE enrute por la rama true — bug latente que existió en todos los workflows). Formato correcto: `"conditions": {"options": {...}, "conditions": [{...}], "combinator": "and"}`. Además, con `typeValidation: "strict"` el `leftValue` debe coincidir con el tipo del operador: para operadores `string`, envolver expresiones para que devuelvan string (ej. `={{ $json.noLive ? 'nolive' : '' }}` en vez de `={{ $json.noLive }}` cuando el valor puede ser número), si no el nodo lanza "Wrong type: '1' is a number but was expecting a string".
+35. **Live prediction progress endpoint**: `POST /api/v1/internal/predictions/progress` recibe `{snapshots: [...]}` con campos `matchId`, `minute`, `periodLabel`, `homeScore`, `awayScore`, `notes` y `extraData` opcional. El backend calcula `live_fulfillment_percent` para cada predicción y guarda un snapshot en `prediction_progress`.
+36. **Live progress by sport**: Fútbol usa modelo Poisson con minuto + marcador actual; tenis usa heurística set/game/punto porque la API no expone probabilidades punto-a-punto.
+37. **External API proxy/cache**: `POST /api/v1/internal/proxy` es un proxy interno con cache en PostgreSQL (`external_api_cache`) y backoff exponencial ante `429`. n8n debe llamar al proxy para RapidAPI football en lugar de la URL directa. Cuando `unwrap: true` y la API upstream responde con error, el proxy devuelve HTTP 200 con el body original para que los workflows continúen; de lo contrario devuelve el body original con el status code real. Cuando `unwrap: false` devuelve un wrapper `{cached, statusCode, data, attempts}`.
+38. **n8n user management**: `docker-compose.yml` deshabilita user management de n8n (`N8N_USER_MANAGEMENT_DISABLED=true`) para permitir importación y activación de workflows sin intervención manual. Si necesitas features de user management, quítala y configura el owner vía UI.
+28. **Historical ingestion sources**: Tennis usa tennis-data.co.uk (2010-2020 en ZIP con .xls, 2021+ en .xlsx directo). Football usa football-data.co.uk cuando está disponible; si el ISP bloquea el sitio, usar `scripts/download_openfootball_laliga.py` para descargar desde el Wayback Machine / openfootball y guardar los CSVs en `storage/historical_raw/`; el backend los lee del volumen montado `/tmp/historical_raw`.
+29. **Ingesta histórica**: El endpoint `/api/v1/internal/ingest/historical` acepta `tennis_years` (lista de enteros) y `football_seasons` (lista de `[season, league_code]`). La ingesta completa 2010-2023 toma ~5-7 minutos.
+30. **Entrenamiento de modelos**: El endpoint `/api/v1/internal/train/models` entrena Elo y Poisson desde los datos históricos. Tarda ~50s con 40k partidos. Requiere que los partidos históricos tengan `status='FINISHED'` y `match_scores` poblado. El entrenamiento es idempotente: borra el historial Elo anterior y recalcula ratings actuales.
+31. **Elo para tenis**: Se calcula un rating general y ratings por superficie (`hard`, `clay`, `grass`). Los nombres de superficie se normalizan a minúsculas desde `matches.extra_data['surface']`.
+32. **Poisson para fútbol**: Se calculan fuerzas de ataque/defensa por equipo, temporada y liga. Requiere que `matches.season` y `matches.league_id` estén poblados. Si un partido vivo no tiene parámetros históricos, `expected_goals_for_fixture` devuelve valores por defecto (1.5/1.1).
+33. **La Liga historical ingestion**: `scripts/download_openfootball_laliga.py` descarga temporadas 2010-11 a 2023-24 de La Liga. Prefiere Wayback Machine de football-data.co.uk; si no hay snapshot completo (ej. 2019-20), usa openfootball/football.json. Normaliza nombres de equipos al formato football-data para mantener identidades consistentes en Elo/Poisson. Los CSVs se guardan en `storage/historical_raw/` como `football_<season>_SP1.csv`.
+34. **Timezone handling**: All user-facing date operations use America/Bogota (UTC-5). The helper module `backend/src/timezone.py` provides `today_bogota()`, `today_start_bogota()`, and `yesterday_start_bogota()`. The frontend `Dashboard.vue` uses `toLocaleDateString('en-CA', {timeZone: 'America/Bogota'})`. The workflow executor `_today_str()` uses `datetime.now(bogota_tz)`. n8n workflows already used `timeZone: 'America/Bogota'` in `Build Football Date Params` and `Merge & Format Data`.
+35. **Tennis API (api-tennis.com)**: No special headers required; the API key goes in the `APIkey` query param. Endpoints used: `get_fixtures` (fixtures + final results with per-set scores, filter `event_type_key=265` for ATP singles main draw), `get_odds` (by date, keyed by `match_key`), `get_standings?event_type=ATP` (rankings, full names, some scrambled like "Martin Etcheverry Tomas"), `get_livescore`. Player names are abbreviated ("D. Altmaier") — the backend `resolve_competitor_fuzzy` links them to full-name historical competitors.
+36. **Tennis pipeline scope**: Only ATP singles main draw (no WTA, Challenger, ITF, doubles, or qualification rounds). Historical training data is ATP-only, so train/inference stay aligned. Surface is guessed from tournament name (api-tennis has no surface field); country is not collected.
+37. **Tennis score updates**: `update_scores_tennis` (hourly via validation_db) writes BOTH final `match_scores` (finished matches, by event_key) and live progress snapshots. `update_tennis_scores` (12h backfill) covers the last 3 days. Retired/walkover/cancelled matches are stored as status `CANCELLED` so predictions on them expire out of the validation window instead of being scored as lost.
+38. **options.continueOnFail IGNORADO en httpRequest v4.1 (n8n 1.44)**: poner `"options": {"continueOnFail": true}` dentro de `parameters` NO hace nada en nodos `n8n-nodes-base.httpRequest` v4.x — un error de red (socket hang up, timeout) mata la ejecución igual. El flag efectivo es a NIVEL DE NODO: `"onError": "continueRegularOutput"` (el item fallido sale como `{error: ...}` en su posición, preservando el pairing por índice de los merge downstream). Verificado en ejecución real: `Get Football Odds` con la opción legacy falló ante un socket hang up de RapidAPI; con `onError` el workflow completa y solo ese evento queda sin odds.
+39. **Error Trigger no se puede "activar" en n8n 1.44**: el nodo `n8n-nodes-base.errorTrigger` solo implementa `execute()` (no `trigger()`/`poll()`/`webhook()`), así que `checkIfWorkflowCanBeActivated` lo rechaza con "has no node to start the workflow" y entra en retry loop de activación. No importa: n8n ejecuta el error workflow igual cuando otro workflow falla y lo referencia en `settings.errorWorkflow` (`WorkflowExecutionService.executeErrorWorkflow` no chequea `active`). Mantener `error_notifier` INACTIVO para evitar el retry loop en logs. Para debuggear ejecuciones: la data está en `execution_data.data` con formato compacto (array plano + mapa de índices en posición 0, valores digit-string son referencias a índices); consultar vía `docker exec brainbets-n8n python3` con sqlite3 contra `/home/node/.n8n/database.sqlite`.
+40. **Workflows con doble trigger (Webhook + Schedule) deben guardar las referencias al Webhook Trigger con `isExecuted`**: cuando el Schedule Trigger dispara, cualquier expresión en parámetros de nodos que haga `$('Webhook Trigger').first()` lanza "Referenced node is unexecuted" y mata la ejecución (ocurrió en `prediction_pipeline_db` el 2026-07-31 en el run programado 03:45 Bogotá). Fix: `={{ $('Webhook Trigger').isExecuted ? (($('Webhook Trigger').first().json.query || {}).param || '') : '' }}` — `isExecuted` (WorkflowDataProxy) nunca lanza, solo chequea `runData.hasOwnProperty(nodeName)`, y el ternario cortocircuita `.first()`. Sin params el backend defaultea a hoy Bogotá. `prediction_pipeline_db_all` no aplica (solo tiene Webhook Trigger). Ojo: importar un workflow individual con CLI requiere envolverlo en array (`[wf]`), si no falla con "workflows.map is not a function"; tras importar reactivar y reiniciar n8n.
+41. **Un nodo que retorna 0 items mata toda la cadena serial aguas abajo (silenciosamente)**: en n8n, si un nodo devuelve array vacío, los nodos conectados detrás NO se ejecutan y el workflow termina con status `success` — sin error, sin notificación, pareciendo que funcionó. Ocurrió en `data_collection_db` (2026-07-31): 0 fixtures de fútbol en `Extract Football Events` → la rama de tenis, el `Send Matches to DB` y el Telegram final nunca corrieron. Patrón de fix para nodos Code con fan-out por item: emitir un item sentinel cuando no hay datos (`if (items.length === 0) items.push({json: {eventId:'', matchId:'', noMatches:true}})`) y filtrarlo en los consumidores (`Merge Football Odds` ya salta `!eventId`; `Merge & Format Data` filtra con `.filter(ev => ev && ev.eventId)`). Los nodos HTTP con `onError: continueRegularOutput` siempre emiten 1 item por input (incluso con URLs basura tipo `eventid=`), así que el sentinel los atraviesa sin costo real. En jsCode, las referencias a nodos que quizá no se ejecutaron (ej. Webhook Trigger en runs programados) van en try/catch — `$('Nodo').first()` lanza un error JS capturable dentro del sandbox del Code node.
+42. **football-data.org `/v4/matches` exige `dateTo > dateFrom` (span mínimo 1 día)**: con `dateFrom == dateTo` devuelve HTTP 200 con `resultSet.count = 0` SIEMPRE — no es un error, simplemente no devuelve nada (verificado empíricamente 2026-07-31: `07-30→07-30` = 0, `07-30→07-31` = 3 partidos). El loop por fecha de `data_collection_db` (`Build Football Date Params` → `Get Football Live`) envía spans de 0 días, así que `/proxy/football/fixtures` extiende internamente `dateTo` +1 día antes de llamar al primario (bonus: captura partidos de noche Bogotá con utcDate al día siguiente UTC). El free tier (TIER_ONE) solo cubre ciertas competencias (Brasileirao BSA + top europeas en temporada); fuera de eso el proxy cae al fallback RapidAPI. Además: los `except: pass` en endpoints proxy ocultan fallos de proveedores (la suscripción RapidAPI estuvo muerta días sin que nadie lo notara) — loggear siempre status != 200 con `logging.warning`.
+
+## When Implementing
+
+- Check `README.md` for full functional requirements and setup instructions.
+- Check `CONFIGURACION.md` for credentials and setup details.
+- Respect the **separation of concerns** above all else.
+- The system is designed to allow swapping AI models and databases later without changing business logic.
+- Prefer **absolute imports** with `src.` prefix in the backend.
+- Any new JSON file must follow the schemas in `schemas/` and use timestamped filenames.
+- If you add new endpoints, update `frontend/src/stores/` and `vite.config.js` proxy if needed.
+- If you add a new Python service, create a folder under `services/` with its own `main.py` (or `bot.py`) and `Dockerfile`, and register it in `docker-compose.yml`.
+- If you modify the prediction engine scripts, remember they run inside the n8n container. Keep dependencies minimal (current scripts only use Python stdlib + math) and test the CLI entry point `python predict.py '{"sport":"football","match":{...}}'`.
+
+## Credentials
+
+Secrets live in `.env` (gitignored; see `.env.example` for the template). Never commit real values:
+- `TELEGRAM_TOKEN` / `TELEGRAM_CHAT_ID` - Telegram bot + notifications
+- `OPENAI_API_KEY` - GPT-4o-mini reasoning enrichment (prediction engine)
+- `RAPIDAPI_KEY` - football fixtures/odds fallback provider
+- `TENNIS_API_KEY` - api-tennis.com (query param `APIkey`)
+- `INTERNAL_API_KEY` - guards `/api/v1/internal/*`
+- `FOOTBALL_DATA_ORG_TOKEN` - football-data.org (primary football fixtures)
+
+**Workflow JSONs are sanitized**: `n8n/workflows/*.json` contain `__PLACEHOLDER__` tokens instead of real secrets. The ACTIVE workflows inside n8n keep real values, so the running system is unaffected. To re-import a workflow from the repo, first re-inject secrets from `.env`, e.g.:
+
+```bash
+# PowerShell / bash: replace placeholders in a workflow file before n8n import:workflow
+(Get-Content n8n/workflows/data_collection_db.json) -replace '__TELEGRAM_TOKEN__', $env:TELEGRAM_TOKEN -replace '__TELEGRAM_CHAT_ID__', $env:TELEGRAM_CHAT_ID -replace '__RAPIDAPI_KEY__', $env:RAPIDAPI_KEY -replace '__TENNIS_API_KEY__', $env:TENNIS_API_KEY -replace '__INTERNAL_API_KEY__', $env:INTERNAL_API_KEY | Set-Content /tmp/wf.json
+```
+
+## Planned Evolution
+
+- **Phase 2**: Multi-model support (OpenAI, Claude, Gemini) via Adapter pattern
+- **Phase 3**: Bankroll management, Kelly Criterion, Monte Carlo simulation
+- **Phase 4**: Flutter mobile app, Telegram bot, WhatsApp Business
