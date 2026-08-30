@@ -474,7 +474,7 @@
         "contentType": "json",
         "specifyBody": "json",
         "jsonBody": {
-          "url": "={{ 'https://api.api-tennis.com/tennis/?APIkey=__TENNIS_API_KEY__&method=get_odds&date_start=' + new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) + '&date_stop=' + new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) + '&event_type_key=265' }}",
+          "url": "={{ 'https://api.api-tennis.com/tennis/?APIkey=__TENNIS_API_KEY__&method=get_odds&date_start=' + new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) + '&date_stop=' + new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) }}",
           "method": "GET",
           "headers": {
             "Content-Type": "application/json"

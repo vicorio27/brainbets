@@ -4,6 +4,7 @@ Validates pending predictions against match results stored in the database.
 For finished matches with scores, it determines the actual outcome and
 whether each prediction was successful.
 """
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
@@ -104,28 +105,42 @@ def _validate_tennis(prediction: Prediction, match: Match, score: MatchScore) ->
     if "set 1 winner" in market:
         stats = (match.extra_data or {}).get("score_stats") or {}
         set_rows = stats.get("sets") or []
-        if not set_rows:
-            actual = "N/A"
-            success = False
-            notes = "Set-level score data not available for this match"
-        else:
-            first = set_rows[0]
+        competitors = {c.side: c for c in match.competitors}
+        mc1 = competitors.get("player1")
+        mc2 = competitors.get("player2")
+        first = set_rows[0] if set_rows else None
+        p1_games = p2_games = None
+        if first is not None:
             try:
-                p1_games = int(first.get("p1") or 0)
-                p2_games = int(first.get("p2") or 0)
+                p1_games = int(first.get("p1"))
+                p2_games = int(first.get("p2"))
             except (TypeError, ValueError):
-                p1_games = p2_games = 0
-            competitors = {c.side: c for c in match.competitors}
-            mc1 = competitors.get("player1")
-            mc2 = competitors.get("player2")
-            if p1_games == p2_games or not mc1 or not mc2:
-                actual = "N/A"
-                success = False
-                notes = f"Set 1 score unavailable or tied: {p1_games}-{p2_games}"
-            else:
-                actual = mc1.competitor.name if p1_games > p2_games else mc2.competitor.name
-                success = _normalize_team_name(actual) == _normalize_team_name(predicted or "")
-                notes = f"Set 1: {p1_games}-{p2_games} (games). Winner: {actual}. Prediction: {predicted}."
+                p1_games = p2_games = None
+
+        if p1_games is not None and p2_games is not None and p1_games != p2_games and mc1 and mc2:
+            # Per-set data available: use the actual first set.
+            actual = mc1.competitor.name if p1_games > p2_games else mc2.competitor.name
+            success = _normalize_team_name(actual) == _normalize_team_name(predicted or "")
+            notes = f"Set 1: {p1_games}-{p2_games} (games). Winner: {actual}. Prediction: {predicted}."
+        elif (
+            mc1 and mc2
+            and home_score is not None and away_score is not None
+            and min(home_score, away_score) == 0
+            and max(home_score, away_score) > 0
+        ):
+            # No per-set breakdown, but the match was a straight-sets sweep, so
+            # whoever won the match necessarily won the first set.
+            actual = mc1.competitor.name if home_score > away_score else mc2.competitor.name
+            success = _normalize_team_name(actual) == _normalize_team_name(predicted or "")
+            notes = (
+                f"Sin desglose por set; el partido fue barrida {home_score}-{away_score}, "
+                f"así que el Set 1 lo ganó {actual}. Prediction: {predicted}."
+            )
+        else:
+            # Genuinely unknown: leave pending rather than scoring it as a loss.
+            actual = "N/A"
+            success = None
+            notes = "Set-level score data not available; Set 1 Winner left pending."
     elif "winner" in market or "match winner" in market:
         actual = _tennis_winner(match, score)
         if actual and predicted:
@@ -150,12 +165,16 @@ def _validate_tennis(prediction: Prediction, match: Match, score: MatchScore) ->
             notes = f"Total aces: {total_aces} (home {home_aces}, away {away_aces}). Prediction: {predicted}."
     elif "total sets" in market:
         total_sets = home_score + away_score
+        # Line comes from the predicted outcome ("Over 2.5" for best-of-3,
+        # "Over 3.5" for Grand Slam best-of-5); default 2.5 for legacy rows.
+        line_match = re.search(r"(\d+(?:\.\d+)?)", predicted or "")
+        line = float(line_match.group(1)) if line_match else 2.5
         actual = f"{total_sets} sets"
         if "over" in predicted.lower():
-            success = total_sets > 2.5
+            success = total_sets > line
         elif "under" in predicted.lower():
-            success = total_sets <= 2.5
-        notes = f"Total sets played: {total_sets}. Prediction: {predicted}."
+            success = total_sets <= line
+        notes = f"Total sets played: {total_sets} (línea {line}). Prediction: {predicted}."
     elif "exact set score" in market:
         winner = _tennis_winner(match, score)
         if winner:

@@ -5,6 +5,7 @@ export const useMatchesStore = defineStore('matches', {
   state: () => ({
     latest: null,
     playerSetStats: null,
+    predictionReliability: null,
     loading: false,
     error: null
   }),
@@ -56,6 +57,14 @@ export const useMatchesStore = defineStore('matches', {
         this.playerSetStats = data
       } catch (err) {
         this.playerSetStats = null
+      }
+    },
+    async fetchPredictionReliability() {
+      try {
+        const { data } = await api.get('/matches/prediction-reliability')
+        this.predictionReliability = data
+      } catch (err) {
+        this.predictionReliability = null
       }
     }
   }

@@ -77,6 +77,14 @@ class DataService:
 
         return _compute(self.db, match_id)
 
+    def get_prediction_reliability(
+        self, player: Optional[str] = None, surface: Optional[str] = None, min_sample: int = 4
+    ) -> Dict[str, Any]:
+        """Hit rate of each prediction market per tennis player and surface."""
+        from src.application.tennis_stats_service import compute_prediction_reliability as _compute
+
+        return _compute(self.db, player=player, surface=surface, min_sample=min_sample)
+
     # ------------------------------------------------------------------
     # Matches
     # ------------------------------------------------------------------

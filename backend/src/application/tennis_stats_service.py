@@ -17,6 +17,8 @@ from src.domain.models import (
     Match,
     MatchCompetitor,
     MatchScore,
+    Prediction,
+    PredictionResult,
     Sport,
 )
 
@@ -972,3 +974,111 @@ def compute_player_set_stats(db: Session, target_date) -> Dict[str, Any]:
 
     players.sort(key=lambda p: p["totalSets"], reverse=True)
     return {"date": target_date.isoformat(), "players": players}
+
+
+# ---------------------------------------------------------------------------
+# Prediction reliability by player and surface
+# ---------------------------------------------------------------------------
+# Market display order / short Spanish labels for the UI.
+_MARKET_LABELS = {
+    "Match Winner": "Ganador del partido",
+    "Set 1 Winner": "Ganador del primer set",
+    "Total Sets": "Total de sets (over/under)",
+    "Exact Set Score": "Marcador exacto de sets",
+    "Total Aces": "Total de aces (over/under)",
+}
+
+
+def compute_prediction_reliability(
+    db: Session,
+    player: Optional[str] = None,
+    surface: Optional[str] = None,
+    min_sample: int = 4,
+) -> Dict[str, Any]:
+    """How reliable each prediction market has been, per tennis player and surface.
+
+    For every validated tennis prediction, the match is attributed to BOTH of
+    its competitors (the market is a property of the match, e.g. "does this
+    match reach a 3rd set"). Results are grouped by (player, surface, market)
+    and the hit rate is reported alongside the sample size. ``best`` / ``worst``
+    per (player, surface) are only filled when the top/bottom market has at
+    least ``min_sample`` validated predictions; otherwise they are ``None`` and
+    the caller should show "insufficient sample".
+    """
+    from sqlalchemy import Integer, cast, func
+
+    q = (
+        db.query(
+            Competitor.name.label("player"),
+            Match.extra_data["surface"].astext.label("surface_raw"),
+            Prediction.market.label("market"),
+            func.count().label("n"),
+            func.coalesce(func.sum(cast(PredictionResult.is_successful, Integer)), 0).label("hits"),
+        )
+        .select_from(PredictionResult)
+        .join(Prediction, Prediction.id == PredictionResult.prediction_id)
+        .join(Match, Match.id == Prediction.match_id)
+        .join(Sport, Sport.id == Match.sport_id)
+        .join(MatchCompetitor, MatchCompetitor.match_id == Match.id)
+        .join(Competitor, Competitor.id == MatchCompetitor.competitor_id)
+        .filter(Sport.code == "tennis")
+        .filter(PredictionResult.is_successful.isnot(None))
+        .filter(MatchCompetitor.side.in_(["player1", "player2"]))
+        .group_by(Competitor.name, Match.extra_data["surface"].astext, Prediction.market)
+    )
+    if player:
+        q = q.filter(func.lower(Competitor.name).like(f"%{player.strip().lower()}%"))
+
+    # players[name][surface][market] = [n, hits]
+    players: Dict[str, Dict[str, Dict[str, list]]] = {}
+    overall: Dict[str, Dict[str, list]] = {}
+    for name, surf_raw, market, n, hits in q.all():
+        surf = normalize_surface(surf_raw)
+        if not surf or (surface and surf != surface):
+            continue
+        pm = players.setdefault(name, {}).setdefault(surf, {})
+        cell = pm.setdefault(market, [0, 0])
+        cell[0] += int(n)
+        cell[1] += int(hits)
+        oc = overall.setdefault(surf, {}).setdefault(market, [0, 0])
+        oc[0] += int(n)
+        oc[1] += int(hits)
+
+    def _pack(surface_map: Dict[str, Dict[str, list]]) -> Dict[str, Any]:
+        out: Dict[str, Any] = {}
+        for surf, markets in surface_map.items():
+            rows = [
+                {
+                    "market": m,
+                    "label": _MARKET_LABELS.get(m, m),
+                    "n": v[0],
+                    "hits": v[1],
+                    "hitRate": round(100.0 * v[1] / v[0], 1) if v[0] else 0.0,
+                }
+                for m, v in markets.items()
+            ]
+            rows.sort(key=lambda r: (-r["hitRate"], -r["n"]))
+            eligible = [r for r in rows if r["n"] >= min_sample]
+            out[surf] = {
+                "markets": rows,
+                "best": eligible[0] if eligible else None,
+                "worst": eligible[-1] if len(eligible) >= 2 else None,
+                "sampleTotal": sum(r["n"] for r in rows),
+            }
+        return out
+
+    player_blocks = [
+        {"player": name, "surfaces": _pack(surface_map)}
+        for name, surface_map in players.items()
+    ]
+    player_blocks.sort(
+        key=lambda p: sum(s["sampleTotal"] for s in p["surfaces"].values()),
+        reverse=True,
+    )
+
+    return {
+        "generatedAt": datetime.utcnow().isoformat() + "Z",
+        "minSample": min_sample,
+        "players": player_blocks,
+        "overall": _pack(overall),
+    }

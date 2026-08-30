@@ -5,6 +5,7 @@ match state (score, minute, set/game/point). Stores snapshots in
 `prediction_progress` so the dashboard and Telegram can show evolution.
 """
 import math
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -228,25 +229,35 @@ def _tennis_match_winner_fulfillment(state: Dict[str, Any]) -> float:
 
 
 def _tennis_total_sets_fulfillment(state: Dict[str, Any], predicted: str) -> float:
-    """Fulfillment for Total Sets Over/Under 2.5 (best-of-3 default)."""
+    """Fulfillment for Total Sets Over/Under.
+
+    Line is 2.5 for best-of-3 and 3.5 for best-of-5 (Grand Slams). It is taken
+    from the predicted outcome string when present, otherwise derived from the
+    snapshot's best_of.
+    """
     home_sets = state["home_sets"]
     away_sets = state["away_sets"]
     home_games = state["home_games_current"]
     away_games = state["away_games_current"]
-    total_sets_played = home_sets + away_sets
+    best_of = state.get("best_of") or 3
+    sets_to_win = best_of // 2 + 1  # 2 (bo3) or 3 (bo5)
 
-    # Already decided.
-    if total_sets_played >= 3:
+    line_match = re.search(r"(\d+(?:\.\d+)?)", predicted or "")
+    line = float(line_match.group(1)) if line_match else (sets_to_win + 0.5)
+
+    total_sets_played = home_sets + away_sets
+    decided_by = home_sets == sets_to_win or away_sets == sets_to_win
+
+    if total_sets_played > line:
         over_prob = 1.0
-    elif total_sets_played == 2 and (home_sets == 2 or away_sets == 2):
-        over_prob = 0.0
-    elif total_sets_played == 1 and (home_sets == 2 or away_sets == 2):
+    elif decided_by and total_sets_played <= line:
+        # Someone already reached the winning set count at or below the line.
         over_prob = 0.0
     else:
-        # Estimate probability of reaching 3 sets from current game state.
-        # If we are in set 2, probability = P(underdog wins current set).
-        # Proxy: if current set is close, higher chance of 3 sets.
-        if home_sets + away_sets == 1:
+        # In the final set allowed under the line: closeness of the current set
+        # is the only signal for whether the match pushes past the line.
+        remaining_to_line = math.floor(line) + 1 - total_sets_played
+        if remaining_to_line == 1:
             game_diff = abs(home_games - away_games)
             if game_diff >= 3:
                 over_prob = 0.25
@@ -254,8 +265,10 @@ def _tennis_total_sets_fulfillment(state: Dict[str, Any], predicted: str) -> flo
                 over_prob = 0.45
             else:
                 over_prob = 0.65
-        else:
+        elif remaining_to_line <= 0:
             over_prob = 0.0
+        else:
+            over_prob = 0.5
 
     predicted_side = predicted.strip().lower()
     if "over" in predicted_side:

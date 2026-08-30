@@ -58,6 +58,22 @@ def get_router() -> APIRouter:
         target = _parse_date(date_str) or today_bogota()
         return service.get_player_set_stats(target)
 
+    @r.get("/prediction-reliability")
+    async def get_prediction_reliability(
+        player: Optional[str] = Query(None),
+        surface: Optional[str] = Query(None),
+        min_sample: int = Query(4, ge=1, le=50, alias="minSample"),
+        service: DataService = Depends(get_data_service),
+    ):
+        """Historical hit rate of each prediction market (Match Winner, Set 1
+        Winner, Total Sets, Exact Set Score, Total Aces) broken down by tennis
+        player and surface, plus which market is most / least reliable per
+        (player, surface). Optional `player` substring and `surface` filters."""
+        surf = surface.strip().lower() if surface else None
+        if surf and surf not in ("hard", "clay", "grass"):
+            surf = None
+        return service.get_prediction_reliability(player=player, surface=surf, min_sample=min_sample)
+
     @r.get("/{match_id}/serve-stats")
     async def get_match_serve_stats(match_id: str, service: DataService = Depends(get_data_service)):
         """Serve/return profile (hold/break %, first-serve %, tiebreak record)

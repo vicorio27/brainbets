@@ -512,11 +512,19 @@ def get_router() -> APIRouter:
                 if item.status:
                     match.status = item.status.upper()
 
-                # Preserve optional per-score statistics (e.g. tennis aces)
+                # Preserve optional per-score statistics (e.g. tennis per-set
+                # games, points, aces). Rebuild extra_data as a new dict so
+                # SQLAlchemy detects the change on the JSON column (in-place
+                # mutation of the existing dict is not tracked).
                 if item.extraData:
                     existing = match.extra_data or {}
-                    existing["score_stats"] = {**(existing.get("score_stats") or {}), **item.extraData}
-                    match.extra_data = existing
+                    match.extra_data = {
+                        **existing,
+                        "score_stats": {
+                            **(existing.get("score_stats") or {}),
+                            **item.extraData,
+                        },
+                    }
 
                 db.commit()
             except Exception as e:

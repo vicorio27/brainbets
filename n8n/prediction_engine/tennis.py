@@ -450,18 +450,48 @@ def ensemble_tennis(
     }
 
 
-def _match_prob_to_set_prob(match_prob: float) -> float:
-    """Invert the best-of-3 relation P_match = p_set^2 * (3 - 2*p_set).
+GRAND_SLAMS = (
+    'us open', 'wimbledon', 'australian open', 'roland garros', 'french open',
+)
 
-    Given the probability of winning the match, returns the implied
-    probability of winning a single set (bisection on the monotonic cubic).
+
+def best_of_sets(tournament: str, tournament_tier: int = 0) -> int:
+    """Number of sets the match is played to.
+
+    On the ATP tour only Grand Slams are best-of-5; everything else
+    (Masters, 500, 250, Challengers, Finals) is best-of-3.
+    """
+    t = (tournament or '').lower()
+    if 'grand slam' in t or any(gs in t for gs in GRAND_SLAMS):
+        return 5
+    if tournament_tier and int(tournament_tier) >= 2000:
+        return 5
+    return 3
+
+
+def _match_prob_to_set_prob(match_prob: float, best_of: int = 3) -> float:
+    """Invert the sets->match relation to recover the single-set win prob.
+
+    best-of-3: P_match = p^2 * (3 - 2p)
+    best-of-5: P_match = p^3 * (10 - 15p + 6p^2)
+
+    Both curves are monotonic on [0, 1] and map 0->0, 0.5->0.5, 1->1, so a
+    bisection recovers the implied probability of winning one set given the
+    probability of winning the match.
     """
     target = min(max(float(match_prob), 0.0), 1.0)
+
+    if best_of >= 5:
+        def curve(p: float) -> float:
+            return p ** 3 * (10.0 - 15.0 * p + 6.0 * p * p)
+    else:
+        def curve(p: float) -> float:
+            return p * p * (3.0 - 2.0 * p)
+
     lo, hi = 0.0, 1.0
     for _ in range(60):
         mid = (lo + hi) / 2.0
-        val = mid * mid * (3.0 - 2.0 * mid)
-        if val < target:
+        if curve(mid) < target:
             lo = mid
         else:
             hi = mid
@@ -549,9 +579,24 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
     winner_odds = odds_player1 if winner_key == 'player1' else odds_player2
     ev_kelly = ev_and_kelly(ensemble[winner_key], winner_odds)
 
-    # Total sets over/under 2.5 (based on ranking closeness)
+    # Best-of-3 everywhere except Grand Slams (best-of-5).
+    best_of = best_of_sets(tournament, tournament_tier)
+    sets_to_win = best_of // 2 + 1  # 2 for best-of-3, 3 for best-of-5
+    sets_line = sets_to_win + 0.5   # 2.5 for best-of-3, 3.5 for best-of-5
+
+    # Probability of winning a single set, implied by the ensemble match prob
+    # and the best-of format.
+    set_p1 = _match_prob_to_set_prob(ensemble['player1'], best_of)
+    set_p2 = 1.0 - set_p1
+
+    # Total sets over/under the format line. "Over" = the match goes past a
+    # straight-sets result. Blended with a ranking-closeness nudge because
+    # i.i.d. sets underestimate long matches between evenly matched players.
     rank_diff = abs(p1_rank - p2_rank)
-    close_match_prob = sigmoid((30 - rank_diff) / 10.0)  # closer ranking -> more likely 3 sets
+    closeness = sigmoid((30 - rank_diff) / 10.0)
+    straight_sets_prob = set_p1 ** sets_to_win + set_p2 ** sets_to_win
+    close_match_prob = 0.7 * (1.0 - straight_sets_prob) + 0.3 * closeness
+    close_match_prob = min(max(close_match_prob, 0.05), 0.95)
     over_sets = close_match_prob > 0.5
 
     elo_source = 'real' if has_real_elo else 'estimado por ranking'
@@ -583,22 +628,29 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
         f"H2H: {h2h[0]}-{h2h[1]}.{odds_line}{ml_line}{feature_source}"
     )
 
+    fmt_label = 'al mejor de 5 sets (Grand Slam)' if best_of >= 5 else 'al mejor de 3 sets'
     sets_reasoning = (
-        f"Diferencia de ranking: {rank_diff}. "
-        f"Probabilidad de más de 2.5 sets: {round(close_match_prob*100,1)}%."
+        f"Partido {fmt_label}. Diferencia de ranking: {rank_diff}. "
+        f"Probabilidad de más de {sets_line} sets: {round(close_match_prob*100,1)}%."
     )
 
-    # Set-level markets derived from the ensemble match probability with a
-    # best-of-3 binomial model (P_match = p_set^2 * (3 - 2*p_set)).
-    set_p1 = _match_prob_to_set_prob(ensemble['player1'])
-    set_p2 = 1.0 - set_p1
-
-    exact_scores = {
-        f'{p1} 2-0': set_p1 ** 2,
-        f'{p1} 2-1': 2.0 * (set_p1 ** 2) * set_p2,
-        f'{p2} 2-0': set_p2 ** 2,
-        f'{p2} 2-1': 2.0 * (set_p2 ** 2) * set_p1,
-    }
+    # Exact set score, binomial over i.i.d. sets for the match format.
+    if best_of >= 5:
+        exact_scores = {
+            f'{p1} 3-0': set_p1 ** 3,
+            f'{p1} 3-1': 3.0 * (set_p1 ** 3) * set_p2,
+            f'{p1} 3-2': 6.0 * (set_p1 ** 3) * (set_p2 ** 2),
+            f'{p2} 3-0': set_p2 ** 3,
+            f'{p2} 3-1': 3.0 * (set_p2 ** 3) * set_p1,
+            f'{p2} 3-2': 6.0 * (set_p2 ** 3) * (set_p1 ** 2),
+        }
+    else:
+        exact_scores = {
+            f'{p1} 2-0': set_p1 ** 2,
+            f'{p1} 2-1': 2.0 * (set_p1 ** 2) * set_p2,
+            f'{p2} 2-0': set_p2 ** 2,
+            f'{p2} 2-1': 2.0 * (set_p2 ** 2) * set_p1,
+        }
     best_exact = max(exact_scores, key=exact_scores.get)
 
     set1_winner = p1 if set_p1 >= set_p2 else p2
@@ -694,7 +746,7 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
         },
         {
             'market': 'Total Sets',
-            'prediction': 'Over 2.5' if over_sets else 'Under 2.5',
+            'prediction': f'Over {sets_line}' if over_sets else f'Under {sets_line}',
             'confidence': confidence_from_prob(max(close_match_prob, 1.0 - close_match_prob)),
             'probabilities': format_probabilities({
                 'over': close_match_prob,
@@ -705,6 +757,8 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
             'reasoningData': {
                 'model': 'heuristic',
                 'rankDifference': rank_diff,
+                'bestOf': best_of,
+                'line': sets_line,
             },
         },
         {

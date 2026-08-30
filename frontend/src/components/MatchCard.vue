@@ -51,15 +51,26 @@
           <span v-if="sport === 'tennis' && match.rankingPlayer1" class="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-100">Ranking: #{{ match.rankingPlayer1 }} vs #{{ match.rankingPlayer2 }}</span>
           <span v-if="sport === 'football' && match.homePosition" class="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-100">Pos: {{ match.homePosition }} vs {{ match.awayPosition }}</span>
         </div>
+
+        <!-- Prediction reliability by player on this surface -->
+        <div v-if="reliabilityRows.length" class="mt-2 space-y-0.5 text-xs">
+          <div v-for="row in reliabilityRows" :key="row.name" class="text-slate-500">
+            <span class="font-medium text-slate-600">{{ row.name }}</span>
+            <span v-if="row.best" class="text-green-600"> · ✓ {{ row.best.label }} {{ row.best.hitRate }}%</span>
+            <span v-if="row.worst" class="text-red-500"> · ✗ {{ row.worst.label }} {{ row.worst.hitRate }}%</span>
+            <span class="text-slate-400"> ({{ row.sampleTotal }} preds en {{ match.surface }})</span>
+          </div>
+        </div>
       </div>
     </div>
   </router-link>
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { formatDateTime, formatDate, formatTime } from '../utils/format.js'
 
-defineProps({
+const props = defineProps({
   match: {
     type: Object,
     required: true
@@ -75,6 +86,26 @@ defineProps({
   isTop: {
     type: Boolean,
     default: false
+  },
+  // { player1: { best, worst, markets, sampleTotal } | null, player2: {...} | null }
+  reliability: {
+    type: Object,
+    default: null
   }
+})
+
+// One compact line per player that has enough validated history on this surface.
+const reliabilityRows = computed(() => {
+  const r = props.reliability
+  if (!r) return []
+  const rows = []
+  const add = (name, blk) => {
+    if (blk && (blk.best || blk.worst)) {
+      rows.push({ name, best: blk.best, worst: blk.worst, sampleTotal: blk.sampleTotal })
+    }
+  }
+  add(props.match.player1, r.player1)
+  add(props.match.player2, r.player2)
+  return rows
 })
 </script>
