@@ -4,7 +4,7 @@
 
     <!-- Tabs -->
     <div class="border-b border-slate-200 mb-6">
-      <nav class="-mb-px flex gap-6" aria-label="Tabs">
+      <nav class="-mb-px flex gap-6 overflow-x-auto" aria-label="Tabs">
         <button
           @click="activeTab = 'today'"
           :class="activeTab === 'today'
@@ -60,17 +60,20 @@
         <input
           v-model="historyDateFrom"
           type="date"
+          aria-label="Fecha desde"
           class="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         />
         <label class="text-sm font-medium text-slate-700">Hasta:</label>
         <input
           v-model="historyDateTo"
           type="date"
+          aria-label="Fecha hasta"
           class="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         />
         <label class="text-sm font-medium text-slate-700">Deporte:</label>
         <select
           v-model="historySport"
+          aria-label="Filtrar por deporte"
           class="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         >
           <option value="all">Todos</option>
@@ -80,6 +83,7 @@
         <label class="text-sm font-medium text-slate-700">Por página:</label>
         <select
           v-model.number="pageSize"
+          aria-label="Resultados por página"
           class="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         >
           <option :value="10">10</option>
@@ -90,6 +94,7 @@
         <label class="text-sm font-medium text-slate-700">Orden:</label>
         <select
           v-model="historySort"
+          aria-label="Orden cronológico"
           class="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         >
           <option value="desc">Más recientes primero</option>
@@ -124,10 +129,11 @@
         <input
           v-model="reliabilitySearch"
           type="text"
+          aria-label="Buscar jugador"
           placeholder="Buscar jugador… (ej. Norrie, Medvedev)"
           class="mt-3 w-full sm:w-80 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
-        <p class="text-xs text-slate-400 mt-2">
+        <p class="text-xs text-slate-500 mt-2">
           Muestra mínima para marcar "mejor/peor": {{ reliabilityMinSample }} predicciones.
           Con pocas semanas de historial las muestras por jugador aún son pequeñas — mira el <code>n</code>.
         </p>
@@ -138,16 +144,16 @@
         <h3 class="font-semibold text-slate-900 mb-3">Global — todos los jugadores</h3>
         <div v-for="(blk, surf) in reliabilityOverall" :key="surf" class="mb-4 last:mb-0">
           <div class="text-sm font-medium text-slate-700 mb-1">{{ surfaceLabel(surf) }}</div>
-          <div class="overflow-x-auto">
+          <div class="overflow-x-auto" tabindex="0">
             <table class="min-w-full text-sm">
               <tbody>
                 <tr v-for="r in blk.markets" :key="r.market" class="border-t border-slate-100">
                   <td class="py-1.5 pr-4 text-slate-700">{{ r.label }}</td>
                   <td class="py-1.5 px-3 font-semibold" :class="rateClass(r, blk)">{{ r.hitRate }}%</td>
-                  <td class="py-1.5 px-2 text-xs text-slate-400">n={{ r.n }}</td>
+                  <td class="py-1.5 px-2 text-xs text-slate-500">n={{ r.n }}</td>
                   <td class="py-1.5 px-2 text-xs">
-                    <span v-if="blk.best && r.market === blk.best.market" class="text-green-600 font-medium">✓ mejor</span>
-                    <span v-else-if="blk.worst && r.market === blk.worst.market" class="text-red-600 font-medium">✗ peor</span>
+                    <span v-if="blk.best && r.market === blk.best.market" class="text-green-700 font-medium">✓ mejor</span>
+                    <span v-else-if="blk.worst && r.market === blk.worst.market" class="text-red-700 font-medium">✗ peor</span>
                   </td>
                 </tr>
               </tbody>
@@ -167,7 +173,7 @@
           <div v-for="(blk, surf) in p.surfaces" :key="surf" class="mb-3 last:mb-0">
             <div class="text-sm font-medium text-slate-700 mb-1">
               {{ surfaceLabel(surf) }}
-              <span class="text-xs font-normal text-slate-400">({{ blk.sampleTotal }} preds)</span>
+              <span class="text-xs font-normal text-slate-500">({{ blk.sampleTotal }} preds)</span>
             </div>
             <div v-if="blk.best || blk.worst" class="flex flex-wrap gap-2 mb-1 text-xs">
               <span v-if="blk.best" class="px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">
@@ -178,14 +184,14 @@
                 ✗ {{ blk.worst.label }} — {{ blk.worst.hitRate }}% (n={{ blk.worst.n }})
               </span>
             </div>
-            <div v-else class="text-xs text-slate-400 mb-1">Muestra insuficiente para destacar mejor/peor.</div>
-            <div class="overflow-x-auto">
+            <div v-else class="text-xs text-slate-500 mb-1">Muestra insuficiente para destacar mejor/peor.</div>
+            <div class="overflow-x-auto" tabindex="0">
               <table class="min-w-full text-sm">
                 <tbody>
                   <tr v-for="r in blk.markets" :key="r.market" class="border-t border-slate-100">
                     <td class="py-1 pr-4 text-slate-600">{{ r.label }}</td>
                     <td class="py-1 px-3 font-medium">{{ r.hitRate }}%</td>
-                    <td class="py-1 px-2 text-xs text-slate-400">n={{ r.n }}</td>
+                    <td class="py-1 px-2 text-xs text-slate-500">n={{ r.n }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -240,7 +246,7 @@
           class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden"
         >
           <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-3">
-            <span class="font-semibold text-slate-900 truncate">🎾 {{ rec.home }} <span class="text-slate-400 font-normal">vs</span> {{ rec.away }}</span>
+            <span class="font-semibold text-slate-900 truncate">🎾 {{ rec.home }} <span class="text-slate-500 font-normal">vs</span> {{ rec.away }}</span>
             <span class="text-xs text-slate-500 flex-shrink-0">
               <span v-if="rec.tournament">{{ rec.tournament }}</span>
               <span v-if="rec.time && rec.time !== '00:00'"> · {{ rec.time }}</span>
@@ -249,7 +255,7 @@
           <ul class="divide-y divide-slate-100">
             <li v-for="pick in rec.picks" :key="pick.id" class="px-4 py-2.5 flex items-center justify-between gap-3">
               <div class="min-w-0">
-                <span class="inline-block text-xs font-medium text-slate-500 bg-slate-100 rounded px-1.5 py-0.5 mr-2">{{ pick.market }}</span>
+                <span class="inline-block text-xs font-medium text-slate-600 bg-slate-100 rounded px-1.5 py-0.5 mr-2">{{ pick.market }}</span>
                 <span class="font-semibold text-slate-900">{{ pick.prediction }}</span>
               </div>
               <div class="flex items-center gap-2 flex-shrink-0">
@@ -259,13 +265,13 @@
                     ? 'bg-green-100 text-green-700 border border-green-200'
                     : pick.edge > 0
                       ? 'bg-amber-100 text-amber-700 border border-amber-200'
-                      : 'bg-slate-100 text-slate-500 border border-slate-200'"
+                      : 'bg-slate-100 text-slate-600 border border-slate-200'"
                   class="text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
                   :title="pick.kelly != null ? `Kelly: ${(pick.kelly * 100).toFixed(1)}% · stake sugerido = ¼ Kelly. Solo apostar si edge > 5%.` : ''"
                 >
                   edge {{ (pick.edge * 100).toFixed(0) }}%
                 </span>
-                <span v-else class="text-xs text-slate-400 whitespace-nowrap">sin cuota</span>
+                <span v-else class="text-xs text-slate-500 whitespace-nowrap">sin cuota</span>
                 <span
                   class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold whitespace-nowrap"
                   :class="pick.confidence >= 75 ? 'bg-blue-600 text-white' : 'bg-blue-100 text-blue-700'"
@@ -378,7 +384,7 @@
       <p class="text-sm text-slate-500 mb-4">
         Promedio de games y puntos ganados-perdidos por set en cada superficie, sobre los partidos con detalle por set.
       </p>
-      <div class="overflow-x-auto">
+      <div class="overflow-x-auto" tabindex="0">
         <table class="min-w-full text-sm">
           <thead>
             <tr class="text-left text-xs text-slate-500 uppercase tracking-wider">
@@ -398,18 +404,18 @@
                   :class="surf === p.matchSurface ? 'bg-blue-100/70 ring-1 ring-blue-300' : ''"
                 >
                   {{ p.surfaces[surf].avgGamesWon }}-{{ p.surfaces[surf].avgGamesLost }}
-                  <span class="text-xs text-slate-400">({{ p.surfaces[surf].setsPlayed }})</span>
-                  <div v-if="p.surfaces[surf].avgPointsWon != null" class="text-xs text-slate-500">
+                  <span class="text-xs text-slate-600">({{ p.surfaces[surf].setsPlayed }})</span>
+                  <div v-if="p.surfaces[surf].avgPointsWon != null" class="text-xs text-slate-600">
                     {{ p.surfaces[surf].avgPointsWon }}-{{ p.surfaces[surf].avgPointsLost }} pts
                   </div>
                 </span>
-                <span v-else class="text-xs text-slate-300">-</span>
+                <span v-else class="text-xs text-slate-600">-</span>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
-      <p class="text-xs text-slate-400 mt-2">
+      <p class="text-xs text-slate-500 mt-2">
         Formato: games ganados-perdidos por set (sets con datos) y, debajo, puntos por set cuando hay estadísticas.
         Resaltado = superficie del partido de hoy.
       </p>
@@ -587,8 +593,8 @@ const filteredReliabilityPlayers = computed(() => {
   return reliabilityPlayers.value.filter((p) => p.player.toLowerCase().includes(q)).slice(0, 30)
 })
 function rateClass(row, blk) {
-  if (blk.best && row.market === blk.best.market) return 'text-green-600'
-  if (blk.worst && row.market === blk.worst.market) return 'text-red-600'
+  if (blk.best && row.market === blk.best.market) return 'text-green-700'
+  if (blk.worst && row.market === blk.worst.market) return 'text-red-700'
   return 'text-slate-700'
 }
 

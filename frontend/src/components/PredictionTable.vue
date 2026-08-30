@@ -1,6 +1,6 @@
 <template>
   <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
-    <div class="overflow-x-auto">
+    <div class="overflow-x-auto" tabindex="0" role="region" aria-label="Tabla de predicciones">
       <table class="min-w-full divide-y divide-slate-200">
         <thead class="bg-slate-50">
           <tr>
@@ -27,7 +27,7 @@
                   <span class="text-sm font-semibold text-slate-800 truncate">
                     {{ getMatchName(group) }}
                   </span>
-                  <span class="text-xs text-slate-500 hidden sm:inline">
+                  <span class="text-xs text-slate-600 hidden sm:inline">
                     ({{ group.matchId }})
                   </span>
                 </div>
@@ -47,7 +47,7 @@
                     <div class="bg-blue-600 h-2 rounded-full" :style="{ width: (pred.calibratedConfidence ?? pred.confidence) + '%' }"></div>
                   </div>
                   <span class="text-sm font-medium">{{ pred.calibratedConfidence ?? pred.confidence }}%</span>
-                  <span v-if="pred.calibratedConfidence != null && pred.calibratedConfidence !== pred.confidence" class="ml-1 text-[10px] text-slate-400">cal</span>
+                  <span v-if="pred.calibratedConfidence != null && pred.calibratedConfidence !== pred.confidence" class="ml-1 text-[10px] text-slate-500">cal</span>
                 </div>
               </td>
               <td class="px-3 sm:px-6 py-3 sm:py-4 text-sm whitespace-nowrap">
@@ -59,7 +59,7 @@
                 >
                   {{ formatEdge(edgeOf(pred)) }}
                 </span>
-                <span v-else class="text-xs text-slate-400">-</span>
+                <span v-else class="text-xs text-slate-500">-</span>
               </td>
               <td class="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-600 hidden sm:table-cell">
                 <div v-if="pred.modelContributions" class="flex items-center gap-1 w-24 sm:w-32">
@@ -72,7 +72,7 @@
                     </div>
                   </div>
                 </div>
-                <span v-else class="text-xs text-slate-400">-</span>
+                <span v-else class="text-xs text-slate-500">-</span>
               </td>
               <td class="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-600 hidden md:table-cell whitespace-nowrap">
                 {{ pred.eventDate ? formatDateTime(pred.eventDate, null) : getMatchDate(pred.matchId) }}

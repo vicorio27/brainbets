@@ -5,9 +5,9 @@
       <div
         class="text-2xl font-bold"
         :class="{
-          'text-green-600': color === 'green',
-          'text-yellow-600': color === 'yellow',
-          'text-red-600': color === 'red',
+          'text-green-700': color === 'green',
+          'text-yellow-700': color === 'yellow',
+          'text-red-700': color === 'red',
           'text-slate-900': color === 'gray' || !color
         }"
       >

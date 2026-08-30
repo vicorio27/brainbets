@@ -23,7 +23,7 @@
             </span>
             <span
               v-else
-              class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-500 border border-slate-200 whitespace-nowrap"
+              class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap"
               title="Este partido aún no tiene predicción generada"
             >
               ⏳ Sin predicción
@@ -46,7 +46,7 @@
           <span v-if="match.eventTime && match.eventTime !== '00:00'" class="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-100">
             🕒 {{ formatTime(match.eventTime) }}
           </span>
-          <span v-else-if="match.eventDate" class="text-slate-400">Hora por confirmar</span>
+          <span v-else-if="match.eventDate" class="text-slate-500">Hora por confirmar</span>
           <span v-if="sport === 'tennis' && match.surface" class="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-100">🏟️ {{ match.surface }}</span>
           <span v-if="sport === 'tennis' && match.rankingPlayer1" class="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-100">Ranking: #{{ match.rankingPlayer1 }} vs #{{ match.rankingPlayer2 }}</span>
           <span v-if="sport === 'football' && match.homePosition" class="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-100">Pos: {{ match.homePosition }} vs {{ match.awayPosition }}</span>
@@ -56,9 +56,9 @@
         <div v-if="reliabilityRows.length" class="mt-2 space-y-0.5 text-xs">
           <div v-for="row in reliabilityRows" :key="row.name" class="text-slate-500">
             <span class="font-medium text-slate-600">{{ row.name }}</span>
-            <span v-if="row.best" class="text-green-600"> · ✓ {{ row.best.label }} {{ row.best.hitRate }}%</span>
-            <span v-if="row.worst" class="text-red-500"> · ✗ {{ row.worst.label }} {{ row.worst.hitRate }}%</span>
-            <span class="text-slate-400"> ({{ row.sampleTotal }} preds en {{ match.surface }})</span>
+            <span v-if="row.best" class="text-green-700"> · ✓ {{ row.best.label }} {{ row.best.hitRate }}%</span>
+            <span v-if="row.worst" class="text-red-700"> · ✗ {{ row.worst.label }} {{ row.worst.hitRate }}%</span>
+            <span class="text-slate-500"> ({{ row.sampleTotal }} preds en {{ match.surface }})</span>
           </div>
         </div>
       </div>
