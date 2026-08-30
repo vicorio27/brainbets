@@ -33,20 +33,36 @@ const VIEWPORTS = [
 // client state, not routes, so we click the tab button by its label).
 const VIEWS = [
   { slug: 'dashboard-hoy', path: '/', tab: 'Hoy' },
-  { slug: 'dashboard-torneos', path: '/', tab: 'Torneos' },
+  {
+    slug: 'dashboard-hoy-por-torneo',
+    path: '/',
+    tab: 'Hoy',
+    action: async (page) => {
+      await page.getByRole('button', { name: 'Por torneo', exact: true }).click()
+      await page.waitForTimeout(400)
+    },
+  },
   { slug: 'dashboard-apuestas', path: '/', tab: 'Apuestas' },
+  {
+    slug: 'dashboard-apuestas-todas',
+    path: '/',
+    tab: 'Apuestas',
+    action: async (page) => {
+      await page.getByLabel('Filtro de recomendaciones').selectOption('-1')
+      await page.waitForTimeout(400)
+    },
+  },
   { slug: 'dashboard-fiabilidad', path: '/', tab: 'Fiabilidad' },
   {
     slug: 'dashboard-fiabilidad-busqueda',
     path: '/',
     tab: 'Fiabilidad',
     action: async (page) => {
-      const input = page.getByPlaceholder(/Buscar jugador/i)
-      await input.fill('a')
+      await page.getByPlaceholder(/Buscar jugador/i).fill('a')
       await page.waitForTimeout(400)
     },
   },
-  { slug: 'dashboard-historico', path: '/', tab: 'Histórico' },
+  { slug: 'partidos', path: '/matches' },
   { slug: 'predicciones', path: '/predictions' },
   { slug: 'analytics', path: '/analytics' },
 ]

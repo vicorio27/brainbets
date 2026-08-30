@@ -6,107 +6,17 @@
     <div class="border-b border-slate-200 mb-6">
       <nav class="-mb-px flex gap-6 overflow-x-auto" aria-label="Tabs">
         <button
-          @click="activeTab = 'today'"
-          :class="activeTab === 'today'
+          v-for="t in tabs"
+          :key="t.id"
+          @click="activeTab = t.id"
+          :class="activeTab === t.id
             ? 'border-blue-500 text-blue-600'
             : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'"
           class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm"
         >
-          Hoy
-        </button>
-        <button
-          @click="activeTab = 'tournaments'"
-          :class="activeTab === 'tournaments'
-            ? 'border-blue-500 text-blue-600'
-            : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'"
-          class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm"
-        >
-          Torneos
-        </button>
-        <button
-          @click="activeTab = 'bets'"
-          :class="activeTab === 'bets'
-            ? 'border-blue-500 text-blue-600'
-            : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'"
-          class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm"
-        >
-          Apuestas
-        </button>
-        <button
-          @click="activeTab = 'reliability'"
-          :class="activeTab === 'reliability'
-            ? 'border-blue-500 text-blue-600'
-            : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'"
-          class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm"
-        >
-          Fiabilidad
-        </button>
-        <button
-          @click="activeTab = 'history'"
-          :class="activeTab === 'history'
-            ? 'border-blue-500 text-blue-600'
-            : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'"
-          class="whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm"
-        >
-          Histórico
+          {{ t.label }}
         </button>
       </nav>
-    </div>
-
-    <!-- History Filters -->
-    <div v-if="activeTab === 'history'" class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mb-6">
-      <div class="flex flex-col sm:flex-row sm:items-center gap-4 flex-wrap">
-        <label class="text-sm font-medium text-slate-700">Desde:</label>
-        <input
-          v-model="historyDateFrom"
-          type="date"
-          aria-label="Fecha desde"
-          class="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-        />
-        <label class="text-sm font-medium text-slate-700">Hasta:</label>
-        <input
-          v-model="historyDateTo"
-          type="date"
-          aria-label="Fecha hasta"
-          class="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-        />
-        <label class="text-sm font-medium text-slate-700">Deporte:</label>
-        <select
-          v-model="historySport"
-          aria-label="Filtrar por deporte"
-          class="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-        >
-          <option value="all">Todos</option>
-          <option value="football">⚽ Fútbol</option>
-          <option value="tennis">🎾 Tenis</option>
-        </select>
-        <label class="text-sm font-medium text-slate-700">Por página:</label>
-        <select
-          v-model.number="pageSize"
-          aria-label="Resultados por página"
-          class="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-        >
-          <option :value="10">10</option>
-          <option :value="20">20</option>
-          <option :value="50">50</option>
-          <option :value="100">100</option>
-        </select>
-        <label class="text-sm font-medium text-slate-700">Orden:</label>
-        <select
-          v-model="historySort"
-          aria-label="Orden cronológico"
-          class="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-        >
-          <option value="desc">Más recientes primero</option>
-          <option value="asc">Más antiguos primero</option>
-        </select>
-        <button
-          @click="resetHistoryFilters"
-          class="px-3 py-2 text-sm text-blue-600 hover:text-blue-800 font-medium"
-        >
-          Limpiar
-        </button>
-      </div>
     </div>
 
     <div v-if="matchesStore.loading" class="text-center py-12">
@@ -214,28 +124,51 @@
           <div>
             <h2 class="text-lg font-semibold text-slate-900">🎯 Recomendaciones de hoy — Tenis</h2>
             <p class="text-sm text-slate-500">
-              Los picks de mayor confianza por partido (máx. 3). Solo se muestran los que superan la confianza mínima.
+              Qué apostar sin entrar al detalle. Máx. 3 picks por partido.
             </p>
           </div>
           <label class="text-sm font-medium text-slate-700 flex items-center gap-2 flex-shrink-0">
-            Confianza mínima:
+            Filtro:
             <select
-              v-model.number="minConfidence"
+              v-model.number="minEdge"
+              aria-label="Filtro de recomendaciones"
               class="px-2 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option :value="45">45%</option>
-              <option :value="50">50%</option>
-              <option :value="55">55%</option>
-              <option :value="60">60%</option>
-              <option :value="65">65%</option>
+              <option :value="0.1">Alto valor: edge &gt; 10%</option>
+              <option :value="0.05">Valor: edge &gt; 5%</option>
+              <option :value="0">Con cuota: edge ≥ 0%</option>
+              <option :value="-1">Todas (por confianza)</option>
             </select>
           </label>
         </div>
+        <label
+          v-if="minEdge < 0"
+          class="text-xs font-medium text-slate-600 flex items-center gap-2 mt-3"
+        >
+          Confianza mínima:
+          <select
+            v-model.number="minConfidence"
+            aria-label="Confianza mínima"
+            class="px-2 py-1 border border-slate-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option :value="45">45%</option>
+            <option :value="50">50%</option>
+            <option :value="55">55%</option>
+            <option :value="60">60%</option>
+            <option :value="65">65%</option>
+          </select>
+        </label>
         <p class="text-xs text-slate-500 mt-3">
-          {{ bettingRecs.length }} partido(s) con pick · <b>{{ bettingRecsEdgeCount }}</b> pick(s) con
-          <span class="text-green-700 font-semibold">edge &gt; 5%</span> — esos son los de apostar.
-          La confianza es la <b>calibrada</b> (los modelos de tenis se calibran a la baja porque son
-          sobre-confiados; tope ~65%). Orden: primero por edge, luego por confianza.
+          <template v-if="minEdge >= 0">
+            <b>{{ bettingRecs.length }}</b> partido(s) con valor real de apuesta ·
+            <b>{{ bettingPickCount }}</b> pick(s). Solo Match Winner tiene cuota, así que el edge sale de ahí;
+            el resto de mercados no aparece en este filtro. Orden: mayor edge primero.
+          </template>
+          <template v-else>
+            {{ bettingRecs.length }} partido(s) sobre {{ minConfidence }}% de confianza
+            <b>calibrada</b> (los modelos de tenis se calibran a la baja; tope ~65%).
+            <b>{{ bettingPickCount }}</b> pick(s), orden: edge y luego confianza.
+          </template>
         </p>
       </div>
 
@@ -287,93 +220,116 @@
       <EmptyState
         v-if="!bettingRecs.length"
         icon="🎯"
-        title="Sin recomendaciones de alta confianza"
-        :message="`Ningún pick de hoy supera el ${minConfidence}% de confianza. Baja el umbral o espera al collect/predict del día.`"
+        :title="minEdge >= 0 ? 'Sin apuestas con valor hoy' : 'Sin recomendaciones'"
+        :message="minEdge >= 0
+          ? 'Ningún pick de hoy supera ese edge. Baja el filtro o espera a que lleguen más cuotas (collect).'
+          : `Ningún pick de hoy supera el ${minConfidence}% de confianza.`"
       />
     </div>
 
-    <!-- Tournaments view: all matches grouped by tournament / league -->
-    <div v-else-if="activeTab === 'tournaments'" class="space-y-4">
-      <details
-        v-for="group in tournamentGroups"
-        :key="group.name"
-        open
-        class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden"
-      >
-        <summary class="cursor-pointer select-none px-4 py-3 flex items-center justify-between gap-3 hover:bg-slate-50">
-          <span class="flex items-center gap-2 font-semibold text-slate-900 min-w-0">
-            <span class="flex-shrink-0">{{ group.icon }}</span>
-            <span class="truncate">{{ group.name }}</span>
-            <span class="text-sm font-normal text-slate-500 flex-shrink-0">({{ group.matches.length }})</span>
-          </span>
-        </summary>
-        <div class="px-4 pb-4 pt-1 space-y-3 border-t border-slate-100">
-          <MatchCard
-            v-for="match in group.matches"
-            :key="match.matchId"
-            :match="match"
-            :sport="match._sport"
-            :best-confidence="bestConfidenceByMatch[match.matchId] ?? null"
-            :is-top="top3MatchIds.has(match.matchId)"
-            :reliability="match._sport === 'tennis' ? matchReliability(match) : null"
-          />
-        </div>
-      </details>
-      <EmptyState
-        v-if="!tournamentGroups.length"
-        icon="🏆"
-        title="No hay torneos"
-        message="No hay partidos disponibles para hoy."
-      />
-    </div>
-
-    <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-      <!-- Tennis Matches -->
-      <div>
-        <h2 class="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
-          <span>🎾</span> Tenis
-          <span class="text-sm font-normal text-slate-500">({{ tennisMatches.length }})</span>
-        </h2>
-        <div class="space-y-4">
-          <MatchCard
-            v-for="match in tennisMatches"
-            :key="match.matchId"
-            :match="match"
-            sport="tennis"
-            :best-confidence="bestConfidenceByMatch[match.matchId] ?? null"
-            :is-top="top3MatchIds.has(match.matchId)"
-            :reliability="matchReliability(match)"
-          />
-          <EmptyState
-            v-if="!tennisMatches.length"
-            icon="🎾"
-            title="No hay partidos de tenis"
-            :message="emptyMessage"
-          />
+    <!-- Today view: sport split, or grouped by tournament via the toggle -->
+    <div v-else>
+      <div class="flex justify-end mb-4">
+        <div class="inline-flex rounded-lg border border-slate-300 overflow-hidden text-sm">
+          <button
+            @click="groupByTournament = false"
+            :class="groupByTournament ? 'bg-white text-slate-600' : 'bg-blue-600 text-white'"
+            class="px-3 py-1.5 font-medium"
+          >
+            Por deporte
+          </button>
+          <button
+            @click="groupByTournament = true"
+            :class="groupByTournament ? 'bg-blue-600 text-white' : 'bg-white text-slate-600'"
+            class="px-3 py-1.5 font-medium border-l border-slate-300"
+          >
+            Por torneo
+          </button>
         </div>
       </div>
 
-      <!-- Football Matches -->
-      <div>
-        <h2 class="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
-          <span>⚽</span> Fútbol
-          <span class="text-sm font-normal text-slate-500">({{ footballMatches.length }})</span>
-        </h2>
-        <div class="space-y-4">
-          <MatchCard
-            v-for="match in footballMatches"
-            :key="match.matchId"
-            :match="match"
-            sport="football"
-            :best-confidence="bestConfidenceByMatch[match.matchId] ?? null"
-            :is-top="top3MatchIds.has(match.matchId)"
-          />
-          <EmptyState
-            v-if="!footballMatches.length"
-            icon="⚽"
-            title="No hay partidos de fútbol"
-            :message="emptyMessage"
-          />
+      <!-- Grouped by tournament / league -->
+      <div v-if="groupByTournament" class="space-y-4">
+        <details
+          v-for="group in tournamentGroups"
+          :key="group.name"
+          open
+          class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden"
+        >
+          <summary class="cursor-pointer select-none px-4 py-3 flex items-center justify-between gap-3 hover:bg-slate-50">
+            <span class="flex items-center gap-2 font-semibold text-slate-900 min-w-0">
+              <span class="flex-shrink-0">{{ group.icon }}</span>
+              <span class="truncate">{{ group.name }}</span>
+              <span class="text-sm font-normal text-slate-500 flex-shrink-0">({{ group.matches.length }})</span>
+            </span>
+          </summary>
+          <div class="px-4 pb-4 pt-1 space-y-3 border-t border-slate-100">
+            <MatchCard
+              v-for="match in group.matches"
+              :key="match.matchId"
+              :match="match"
+              :sport="match._sport"
+              :best-confidence="bestConfidenceByMatch[match.matchId] ?? null"
+              :is-top="top3MatchIds.has(match.matchId)"
+              :reliability="match._sport === 'tennis' ? matchReliability(match) : null"
+            />
+          </div>
+        </details>
+        <EmptyState
+          v-if="!tournamentGroups.length"
+          icon="🏆"
+          title="No hay torneos"
+          message="No hay partidos disponibles para hoy."
+        />
+      </div>
+
+      <!-- Sport split -->
+      <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div>
+          <h2 class="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
+            <span>🎾</span> Tenis
+            <span class="text-sm font-normal text-slate-500">({{ tennisMatches.length }})</span>
+          </h2>
+          <div class="space-y-4">
+            <MatchCard
+              v-for="match in tennisMatches"
+              :key="match.matchId"
+              :match="match"
+              sport="tennis"
+              :best-confidence="bestConfidenceByMatch[match.matchId] ?? null"
+              :is-top="top3MatchIds.has(match.matchId)"
+              :reliability="matchReliability(match)"
+            />
+            <EmptyState
+              v-if="!tennisMatches.length"
+              icon="🎾"
+              title="No hay partidos de tenis"
+              message="No hay partidos disponibles para hoy."
+            />
+          </div>
+        </div>
+
+        <div>
+          <h2 class="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
+            <span>⚽</span> Fútbol
+            <span class="text-sm font-normal text-slate-500">({{ footballMatches.length }})</span>
+          </h2>
+          <div class="space-y-4">
+            <MatchCard
+              v-for="match in footballMatches"
+              :key="match.matchId"
+              :match="match"
+              sport="football"
+              :best-confidence="bestConfidenceByMatch[match.matchId] ?? null"
+              :is-top="top3MatchIds.has(match.matchId)"
+            />
+            <EmptyState
+              v-if="!footballMatches.length"
+              icon="⚽"
+              title="No hay partidos de fútbol"
+              message="No hay partidos disponibles para hoy."
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -421,41 +377,31 @@
       </p>
     </div>
 
-    <!-- Pagination -->
-    <div v-if="activeTab === 'history' && totalItems > pageSize" class="mt-8">
-      <Pagination
-        v-model:current-page="currentPage"
-        :total-items="totalItems"
-        :page-size="pageSize"
-      />
-    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useMatchesStore } from '../stores/matches.js'
 import { usePredictionsStore } from '../stores/predictions.js'
 import MatchCard from '../components/MatchCard.vue'
 import EmptyState from '../components/EmptyState.vue'
-import Pagination from '../components/Pagination.vue'
 
 const matchesStore = useMatchesStore()
 const predictionsStore = usePredictionsStore()
 
+const tabs = [
+  { id: 'today', label: 'Hoy' },
+  { id: 'bets', label: 'Apuestas' },
+  { id: 'reliability', label: 'Fiabilidad' },
+]
 const activeTab = ref('today')
-const pageSize = ref(20)
-const currentPage = ref(1)
+const groupByTournament = ref(false)
 
 function getUtcTodayStr() {
   // Use America/Bogota timezone (UTC-5) so "today" matches the user's local date
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' })
 }
-
-const historyDateFrom = ref('')
-const historyDateTo = ref('')
-const historySport = ref('all')
-const historySort = ref('desc')
 
 // Best (max) confidence per match, using calibrated confidence when available
 const bestConfidenceByMatch = computed(() => {
@@ -514,10 +460,12 @@ const tournamentGroups = computed(() => {
     }))
     .sort((a, b) => b.matches.length - a.matches.length || a.name.localeCompare(b.name))
 })
-const totalItems = computed(() => matchesStore.latest?.total || 0)
 const setStatsPlayers = computed(() => matchesStore.playerSetStats?.players || [])
 
 // --- Betting recommendations (tab "Apuestas") ---
+// minEdge: -1 = "todas" (filter by confidence instead); >= 0 = only picks with
+// a real edge above that threshold (edge only exists for Match Winner).
+const minEdge = ref(0.05)
 const minConfidence = ref(50)
 
 const tennisMatchById = computed(() => {
@@ -526,17 +474,23 @@ const tennisMatchById = computed(() => {
   return map
 })
 
-// Per today's tennis match, the top picks whose (calibrated) confidence clears
-// the threshold — min 1, max 3, sorted by confidence. Matches with no
-// qualifying pick are dropped.
 const bettingRecs = computed(() => {
   const today = getUtcTodayStr()
+  const edgeMode = minEdge.value >= 0
   const byMatch = {}
   for (const p of predictionsStore.latest?.predictions || []) {
     if (String(p.sport).toLowerCase() !== 'tennis') continue
     if (p.eventDate && p.eventDate !== today) continue
     const conf = p.calibratedConfidence ?? p.confidence
-    if (conf == null || conf < minConfidence.value) continue
+    const edge = p.expectedValue ?? null
+
+    if (edgeMode) {
+      // Only picks whose edge clears the threshold.
+      if (edge == null || edge <= minEdge.value) continue
+    } else {
+      if (conf == null || conf < minConfidence.value) continue
+    }
+
     const m = tennisMatchById.value[p.matchId] || {}
     if (!byMatch[p.matchId]) {
       byMatch[p.matchId] = {
@@ -553,17 +507,16 @@ const bettingRecs = computed(() => {
       market: p.market,
       prediction: p.prediction,
       confidence: conf,
-      edge: p.expectedValue ?? null,
+      edge,
       kelly: p.kellyFraction ?? null
     })
   }
-  // Within a match: edge-positive picks first (higher edge first), then by
-  // confidence. Across matches: best edge first, then best confidence.
+  // Best edge first (nulls last), then confidence.
   const byValue = (a, b) => {
     const ea = a.edge ?? -Infinity
     const eb = b.edge ?? -Infinity
     if (ea !== eb) return eb - ea
-    return b.confidence - a.confidence
+    return (b.confidence ?? 0) - (a.confidence ?? 0)
   }
   return Object.values(byMatch)
     .map((r) => ({ ...r, picks: r.picks.sort(byValue).slice(0, 3) }))
@@ -571,11 +524,8 @@ const bettingRecs = computed(() => {
     .sort((a, b) => byValue(a.picks[0], b.picks[0]))
 })
 
-const bettingRecsEdgeCount = computed(() =>
-  bettingRecs.value.reduce(
-    (n, r) => n + r.picks.filter((p) => p.edge != null && p.edge > 0.05).length,
-    0
-  )
+const bettingPickCount = computed(() =>
+  bettingRecs.value.reduce((n, r) => n + r.picks.length, 0)
 )
 
 // --- Prediction reliability by player + surface (tab "Fiabilidad") ---
@@ -613,64 +563,12 @@ function matchReliability(match) {
   return { player1: forSide(match.player1), player2: forSide(match.player2) }
 }
 
-const emptyMessage = computed(() => {
-  if (activeTab.value === 'history') {
-    return 'No se encontraron partidos en el rango seleccionado.'
-  }
-  return 'No hay partidos disponibles para hoy.'
-})
-
-function resetHistoryFilters() {
-  historyDateFrom.value = ''
-  historyDateTo.value = ''
-  historySport.value = 'all'
-  historySort.value = 'desc'
-  currentPage.value = 1
-}
-
 function loadToday() {
   matchesStore.fetchByDate(getUtcTodayStr())
   matchesStore.fetchPlayerSetStats(getUtcTodayStr())
   matchesStore.fetchPredictionReliability()
   predictionsStore.fetchLatest()
 }
-
-function loadHistory() {
-  const from = historyDateFrom.value || '2010-01-01'
-  const to = historyDateTo.value || getUtcTodayStr()
-  matchesStore.fetchHistory(from, to, historySport.value, currentPage.value, pageSize.value, historySort.value)
-  predictionsStore.fetchLatest()
-}
-
-watch(activeTab, (tab) => {
-  currentPage.value = 1
-  if (tab === 'history') {
-    loadHistory()
-  } else {
-    // 'today' and 'tournaments' share the same (today-scoped) dataset
-    loadToday()
-  }
-})
-
-watch([historyDateFrom, historyDateTo, historySport, historySort], () => {
-  currentPage.value = 1
-  if (activeTab.value === 'history') {
-    loadHistory()
-  }
-})
-
-watch(currentPage, () => {
-  if (activeTab.value === 'history') {
-    loadHistory()
-  }
-})
-
-watch(pageSize, () => {
-  currentPage.value = 1
-  if (activeTab.value === 'history') {
-    loadHistory()
-  }
-})
 
 onMounted(() => {
   loadToday()

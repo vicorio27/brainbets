@@ -15,6 +15,9 @@
             <router-link to="/" class="text-sm font-medium text-slate-600 hover:text-blue-600">
               Dashboard
             </router-link>
+            <router-link to="/matches" class="text-sm font-medium text-slate-600 hover:text-blue-600">
+              Partidos
+            </router-link>
             <router-link to="/predictions" class="text-sm font-medium text-slate-600 hover:text-blue-600">
               Predicciones
             </router-link>
@@ -45,6 +48,14 @@
             :class="{ 'bg-slate-50 text-blue-600': $route.path === '/' }"
           >
             Dashboard
+          </router-link>
+          <router-link
+            to="/matches"
+            @click="mobileMenuOpen = false"
+            class="block px-3 py-2 rounded-md text-base font-medium text-slate-600 hover:text-blue-600 hover:bg-slate-50"
+            :class="{ 'bg-slate-50 text-blue-600': $route.path === '/matches' }"
+          >
+            Partidos
           </router-link>
           <router-link
             to="/predictions"
