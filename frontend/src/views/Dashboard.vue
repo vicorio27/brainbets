@@ -36,14 +36,38 @@
           De todas nuestras predicciones ya validadas de tenis, qué mercado acierta más y cuál menos
           para cada jugador en cada superficie. El partido cuenta para ambos jugadores.
         </p>
-        <input
-          v-model="reliabilitySearch"
-          type="text"
-          aria-label="Buscar jugador"
-          placeholder="Buscar jugador… (ej. Norrie, Medvedev)"
-          class="mt-3 w-full sm:w-80 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
+        <div class="mt-3 relative sm:w-80">
+          <input
+            v-model="reliabilitySearch"
+            type="text"
+            list="reliability-players"
+            aria-label="Buscar jugador"
+            placeholder="Buscar jugador… (ej. Norrie, Medvedev)"
+            @focus="searchFocused = true"
+            @blur="onSearchBlur"
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <datalist id="reliability-players">
+            <option v-for="name in allPlayerNames" :key="name" :value="name" />
+          </datalist>
+          <!-- Full list on focus (empty query) so you can browse who's available -->
+          <div
+            v-if="searchFocused && !reliabilitySearch.trim() && allPlayerNames.length"
+            class="absolute z-10 mt-1 w-full max-h-64 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"
+          >
+            <button
+              v-for="name in allPlayerNames"
+              :key="name"
+              type="button"
+              @mousedown.prevent="pickPlayer(name)"
+              class="block w-full text-left px-3 py-1.5 text-sm text-slate-700 hover:bg-blue-50"
+            >
+              {{ name }}
+            </button>
+          </div>
+        </div>
         <p class="text-xs text-slate-500 mt-2">
+          <b>{{ allPlayerNames.length }}</b> jugadores con datos disponibles.
           Muestra mínima para marcar "mejor/peor": {{ reliabilityMinSample }} predicciones.
           Con pocas semanas de historial las muestras por jugador aún son pequeñas — mira el <code>n</code>.
         </p>
@@ -571,6 +595,15 @@ const bettingPickCount = computed(() =>
 
 // --- Prediction reliability by player + surface (tab "Fiabilidad") ---
 const reliabilitySearch = ref('')
+const searchFocused = ref(false)
+function onSearchBlur() {
+  // Delay so a click on a list item registers before the list unmounts.
+  setTimeout(() => { searchFocused.value = false }, 150)
+}
+function pickPlayer(name) {
+  reliabilitySearch.value = name
+  searchFocused.value = false
+}
 const SURFACE_ES = { clay: '🟠 Arcilla', hard: '🔵 Dura', grass: '🟢 Hierba' }
 function surfaceLabel(s) {
   return SURFACE_ES[s] || s
@@ -578,6 +611,16 @@ function surfaceLabel(s) {
 const reliabilityMinSample = computed(() => matchesStore.predictionReliability?.minSample ?? 4)
 const reliabilityOverall = computed(() => matchesStore.predictionReliability?.overall || {})
 const reliabilityPlayers = computed(() => matchesStore.predictionReliability?.players || [])
+
+// Every player name with data in either dataset (reliability + points/set),
+// sorted — powers the search datalist and the browse-on-focus list.
+const allPlayerNames = computed(() => {
+  const set = new Set()
+  for (const p of reliabilityPlayers.value) set.add(p.player)
+  for (const p of matchesStore.playerPointsPerSet?.players || []) set.add(p.player)
+  return [...set].sort((a, b) => a.localeCompare(b))
+})
+
 const filteredReliabilityPlayers = computed(() => {
   const q = reliabilitySearch.value.trim().toLowerCase()
   if (!q) return []
