@@ -225,9 +225,10 @@
         </label>
         <p class="text-xs text-slate-500 mt-3">
           <template v-if="minEdge >= 0">
-            <b>{{ bettingRecs.length }}</b> partido(s) con valor real de apuesta ·
-            <b>{{ bettingPickCount }}</b> pick(s). Solo Match Winner tiene cuota, así que el edge sale de ahí;
-            el resto de mercados no aparece en este filtro. Orden: mayor edge primero.
+            <b>{{ bettingRecs.length }}</b> partido(s) con valor real ·
+            <b>{{ bettingPickCount }}</b> apuesta(s) con edge. Solo Match Winner trae cuota; el resto de
+            mercados del partido se muestra debajo como <span class="text-slate-500">contexto</span> (sin cuota).
+            Orden: mayor edge primero.
           </template>
           <template v-else>
             {{ bettingRecs.length }} partido(s) sobre {{ minConfidence }}% de confianza
@@ -251,10 +252,16 @@
             </span>
           </div>
           <ul class="divide-y divide-slate-100">
-            <li v-for="pick in rec.picks" :key="pick.id" class="px-4 py-2.5 flex items-center justify-between gap-3">
+            <li
+              v-for="pick in rec.picks"
+              :key="pick.id"
+              class="px-4 py-2.5 flex items-center justify-between gap-3"
+              :class="pick.context ? 'bg-slate-50/60' : ''"
+            >
               <div class="min-w-0">
-                <span class="inline-block text-xs font-medium text-slate-600 bg-slate-100 rounded px-1.5 py-0.5 mr-2">{{ pick.market }}</span>
-                <span class="font-semibold text-slate-900">{{ pick.prediction }}</span>
+                <span class="inline-block text-xs font-medium rounded px-1.5 py-0.5 mr-2 text-slate-600 bg-slate-100">{{ pick.market }}</span>
+                <span class="font-semibold" :class="pick.context ? 'text-slate-600' : 'text-slate-900'">{{ pick.prediction }}</span>
+                <span v-if="pick.context" class="ml-2 text-[10px] uppercase tracking-wide text-slate-500">contexto</span>
               </div>
               <div class="flex items-center gap-2 flex-shrink-0">
                 <span
@@ -539,23 +546,23 @@ const tennisMatchById = computed(() => {
   return map
 })
 
+// Best edge first (nulls last), then confidence.
+function pickByValue(a, b) {
+  const ea = a.edge ?? -Infinity
+  const eb = b.edge ?? -Infinity
+  if (ea !== eb) return eb - ea
+  return (b.confidence ?? 0) - (a.confidence ?? 0)
+}
+
 const bettingRecs = computed(() => {
   const today = getUtcTodayStr()
   const edgeMode = minEdge.value >= 0
   const byMatch = {}
+  // Collect EVERY tennis pick for today, per match.
   for (const p of predictionsStore.latest?.predictions || []) {
     if (String(p.sport).toLowerCase() !== 'tennis') continue
     if (p.eventDate && p.eventDate !== today) continue
     const conf = p.calibratedConfidence ?? p.confidence
-    const edge = p.expectedValue ?? null
-
-    if (edgeMode) {
-      // Only picks whose edge clears the threshold.
-      if (edge == null || edge <= minEdge.value) continue
-    } else {
-      if (conf == null || conf < minConfidence.value) continue
-    }
-
     const m = tennisMatchById.value[p.matchId] || {}
     if (!byMatch[p.matchId]) {
       byMatch[p.matchId] = {
@@ -572,25 +579,39 @@ const bettingRecs = computed(() => {
       market: p.market,
       prediction: p.prediction,
       confidence: conf,
-      edge,
+      edge: p.expectedValue ?? null,
       kelly: p.kellyFraction ?? null
     })
   }
-  // Best edge first (nulls last), then confidence.
-  const byValue = (a, b) => {
-    const ea = a.edge ?? -Infinity
-    const eb = b.edge ?? -Infinity
-    if (ea !== eb) return eb - ea
-    return (b.confidence ?? 0) - (a.confidence ?? 0)
+
+  const out = []
+  for (const rec of Object.values(byMatch)) {
+    let picks
+    if (edgeMode) {
+      const value = rec.picks
+        .filter((pk) => pk.edge != null && pk.edge > minEdge.value)
+        .sort(pickByValue)
+      if (!value.length) continue // no real betting value in this match
+      // Show the value pick(s), then fill up to 3 with the rest as context.
+      const rest = rec.picks
+        .filter((pk) => !value.includes(pk))
+        .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
+        .map((pk) => ({ ...pk, context: true }))
+      picks = [...value, ...rest].slice(0, 3)
+    } else {
+      picks = rec.picks
+        .filter((pk) => pk.confidence != null && pk.confidence >= minConfidence.value)
+        .sort(pickByValue)
+        .slice(0, 3)
+      if (!picks.length) continue
+    }
+    out.push({ ...rec, picks })
   }
-  return Object.values(byMatch)
-    .map((r) => ({ ...r, picks: r.picks.sort(byValue).slice(0, 3) }))
-    .filter((r) => r.picks.length)
-    .sort((a, b) => byValue(a.picks[0], b.picks[0]))
+  return out.sort((a, b) => pickByValue(a.picks[0], b.picks[0]))
 })
 
 const bettingPickCount = computed(() =>
-  bettingRecs.value.reduce((n, r) => n + r.picks.length, 0)
+  bettingRecs.value.reduce((n, r) => n + r.picks.filter((p) => !p.context).length, 0)
 )
 
 // --- Prediction reliability by player + surface (tab "Fiabilidad") ---

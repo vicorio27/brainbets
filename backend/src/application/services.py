@@ -697,6 +697,74 @@ class DataService:
             accuracyFootball=_accuracy(football_results),
         )
 
+    def get_accuracy_by_day(self, days: int = 30) -> Dict[str, Any]:
+        """Validated-prediction accuracy grouped by the match's day (Bogota).
+
+        Uses the match date, not validated_at, so a match's predictions all
+        land on the day it was played regardless of when validation ran.
+        """
+        from sqlalchemy import func
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        rows = (
+            self.db.query(
+                func.date(func.timezone("America/Bogota", Match.match_date)).label("day"),
+                Sport.code.label("sport"),
+                PredictionResult.is_successful.label("ok"),
+            )
+            .select_from(PredictionResult)
+            .join(Prediction, Prediction.id == PredictionResult.prediction_id)
+            .join(Match, Match.id == Prediction.match_id)
+            .join(Sport, Sport.id == Match.sport_id)
+            .filter(PredictionResult.is_successful.isnot(None))
+            .filter(Match.match_date >= cutoff)
+            .all()
+        )
+
+        by_day: Dict[str, Dict[str, Any]] = {}
+        for day, sport, ok in rows:
+            key = day.isoformat() if hasattr(day, "isoformat") else str(day)
+            d = by_day.setdefault(
+                key,
+                {
+                    "date": key,
+                    "total": 0,
+                    "successful": 0,
+                    "tennisTotal": 0,
+                    "tennisSuccessful": 0,
+                    "footballTotal": 0,
+                    "footballSuccessful": 0,
+                },
+            )
+            d["total"] += 1
+            d["successful"] += 1 if ok else 0
+            if sport == "tennis":
+                d["tennisTotal"] += 1
+                d["tennisSuccessful"] += 1 if ok else 0
+            elif sport == "football":
+                d["footballTotal"] += 1
+                d["footballSuccessful"] += 1 if ok else 0
+
+        def _pct(n: int, d: int) -> Optional[float]:
+            return round(n / d * 100, 1) if d else None
+
+        days_out = []
+        for d in sorted(by_day.values(), key=lambda x: x["date"], reverse=True):
+            days_out.append(
+                {
+                    "date": d["date"],
+                    "total": d["total"],
+                    "successful": d["successful"],
+                    "failed": d["total"] - d["successful"],
+                    "accuracy": _pct(d["successful"], d["total"]),
+                    "accuracyTennis": _pct(d["tennisSuccessful"], d["tennisTotal"]),
+                    "accuracyFootball": _pct(d["footballSuccessful"], d["footballTotal"]),
+                    "tennisTotal": d["tennisTotal"],
+                    "footballTotal": d["footballTotal"],
+                }
+            )
+        return {"days": days_out}
+
     # ------------------------------------------------------------------
     # Dashboard
     # ------------------------------------------------------------------

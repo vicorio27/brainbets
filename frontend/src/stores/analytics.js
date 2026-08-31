@@ -4,6 +4,7 @@ import api from './api.js'
 export const useAnalyticsStore = defineStore('analytics', {
   state: () => ({
     accuracy: null,
+    accuracyByDay: null,
     dashboard: null,
     loading: false,
     error: null
@@ -19,6 +20,14 @@ export const useAnalyticsStore = defineStore('analytics', {
         this.error = err.response?.data?.detail || err.message
       } finally {
         this.loading = false
+      }
+    },
+    async fetchAccuracyByDay(days = 60) {
+      try {
+        const { data } = await api.get('/analytics/accuracy-by-day', { params: { days } })
+        this.accuracyByDay = data.days || []
+      } catch (err) {
+        this.accuracyByDay = []
       }
     },
     async fetchDashboard() {
