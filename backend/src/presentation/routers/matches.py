@@ -74,6 +74,15 @@ def get_router() -> APIRouter:
             surf = None
         return service.get_prediction_reliability(player=player, surface=surf, min_sample=min_sample)
 
+    @r.get("/player-points-per-set")
+    async def get_player_points_per_set(
+        player: Optional[str] = Query(None),
+        service: DataService = Depends(get_data_service),
+    ):
+        """Average points won/lost per set position (1st..5th) for every tennis
+        player with per-set point data. Optional `player` substring filter."""
+        return service.get_player_points_per_set(player=player)
+
     @r.get("/{match_id}/serve-stats")
     async def get_match_serve_stats(match_id: str, service: DataService = Depends(get_data_service)):
         """Serve/return profile (hold/break %, first-serve %, tiebreak record)

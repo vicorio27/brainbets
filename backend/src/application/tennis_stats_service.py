@@ -1082,3 +1082,79 @@ def compute_prediction_reliability(
         "players": player_blocks,
         "overall": _pack(overall),
     }
+
+
+def compute_player_points_per_set(
+    db: Session, player: Optional[str] = None
+) -> Dict[str, Any]:
+    """Average points won/lost per set position (1..5) for tennis players.
+
+    Reads per-set points from ``extra_data['score_stats']['points']``
+    (``[{set, p1, p2}]``, written by the tennis score-update workflows) over
+    every FINISHED match a player has, grouped by the set number. Optional
+    ``player`` substring filter; otherwise returns all players with data,
+    sorted by sample size.
+    """
+    from sqlalchemy import func
+
+    q = (
+        db.query(Competitor.name, Match.extra_data, MatchCompetitor.side)
+        .select_from(Match)
+        .join(Sport, Sport.id == Match.sport_id)
+        .join(MatchCompetitor, MatchCompetitor.match_id == Match.id)
+        .join(Competitor, Competitor.id == MatchCompetitor.competitor_id)
+        .filter(Sport.code == "tennis")
+        .filter(Match.status == "FINISHED")
+        .filter(MatchCompetitor.side.in_(["player1", "player2", "home", "away"]))
+        .filter(Match.extra_data["score_stats"].isnot(None))
+    )
+    if player:
+        q = q.filter(func.lower(Competitor.name).like(f"%{player.strip().lower()}%"))
+
+    # agg[name][set_no] = [points_won, points_lost, matches_counted]
+    agg: Dict[str, Dict[int, list]] = {}
+    for name, extra, side in q.all():
+        rows = ((extra or {}).get("score_stats") or {}).get("points") or []
+        if not rows:
+            continue
+        is_home = side in ("player1", "home")
+        by_set = agg.setdefault(name, {})
+        for row in rows:
+            try:
+                set_no = int(row.get("set"))
+                p1 = int(row.get("p1") or 0)
+                p2 = int(row.get("p2") or 0)
+            except (TypeError, ValueError):
+                continue
+            if set_no < 1 or set_no > 5 or p1 + p2 == 0:
+                continue
+            won, lost = (p1, p2) if is_home else (p2, p1)
+            cell = by_set.setdefault(set_no, [0, 0, 0])
+            cell[0] += won
+            cell[1] += lost
+            cell[2] += 1
+
+    players = []
+    for name, by_set in agg.items():
+        sets_out: Dict[str, Any] = {}
+        total_n = 0
+        for set_no, (won, lost, n) in sorted(by_set.items()):
+            if not n:
+                continue
+            total_n += n
+            sets_out[str(set_no)] = {
+                "n": n,
+                "avgWon": round(won / n, 1),
+                "avgLost": round(lost / n, 1),
+                "avgTotal": round((won + lost) / n, 1),
+            }
+        if sets_out:
+            players.append(
+                {"player": name, "sets": sets_out, "sampleTotal": total_n}
+            )
+
+    players.sort(key=lambda p: p["sampleTotal"], reverse=True)
+    return {
+        "generatedAt": datetime.utcnow().isoformat() + "Z",
+        "players": players,
+    }

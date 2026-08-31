@@ -6,6 +6,7 @@ export const useMatchesStore = defineStore('matches', {
     latest: null,
     playerSetStats: null,
     predictionReliability: null,
+    playerPointsPerSet: null,
     loading: false,
     error: null
   }),
@@ -65,6 +66,14 @@ export const useMatchesStore = defineStore('matches', {
         this.predictionReliability = data
       } catch (err) {
         this.predictionReliability = null
+      }
+    },
+    async fetchPlayerPointsPerSet() {
+      try {
+        const { data } = await api.get('/matches/player-points-per-set')
+        this.playerPointsPerSet = data
+      } catch (err) {
+        this.playerPointsPerSet = null
       }
     }
   }

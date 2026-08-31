@@ -85,6 +85,12 @@ class DataService:
 
         return _compute(self.db, player=player, surface=surface, min_sample=min_sample)
 
+    def get_player_points_per_set(self, player: Optional[str] = None) -> Dict[str, Any]:
+        """Average points won/lost per set position (1..5) per tennis player."""
+        from src.application.tennis_stats_service import compute_player_points_per_set as _compute
+
+        return _compute(self.db, player=player)
+
     # ------------------------------------------------------------------
     # Matches
     # ------------------------------------------------------------------

@@ -115,6 +115,47 @@
           message="No hay predicciones validadas para un jugador con ese nombre todavía."
         />
       </div>
+
+      <!-- Average points per set (1st..5th) -->
+      <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mt-4">
+        <h3 class="font-semibold text-slate-900 mb-1">Puntos promedio por set</h3>
+        <p class="text-xs text-slate-500 mb-3">
+          Puntos ganados-perdidos por set (1º a 5º) sobre los partidos FINISHED con detalle punto a punto.
+          {{ reliabilitySearch.trim() ? 'Filtrado por el buscador de arriba.' : `Top ${pointsPerSetRows.length} por muestra; usa el buscador para uno concreto.` }}
+        </p>
+        <div class="overflow-x-auto" tabindex="0">
+          <table class="min-w-full text-sm">
+            <thead>
+              <tr class="text-left text-xs text-slate-500 uppercase tracking-wider">
+                <th class="py-2 pr-4">Jugador</th>
+                <th class="py-2 px-3">1er set</th>
+                <th class="py-2 px-3">2º set</th>
+                <th class="py-2 px-3">3er set</th>
+                <th class="py-2 px-3">4º set</th>
+                <th class="py-2 px-3">5º set</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="p in pointsPerSetRows" :key="p.player" class="border-t border-slate-100">
+                <td class="py-2 pr-4 font-medium text-slate-900 whitespace-nowrap">{{ p.player }}</td>
+                <td v-for="s in ['1','2','3','4','5']" :key="s" class="py-2 px-3 whitespace-nowrap">
+                  <template v-if="p.sets[s]">
+                    {{ p.sets[s].avgWon }}-{{ p.sets[s].avgLost }}
+                    <span class="text-xs text-slate-500">(n={{ p.sets[s].n }})</span>
+                  </template>
+                  <span v-else class="text-xs text-slate-400">–</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <EmptyState
+          v-if="!pointsPerSetRows.length"
+          icon="📈"
+          title="Sin datos de puntos por set"
+          :message="reliabilitySearch.trim() ? 'Ese jugador no tiene partidos con detalle punto a punto.' : 'Aún no hay partidos con detalle punto a punto.'"
+        />
+      </div>
     </div>
 
     <!-- Bets view: highest-confidence picks across today's tennis matches -->
@@ -563,10 +604,20 @@ function matchReliability(match) {
   return { player1: forSide(match.player1), player2: forSide(match.player2) }
 }
 
+// Average points per set (1..5), shown in the "Fiabilidad" tab. Reuses the
+// same player search box; no search -> top 25 by sample size.
+const pointsPerSetRows = computed(() => {
+  const all = matchesStore.playerPointsPerSet?.players || []
+  const q = reliabilitySearch.value.trim().toLowerCase()
+  if (q) return all.filter((p) => p.player.toLowerCase().includes(q)).slice(0, 30)
+  return all.slice(0, 25)
+})
+
 function loadToday() {
   matchesStore.fetchByDate(getUtcTodayStr())
   matchesStore.fetchPlayerSetStats(getUtcTodayStr())
   matchesStore.fetchPredictionReliability()
+  matchesStore.fetchPlayerPointsPerSet()
   predictionsStore.fetchLatest()
 }
 
