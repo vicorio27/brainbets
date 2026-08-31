@@ -1,290 +1,290 @@
 {
-    "id": "prediction_pipeline_db_all",
-    "name": "BrainBets - Prediction Pipeline DB-First ALL (Prediction Engine)",
-    "active": true,
-    "nodes": [
-        {
-            "parameters": {
-                "httpMethod": "POST",
-                "path": "predictions-db-all",
-                "responseMode": "lastNode"
-            },
-            "id": "webhook-trigger",
-            "name": "Webhook Trigger",
-            "type": "n8n-nodes-base.webhook",
-            "typeVersion": 1,
-            "position": [
-                250,
-                300
-            ],
-            "webhookId": "predictions-db-all"
-        },
-        {
-            "parameters": {
-                "method": "GET",
-                "url": "http://backend:8000/api/v1/matches/latest",
-                "sendQuery": true,
-                "queryParameters": {
-                    "parameters": [
-                        {
-                            "value": "={{ ($('Webhook Trigger').first().json.query || {}).sport || '' }}",
-                            "name": "sport"
-                        }
-                    ]
-                },
-                "sendHeaders": true,
-                "specifyHeaders": "json",
-                "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
-                "options": {
-                    "timeout": 30000
-                }
-            },
-            "id": "get-matches",
-            "name": "Get Matches from DB",
-            "type": "n8n-nodes-base.httpRequest",
-            "typeVersion": 4.1,
-            "position": [
-                450,
-                300
-            ]
-        },
-        {
-            "parameters": {
-                "jsCode": "// Validate matches response from API\nconst content = $input.first().json;\n\nif (!content || !content.generatedAt || !Array.isArray(content.tennis) || !Array.isArray(content.football)) {\n  throw new Error('Invalid matches response from API');\n}\n\nreturn [{ json: content }];"
-            },
-            "id": "validate-matches",
-            "name": "Validate Matches",
-            "type": "n8n-nodes-base.code",
-            "typeVersion": 2,
-            "position": [
-                650,
-                300
-            ]
-        },
-        {
-            "parameters": {
-                "jsCode": "// Build batch payload for prediction engine\nconst matches = $input.first().json;\nconst batch = [];\n\nfor (const match of matches.tennis) {\n  batch.push({ sport: 'tennis', match: match });\n}\n\nfor (const match of matches.football) {\n  batch.push({ sport: 'football', match: match });\n}\n\nreturn [{ json: { matches: batch } }];"
-            },
-            "id": "build-batch",
-            "name": "Build Batch",
-            "type": "n8n-nodes-base.code",
-            "typeVersion": 2,
-            "position": [
-                850,
-                300
-            ]
-        },
-        {
-            "parameters": {
-                "command": "=printf '%s' '{{ $json.toJsonString().base64Encode() }}' | base64 -d > /tmp/predict_input.json && python3 /prediction-engine/predict.py /tmp/predict_input.json"
-            },
-            "id": "run-prediction-engine",
-            "name": "Run Prediction Engine",
-            "type": "n8n-nodes-base.executeCommand",
-            "typeVersion": 1,
-            "position": [
-                1050,
-                300
-            ]
-        },
-        {
-            "parameters": {
-                "jsCode": "// Parse prediction engine stdout (JSON array)\nconst stdout = $input.first().json.stdout;\nlet results;\ntry {\n  results = JSON.parse(stdout);\n} catch (e) {\n  throw new Error('Prediction engine returned invalid JSON: ' + stdout);\n}\nif (!Array.isArray(results)) {\n  results = [results];\n}\nreturn results.map(r => ({ json: r }));"
-            },
-            "id": "parse-engine-output",
-            "name": "Parse Engine Output",
-            "type": "n8n-nodes-base.code",
-            "typeVersion": 2,
-            "position": [
-                1250,
-                300
-            ]
-        },
-        {
-            "parameters": {
-                "jsCode": "// Aggregate all engine outputs into predictions batch\nconst items = $input.all();\nconst predictions = [];\n\nfor (const item of items) {\n  const engineOutput = item.json;\n  if (engineOutput.error || !engineOutput.predictions) continue;\n  const matchId = engineOutput.matchId;\n  const sport = engineOutput.sport;\n  const enginePredictions = engineOutput.predictions || [];\n\n  for (const pred of enginePredictions) {\n    predictions.push({\n      matchId: matchId,\n      sport: sport,\n      market: pred.market,\n      prediction: pred.prediction,\n      confidence: pred.confidence,\n      reasoning: pred.reasoning || '',\n      naturalLanguageReasoning: pred.naturalLanguageReasoning || engineOutput.naturalLanguageReasoning || '',\n      probabilities: pred.probabilities || {},\n      modelContributions: pred.modelContributions || {},\n      reasoningData: pred.reasoningData || {}\n    });\n  }\n}\n\nconst now = new Date();\nconst datePrefix = now.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }).replace(/-/g, '');\nfunction stableHash(str) {\n  let h = 0;\n  for (let i = 0; i < str.length; i++) {\n    h = ((h << 5) - h) + str.charCodeAt(i);\n    h |= 0;\n  }\n  return Math.abs(h).toString().padStart(5, '0');\n}\nfor (let i = 0; i < predictions.length; i++) {\n  const p = predictions[i];\n  const suffix = stableHash(`${p.matchId}|${p.market}`).slice(0, 5);\n  p.predictionId = `PRED-${datePrefix}-${suffix}`;\n  p.status = 'PENDING';\n}\n\nconst generatedAt = now.toISOString();\nconst output = {\n  generatedAt: generatedAt,\n  source: 'prediction_engine',\n  predictions: predictions\n};\n\nreturn [{ json: output }];"
-            },
-            "id": "build-output",
-            "name": "Build Predictions Output",
-            "type": "n8n-nodes-base.code",
-            "typeVersion": 2,
-            "position": [
-                1450,
-                300
-            ]
-        },
-        {
-            "parameters": {
-                "method": "POST",
-                "url": "http://backend:8000/api/v1/internal/predictions/bulk",
-                "sendBody": true,
-                "contentType": "json",
-                "specifyBody": "json",
-                "options": {
-                    "timeout": 30000
-                },
-                "sendHeaders": true,
-                "specifyHeaders": "json",
-                "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
-                "jsonBody": {
-                    "generatedAt": "={{ $json.generatedAt }}",
-                    "source": "={{ $json.source }}",
-                    "predictions": "={{ $json.predictions }}"
-                }
-            },
-            "id": "send-to-db",
-            "name": "Send Predictions to DB",
-            "type": "n8n-nodes-base.httpRequest",
-            "typeVersion": 4.1,
-            "position": [
-                1650,
-                300
-            ]
-        },
-        {
-            "parameters": {
-                "jsCode": "const data = $('Build Predictions Output').first().json;\nconst dbResult = $input.first().json || {};\nconst count = data.predictions ? data.predictions.length : 0;\nconst inserted = dbResult.inserted || 0;\nconst updated = dbResult.updated || 0;\nconst errors = dbResult.errors ? dbResult.errors.length : 0;\n\nconst matchesBySport = {};\nconst predBySport = {};\nfor (const pred of (data.predictions || [])) {\n  const sport = pred.sport || 'unknown';\n  matchesBySport[sport] = matchesBySport[sport] || new Set();\n  matchesBySport[sport].add(pred.matchId);\n  predBySport[sport] = (predBySport[sport] || 0) + 1;\n}\n\nlet sportLines = '';\nfor (const sport of Object.keys(matchesBySport).sort()) {\n  sportLines += `\\n- ${sport}: ${matchesBySport[sport].size} partidos, ${predBySport[sport]} predicciones`;\n}\nconst predictedMatches = Object.values(matchesBySport).reduce((a, s) => a + s.size, 0);\n\nconst telegramMessage = `<b>BrainBets - Predicciones Generadas</b>\\n\\nModelos: Prediction Engine\\nTotal predicciones: ${count}\\nPartidos predichos: ${predictedMatches}${sportLines}\\n\\nInsertadas: ${inserted}\\nActualizadas: ${updated}\\nErrores: ${errors}`;\nreturn [{\n  json: {\n    telegramMessage: telegramMessage,\n    dbResult: dbResult\n  }\n}];"
-            },
-            "id": "prepare-notify",
-            "name": "Prepare Notify",
-            "type": "n8n-nodes-base.code",
-            "typeVersion": 2,
-            "position": [
-                1850,
-                300
-            ]
-        },
-        {
-            "parameters": {
-                "method": "POST",
-                "url": "https://api.telegram.org/bot__TELEGRAM_TOKEN__/sendMessage",
-                "sendBody": true,
-                "contentType": "json",
-                "specifyBody": "json",
-                "options": {},
-                "sendHeaders": true,
-                "specifyHeaders": "json",
-                "jsonHeaders": "={\"Content-Type\": \"application/json\"}",
-                "jsonBody": {
-                    "chat_id": "__TELEGRAM_CHAT_ID__",
-                    "text": "={{ $json.telegramMessage || 'BrainBets - Predicciones listas' }}",
-                    "parse_mode": "HTML"
-                }
-            },
-            "id": "telegram-notify",
-            "name": "Telegram Notification",
-            "type": "n8n-nodes-base.httpRequest",
-            "typeVersion": 4.1,
-            "position": [
-                2050,
-                300
-            ]
-        }
-    ],
-    "connections": {
-        "Webhook Trigger": {
-            "main": [
-                [
-                    {
-                        "node": "Get Matches from DB",
-                        "type": "main",
-                        "index": 0
-                    }
-                ]
-            ]
-        },
-        "Get Matches from DB": {
-            "main": [
-                [
-                    {
-                        "node": "Validate Matches",
-                        "type": "main",
-                        "index": 0
-                    }
-                ]
-            ]
-        },
-        "Validate Matches": {
-            "main": [
-                [
-                    {
-                        "node": "Build Batch",
-                        "type": "main",
-                        "index": 0
-                    }
-                ]
-            ]
-        },
-        "Build Batch": {
-            "main": [
-                [
-                    {
-                        "node": "Run Prediction Engine",
-                        "type": "main",
-                        "index": 0
-                    }
-                ]
-            ]
-        },
-        "Run Prediction Engine": {
-            "main": [
-                [
-                    {
-                        "node": "Parse Engine Output",
-                        "type": "main",
-                        "index": 0
-                    }
-                ]
-            ]
-        },
-        "Parse Engine Output": {
-            "main": [
-                [
-                    {
-                        "node": "Build Predictions Output",
-                        "type": "main",
-                        "index": 0
-                    }
-                ]
-            ]
-        },
-        "Build Predictions Output": {
-            "main": [
-                [
-                    {
-                        "node": "Send Predictions to DB",
-                        "type": "main",
-                        "index": 0
-                    }
-                ]
-            ]
-        },
-        "Send Predictions to DB": {
-            "main": [
-                [
-                    {
-                        "node": "Prepare Notify",
-                        "type": "main",
-                        "index": 0
-                    }
-                ]
-            ]
-        },
-        "Prepare Notify": {
-            "main": [
-                [
-                    {
-                        "node": "Telegram Notification",
-                        "type": "main",
-                        "index": 0
-                    }
-                ]
-            ]
-        }
+  "id": "prediction_pipeline_db_all",
+  "name": "BrainBets - Prediction Pipeline DB-First ALL (Prediction Engine)",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "predictions-db-all",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "predictions-db-all"
     },
-    "settings": {
-        "executionOrder": "v1"
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://backend:8000/api/v1/matches/latest",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "value": "={{ ($('Webhook Trigger').first().json.query || {}).sport || '' }}",
+              "name": "sport"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "get-matches",
+      "name": "Get Matches from DB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        300
+      ]
     },
-    "staticData": null,
-    "tags": []
+    {
+      "parameters": {
+        "jsCode": "// Validate matches response from API\nconst content = $input.first().json;\n\nif (!content || !content.generatedAt || !Array.isArray(content.tennis) || !Array.isArray(content.football)) {\n  throw new Error('Invalid matches response from API');\n}\n\nreturn [{ json: content }];"
+      },
+      "id": "validate-matches",
+      "name": "Validate Matches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Predict only on matches that haven't finished — predicting a completed\n// match is pointless, and it keeps the single Execute Command payload well\n// under the OS argv limit (~128KB) that made predict_all die with\n// 'spawn E2BIG' when /matches/latest returned 100 matches (~200KB).\nconst matches = $input.first().json;\nconst SKIP = new Set(['FINISHED', 'CANCELLED', 'ABANDONED', 'POSTPONED']);\nconst batch = [];\nfor (const match of (matches.tennis || [])) {\n  if (!SKIP.has(String(match.status || '').toUpperCase())) batch.push({ sport: 'tennis', match });\n}\nfor (const match of (matches.football || [])) {\n  if (!SKIP.has(String(match.status || '').toUpperCase())) batch.push({ sport: 'football', match });\n}\nreturn [{ json: { matches: batch } }];\n"
+      },
+      "id": "build-batch",
+      "name": "Build Batch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=cat << 'HEREDOC_END' > /tmp/predict_input.json\n{{ $json.toJsonString() }}\nHEREDOC_END\npython3 /prediction-engine/predict.py /tmp/predict_input.json"
+      },
+      "id": "run-prediction-engine",
+      "name": "Run Prediction Engine",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1050,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse prediction engine stdout across every chunk (each is a JSON array).\nconst out = [];\nfor (const item of $input.all()) {\n  const stdout = (item.json && item.json.stdout) ? String(item.json.stdout).trim() : '';\n  if (!stdout) continue;\n  let results;\n  try {\n    results = JSON.parse(stdout);\n  } catch (e) {\n    throw new Error('Prediction engine returned invalid JSON: ' + stdout.slice(0, 500));\n  }\n  if (!Array.isArray(results)) results = [results];\n  for (const r of results) out.push({ json: r });\n}\nif (out.length === 0) throw new Error('Prediction engine produced no output');\nreturn out;\n"
+      },
+      "id": "parse-engine-output",
+      "name": "Parse Engine Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate all engine outputs into a predictions batch.\n// The predictionId prefix is the MATCH's date (Bogota), NOT the run date, so\n// re-predicting the same match on any day yields the same id -> UPDATE, not a\n// duplicate insert (see AGENTS.md gotcha #45).\nconst items = $input.all();\nconst predictions = [];\nconst now = new Date();\n\nfunction stableHash(str) {\n  let h = 0;\n  for (let i = 0; i < str.length; i++) { h = ((h << 5) - h) + str.charCodeAt(i); h |= 0; }\n  return Math.abs(h).toString().padStart(5, '0');\n}\nfunction datePrefix(engineOutput) {\n  const d = (engineOutput.match && (engineOutput.match.eventDate || engineOutput.match.matchDate)) || '';\n  if (/^\\d{4}-\\d{2}-\\d{2}/.test(d)) return d.slice(0, 10).replace(/-/g, '');\n  return now.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }).replace(/-/g, '');\n}\n\nfor (const item of items) {\n  const engineOutput = item.json;\n  if (engineOutput.error || !engineOutput.predictions) continue;\n  const matchId = engineOutput.matchId;\n  const sport = engineOutput.sport;\n  const prefix = datePrefix(engineOutput);\n  for (const pred of (engineOutput.predictions || [])) {\n    predictions.push({\n      predictionId: `PRED-${prefix}-${stableHash(`${matchId}|${pred.market}`).slice(0, 5)}`,\n      status: 'PENDING',\n      matchId: matchId,\n      sport: sport,\n      market: pred.market,\n      prediction: pred.prediction,\n      confidence: pred.confidence,\n      expectedValue: pred.expectedValue ?? null,\n      kellyFraction: pred.kellyFraction ?? null,\n      reasoning: pred.reasoning || '',\n      naturalLanguageReasoning: pred.naturalLanguageReasoning || engineOutput.naturalLanguageReasoning || '',\n      probabilities: pred.probabilities || {},\n      modelContributions: pred.modelContributions || {},\n      reasoningData: pred.reasoningData || {}\n    });\n  }\n}\n\nconst output = {\n  generatedAt: now.toISOString(),\n  source: 'prediction_engine',\n  predictions: predictions\n};\nreturn [{ json: output }];\n"
+      },
+      "id": "build-output",
+      "name": "Build Predictions Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/predictions/bulk",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "options": {
+          "timeout": 30000
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "jsonBody": {
+          "generatedAt": "={{ $json.generatedAt }}",
+          "source": "={{ $json.source }}",
+          "predictions": "={{ $json.predictions }}"
+        }
+      },
+      "id": "send-to-db",
+      "name": "Send Predictions to DB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Build Predictions Output').first().json;\nconst dbResult = $input.first().json || {};\nconst count = data.predictions ? data.predictions.length : 0;\nconst inserted = dbResult.inserted || 0;\nconst updated = dbResult.updated || 0;\nconst errors = dbResult.errors ? dbResult.errors.length : 0;\n\nconst matchesBySport = {};\nconst predBySport = {};\nfor (const pred of (data.predictions || [])) {\n  const sport = pred.sport || 'unknown';\n  matchesBySport[sport] = matchesBySport[sport] || new Set();\n  matchesBySport[sport].add(pred.matchId);\n  predBySport[sport] = (predBySport[sport] || 0) + 1;\n}\n\nlet sportLines = '';\nfor (const sport of Object.keys(matchesBySport).sort()) {\n  sportLines += `\\n- ${sport}: ${matchesBySport[sport].size} partidos, ${predBySport[sport]} predicciones`;\n}\nconst predictedMatches = Object.values(matchesBySport).reduce((a, s) => a + s.size, 0);\n\nconst telegramMessage = `<b>BrainBets - Predicciones Generadas</b>\\n\\nModelos: Prediction Engine\\nTotal predicciones: ${count}\\nPartidos predichos: ${predictedMatches}${sportLines}\\n\\nInsertadas: ${inserted}\\nActualizadas: ${updated}\\nErrores: ${errors}`;\nreturn [{\n  json: {\n    telegramMessage: telegramMessage,\n    dbResult: dbResult\n  }\n}];"
+      },
+      "id": "prepare-notify",
+      "name": "Prepare Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot__TELEGRAM_TOKEN__/sendMessage",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "options": {},
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\"}",
+        "jsonBody": {
+          "chat_id": "__TELEGRAM_CHAT_ID__",
+          "text": "={{ $json.telegramMessage || 'BrainBets - Predicciones listas' }}",
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "telegram-notify",
+      "name": "Telegram Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2050,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Matches from DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Matches from DB": {
+      "main": [
+        [
+          {
+            "node": "Validate Matches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Matches": {
+      "main": [
+        [
+          {
+            "node": "Build Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Batch": {
+      "main": [
+        [
+          {
+            "node": "Run Prediction Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Prediction Engine": {
+      "main": [
+        [
+          {
+            "node": "Parse Engine Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Engine Output": {
+      "main": [
+        [
+          {
+            "node": "Build Predictions Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Predictions Output": {
+      "main": [
+        [
+          {
+            "node": "Send Predictions to DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Predictions to DB": {
+      "main": [
+        [
+          {
+            "node": "Prepare Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Notify": {
+      "main": [
+        [
+          {
+            "node": "Telegram Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": []
 }
