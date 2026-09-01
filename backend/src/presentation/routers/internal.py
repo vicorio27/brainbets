@@ -281,6 +281,7 @@ def _insert_match(
                     "stats_data_quality": raw.get("statsDataQuality"),
                     "tournament_tier": raw.get("tournamentTier"),
                     "ground_type": raw.get("groundType"),
+                    "odds_markets": raw.get("oddsMarkets"),
                     "expert_consensus": raw.get("expertConsensus"),
                 },
                 created_at=generated_at,
@@ -307,6 +308,9 @@ def _insert_match(
                 "stats_data_quality": raw.get("statsDataQuality"),
                 "tournament_tier": raw.get("tournamentTier"),
                 "ground_type": raw.get("groundType"),
+                "odds_markets": raw.get("oddsMarkets")
+                if raw.get("oddsMarkets") is not None
+                else existing_extra.get("odds_markets"),
                 "expert_consensus": raw.get("expertConsensus")
                 if raw.get("expertConsensus") is not None
                 else existing_extra.get("expert_consensus"),

@@ -25,6 +25,10 @@ class TennisMatch(BaseModel):
     eloSurfacePlayer2: Optional[float] = None
     oddsPlayer1: Optional[float] = None
     oddsPlayer2: Optional[float] = None
+    # Decimal odds for the other predicted markets, from the same get_odds
+    # payload: {matchWinner:{p1,p2}, set1Winner:{p1,p2}, numberOfSets:{"3":o,..},
+    #           setBetting:{"3:0":o,..}}
+    oddsMarkets: Optional[Dict[str, Any]] = None
     tournamentTier: Optional[int] = None
     groundType: Optional[str] = None
     countryPlayer1: Optional[str] = None

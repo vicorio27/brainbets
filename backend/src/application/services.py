@@ -319,6 +319,7 @@ class DataService:
             eloSurfacePlayer2=float(surface_p2.current_elo) if surface_p2 and surface_p2.current_elo else None,
             oddsPlayer1=float(p1.pre_match_odds) if p1 and p1.pre_match_odds is not None else None,
             oddsPlayer2=float(p2.pre_match_odds) if p2 and p2.pre_match_odds is not None else None,
+            oddsMarkets=meta.get("odds_markets"),
             tournamentTier=meta.get("tournament_tier"),
             groundType=meta.get("ground_type"),
             countryPlayer1=p1.competitor.country,
