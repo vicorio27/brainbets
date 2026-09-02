@@ -304,8 +304,9 @@
           <div>
             <h2 class="text-lg font-semibold text-slate-900">🧩 Combinadas recomendadas</h2>
             <p class="text-xs text-slate-500">
-              1 leg por partido · solo legs donde el modelo coincide con el mercado (|p−cuota| &lt; 15pts) ·
-              EV combinado &gt; 0. Los EV son del modelo (varianza alta en combinadas).
+              1 leg por partido · solo legs donde el modelo va con el mercado
+              (|p−cuota| &lt; {{ comboLegs >= 3 ? '10' : '15' }}pts, más estricto a 3 legs) ·
+              EV combinado &gt; 0. Los EV son del modelo (sobre-confiados; se muestran capados al 100%).
             </p>
           </div>
           <label class="text-sm font-medium text-slate-700 flex items-center gap-2 flex-shrink-0">
@@ -343,8 +344,9 @@
               <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-semibold">prob {{ (c.pCombo * 100).toFixed(0) }}%</span>
               <span
                 class="px-2 py-0.5 rounded-full font-semibold"
-                :class="c.evCombo > 0.10 ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'"
-              >EV +{{ (c.evCombo * 100).toFixed(0) }}%</span>
+                :class="c.evShown > 0.10 ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'"
+                :title="c.evCapped ? `EV del modelo ${(c.evCombo * 100).toFixed(0)}% — capado en pantalla` : ''"
+              >EV +{{ (c.evShown * 100).toFixed(0) }}%{{ c.evCapped ? '+' : '' }}</span>
               <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">stake ¼ Kelly {{ (c.kelly * 25).toFixed(1) }}%</span>
             </div>
           </li>
@@ -689,10 +691,22 @@ function comboLegProb(p) {
   return c != null ? c / 100 : null
 }
 
+// Model overconfidence compounds in a parlay, so the tolerance for the
+// model disagreeing with the market tightens as legs are added.
+const COMBO_MAX_DIVERGENCE = { 2: 0.15, 3: 0.10 }
+const COMBO_MIN_LEG_PROB = { 2: 0.35, 3: 0.42 }
+// Displayed EV is capped; a combined EV above this is model noise, not signal.
+const COMBO_EV_DISPLAY_CAP = 1.0
+const COMBO_EV_DROP = 2.5
+
 // Best qualifying leg per match: has odds, model agrees with the market
-// (kills the +50% artifacts), not a longshot, positive edge.
+// (kills the +50% artifacts), not a longshot, positive edge. The thresholds
+// depend on how many legs the combo will have.
 const comboPool = computed(() => {
   const today = getUtcTodayStr()
+  const k = comboLegs.value
+  const maxDiv = COMBO_MAX_DIVERGENCE[k] ?? 0.15
+  const minProb = COMBO_MIN_LEG_PROB[k] ?? 0.35
   const byMatch = {}
   for (const p of predictionsStore.latest?.predictions || []) {
     if (String(p.sport).toLowerCase() !== 'tennis') continue
@@ -700,8 +714,8 @@ const comboPool = computed(() => {
     const odd = comboLegOdd(p)
     const prob = comboLegProb(p)
     if (odd == null || odd <= 1 || prob == null) continue
-    if (prob < 0.35) continue
-    if (Math.abs(prob - 1 / odd) > 0.15) continue
+    if (prob < minProb) continue
+    if (Math.abs(prob - 1 / odd) > maxDiv) continue
     const ev = prob * odd - 1
     if (ev <= 0) continue
     const m = tennisMatchById.value[p.matchId] || {}
@@ -739,9 +753,17 @@ const combos = computed(() => {
       const evCombo = pCombo * oddsCombo - 1
       const b = oddsCombo - 1
       const kelly = b > 0 ? Math.max(0, (b * pCombo - (1 - pCombo)) / b) : 0
-      return { legs, pCombo, oddsCombo, evCombo, kelly }
+      return {
+        legs,
+        pCombo,
+        oddsCombo,
+        evCombo,
+        evShown: Math.min(evCombo, COMBO_EV_DISPLAY_CAP),
+        evCapped: evCombo > COMBO_EV_DISPLAY_CAP,
+        kelly: Math.min(kelly, 4 * COMBO_EV_DISPLAY_CAP) // keep ¼-Kelly stake sane too
+      }
     })
-    .filter((c) => c.evCombo > 0)
+    .filter((c) => c.evCombo > 0 && c.evCombo <= COMBO_EV_DROP)
     .sort((a, b) => b.evCombo - a.evCombo)
     .slice(0, 8)
 })
