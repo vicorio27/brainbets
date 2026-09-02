@@ -668,6 +668,49 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
         f"({round(set1_prob*100,1)}% por set, derivado del ensemble de partido)."
     )
 
+    # --- EV / Kelly for the set-level markets, using the odds for those exact
+    # markets parsed from api-tennis get_odds (match.oddsMarkets). ---
+    odds_markets = safe_get(match, 'odds_markets') or {}
+
+    def _combine_odds(*decimals):
+        """Fair combined decimal odd for 'A or B' from the per-outcome odds."""
+        inv = sum(1.0 / float(o) for o in decimals if o and float(o) > 1.0)
+        return round(1.0 / inv, 3) if inv > 0 else None
+
+    # Set 1 Winner
+    _s1 = odds_markets.get('set1Winner') or {}
+    _s1_p1, _s1_p2 = _s1.get('p1'), _s1.get('p2')
+    set1_odd = _s1_p1 if set1_winner == p1 else _s1_p2
+    set1_ev = ev_and_kelly(set1_prob, set1_odd)
+    set1_odds_decimal = (
+        {'player1': _s1_p1, 'player2': _s1_p2} if _s1_p1 and _s1_p2 else None
+    )
+
+    # Total Sets (Over/Under the format line) from the "Number of sets" market
+    _ns = odds_markets.get('numberOfSets') or {}
+    if best_of >= 5:
+        over_odd = _combine_odds(_ns.get('4'), _ns.get('5'))  # 4 o 5 sets
+        under_odd = _ns.get('3')
+    else:
+        over_odd = _ns.get('3')
+        under_odd = _ns.get('2')
+    sets_odd = over_odd if over_sets else under_odd
+    sets_prob = close_match_prob if over_sets else (1.0 - close_match_prob)
+    sets_ev = ev_and_kelly(sets_prob, sets_odd)
+    sets_odds_decimal = (
+        {'over': over_odd, 'under': under_odd, 'chosen': sets_odd}
+        if (over_odd or under_odd) else None
+    )
+
+    # Exact Set Score from the "Set Betting" market (keys like "3:1" / "1:3")
+    _sb = odds_markets.get('setBetting') or {}
+    _pl, _, _sc = best_exact.rpartition(' ')
+    _w, _, _l = _sc.partition('-')
+    _sb_key = f'{_w}:{_l}' if _pl == p1 else f'{_l}:{_w}'
+    exact_odd = _sb.get(_sb_key)
+    exact_ev = ev_and_kelly(exact_scores[best_exact], exact_odd)
+    exact_odds_decimal = {'chosen': exact_odd, 'key': _sb_key} if exact_odd else None
+
     # Total Aces over/under 15.5 — only with real per-player aces averages.
     # Expected total = combined average adjusted by surface speed, modelled
     # with a Poisson distribution over the 15.5 line (matches validation).
@@ -748,6 +791,8 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
             'market': 'Total Sets',
             'prediction': f'Over {sets_line}' if over_sets else f'Under {sets_line}',
             'confidence': confidence_from_prob(max(close_match_prob, 1.0 - close_match_prob)),
+            'expectedValue': sets_ev['expected_value'],
+            'kellyFraction': sets_ev['kelly_fraction'],
             'probabilities': format_probabilities({
                 'over': close_match_prob,
                 'under': 1.0 - close_match_prob,
@@ -759,12 +804,15 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
                 'rankDifference': rank_diff,
                 'bestOf': best_of,
                 'line': sets_line,
+                'oddsDecimal': sets_odds_decimal,
             },
         },
         {
             'market': 'Exact Set Score',
             'prediction': best_exact,
             'confidence': confidence_from_prob(exact_scores[best_exact]),
+            'expectedValue': exact_ev['expected_value'],
+            'kellyFraction': exact_ev['kelly_fraction'],
             'probabilities': format_probabilities(exact_scores),
             'modelContributions': ensemble['model_contributions'],
             'reasoning': exact_reasoning,
@@ -774,12 +822,15 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
                     'player1': set_p1,
                     'player2': set_p2,
                 }),
+                'oddsDecimal': exact_odds_decimal,
             },
         },
         {
             'market': 'Set 1 Winner',
             'prediction': set1_winner,
             'confidence': confidence_from_prob(set1_prob),
+            'expectedValue': set1_ev['expected_value'],
+            'kellyFraction': set1_ev['kelly_fraction'],
             'probabilities': format_probabilities({
                 'player1': set_p1,
                 'player2': set_p2,
@@ -792,6 +843,7 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
                     'player1': set_p1,
                     'player2': set_p2,
                 }),
+                'oddsDecimal': set1_odds_decimal,
             },
         },
     ]

@@ -171,6 +171,12 @@ def calibrated_probability(sport: Optional[str], market: Optional[str], confiden
     return None
 
 
+# Markets whose "confidence" is not a Match-Winner-style binary probability
+# (Exact Set Score is a 6-way market — its low "confidence" fed through a
+# binary calibration curve produces nonsense EV). Keep the raw EV for these.
+_NO_CALIBRATED_EV_MARKETS = {"exact set score"}
+
+
 def _odds_for_outcome(
     reasoning_data: Optional[Dict[str, Any]],
     predicted_outcome: Optional[str],
@@ -202,6 +208,10 @@ def _odds_for_outcome(
             value = odds.get("player2")
         else:
             value = None
+    # Markets whose outcome isn't a player name (Total Sets, Exact Set Score):
+    # the engine puts the chosen selection's odd under "chosen".
+    elif "chosen" in odds:
+        value = odds.get("chosen")
     else:
         value = None
     try:
@@ -230,5 +240,9 @@ def apply_calibration(
         return None, None
     calibrated_conf = max(1, min(99, int(round(prob * 100))))
     odds = _odds_for_outcome(reasoning_data, predicted_outcome, home_name, away_name)
-    calibrated_ev = round(prob * odds - 1.0, 4) if odds else None
+    calibrated_ev = (
+        round(prob * odds - 1.0, 4)
+        if odds and (market or "").strip().lower() not in _NO_CALIBRATED_EV_MARKETS
+        else None
+    )
     return calibrated_conf, calibrated_ev

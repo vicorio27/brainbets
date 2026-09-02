@@ -226,9 +226,9 @@
         <p class="text-xs text-slate-500 mt-3">
           <template v-if="minEdge >= 0">
             <b>{{ bettingRecs.length }}</b> partido(s) con valor real ·
-            <b>{{ bettingPickCount }}</b> apuesta(s) con edge. Solo Match Winner trae cuota; el resto de
-            mercados del partido se muestra debajo como <span class="text-slate-500">contexto</span> (sin cuota).
-            Orden: mayor edge primero.
+            <b>{{ bettingPickCount }}</b> apuesta(s) con edge en Match Winner, Total Sets, Set 1 Winner y
+            Marcador exacto (según cuotas disponibles). Los picks sin edge suficiente van debajo como
+            <span class="text-slate-500">contexto</span>. Orden: mayor edge primero.
           </template>
           <template v-else>
             {{ bettingRecs.length }} partido(s) sobre {{ minConfidence }}% de confianza

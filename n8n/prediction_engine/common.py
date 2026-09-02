@@ -96,6 +96,7 @@ def safe_get(d: Dict[str, Any], key: str, default: Any = None) -> Any:
         'elo_surface_player2': 'eloSurfacePlayer2',
         'odds_player1': 'oddsPlayer1',
         'odds_player2': 'oddsPlayer2',
+        'odds_markets': 'oddsMarkets',
         'home_odds': 'homeOdds',
         'draw_odds': 'drawOdds',
         'away_odds': 'awayOdds',
