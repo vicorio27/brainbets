@@ -1111,14 +1111,16 @@ def compute_player_points_per_set(
     if player:
         q = q.filter(func.lower(Competitor.name).like(f"%{player.strip().lower()}%"))
 
-    # agg[name][set_no] = [points_won, points_lost, matches_counted]
-    agg: Dict[str, Dict[int, list]] = {}
+    # agg[name] = {"all": {set_no: [won, lost, n]},
+    #              "surf": {surface: {set_no: [won, lost, n]}}}
+    agg: Dict[str, Dict[str, Any]] = {}
     for name, extra, side in q.all():
         rows = ((extra or {}).get("score_stats") or {}).get("points") or []
         if not rows:
             continue
+        surf = normalize_surface((extra or {}).get("surface"))
         is_home = side in ("player1", "home")
-        by_set = agg.setdefault(name, {})
+        rec = agg.setdefault(name, {"all": {}, "surf": {}})
         for row in rows:
             try:
                 set_no = int(row.get("set"))
@@ -1129,29 +1131,48 @@ def compute_player_points_per_set(
             if set_no < 1 or set_no > 5 or p1 + p2 == 0:
                 continue
             won, lost = (p1, p2) if is_home else (p2, p1)
-            cell = by_set.setdefault(set_no, [0, 0, 0])
-            cell[0] += won
-            cell[1] += lost
-            cell[2] += 1
+            for bucket in (
+                rec["all"].setdefault(set_no, [0, 0, 0]),
+                rec["surf"].setdefault(surf, {}).setdefault(set_no, [0, 0, 0]) if surf else None,
+            ):
+                if bucket is None:
+                    continue
+                bucket[0] += won
+                bucket[1] += lost
+                bucket[2] += 1
 
-    players = []
-    for name, by_set in agg.items():
-        sets_out: Dict[str, Any] = {}
-        total_n = 0
+    def _pack_sets(by_set: Dict[int, list]) -> Dict[str, Any]:
+        out: Dict[str, Any] = {}
         for set_no, (won, lost, n) in sorted(by_set.items()):
             if not n:
                 continue
-            total_n += n
-            sets_out[str(set_no)] = {
+            out[str(set_no)] = {
                 "n": n,
                 "avgWon": round(won / n, 1),
                 "avgLost": round(lost / n, 1),
                 "avgTotal": round((won + lost) / n, 1),
             }
-        if sets_out:
-            players.append(
-                {"player": name, "sets": sets_out, "sampleTotal": total_n}
-            )
+        return out
+
+    players = []
+    for name, rec in agg.items():
+        sets_out = _pack_sets(rec["all"])
+        if not sets_out:
+            continue
+        by_surface = {
+            surf: packed
+            for surf, bs in rec["surf"].items()
+            if (packed := _pack_sets(bs))
+        }
+        total_n = sum(v["n"] for v in sets_out.values())
+        players.append(
+            {
+                "player": name,
+                "sets": sets_out,
+                "bySurface": by_surface,
+                "sampleTotal": total_n,
+            }
+        )
 
     players.sort(key=lambda p: p["sampleTotal"], reverse=True)
     return {

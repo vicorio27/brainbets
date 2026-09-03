@@ -140,11 +140,26 @@
         />
       </div>
 
-      <!-- Average points per set (1st..5th) -->
+      <!-- Average points per set (1st..5th), optionally by surface -->
       <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mt-4">
-        <h3 class="font-semibold text-slate-900 mb-1">Puntos promedio por set</h3>
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-1">
+          <h3 class="font-semibold text-slate-900">Puntos promedio por set</h3>
+          <label class="text-sm font-medium text-slate-700 flex items-center gap-2 flex-shrink-0">
+            Superficie:
+            <select
+              v-model="pointsSurface"
+              aria-label="Superficie para puntos por set"
+              class="px-2 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">Todas</option>
+              <option value="clay">🟠 Arcilla</option>
+              <option value="hard">🔵 Dura</option>
+              <option value="grass">🟢 Hierba</option>
+            </select>
+          </label>
+        </div>
         <p class="text-xs text-slate-500 mb-3">
-          Puntos ganados-perdidos por set (1º a 5º) sobre los partidos FINISHED con detalle punto a punto.
+          Puntos ganados-perdidos por set (1º a 5º) sobre los partidos FINISHED con detalle punto a punto{{ pointsSurface !== 'all' ? ` en ${surfaceLabel(pointsSurface)}` : '' }}.
           {{ reliabilitySearch.trim() ? 'Filtrado por el buscador de arriba.' : `Top ${pointsPerSetRows.length} por muestra; usa el buscador para uno concreto.` }}
         </p>
         <div class="overflow-x-auto" tabindex="0">
@@ -823,12 +838,23 @@ function matchReliability(match) {
 }
 
 // Average points per set (1..5), shown in the "Fiabilidad" tab. Reuses the
-// same player search box; no search -> top 25 by sample size.
+// same player search box; no search -> top by sample size. A surface filter
+// switches between the all-surface aggregate and the per-surface breakdown.
+const pointsSurface = ref('all')
 const pointsPerSetRows = computed(() => {
   const all = matchesStore.playerPointsPerSet?.players || []
   const q = reliabilitySearch.value.trim().toLowerCase()
-  if (q) return all.filter((p) => p.player.toLowerCase().includes(q)).slice(0, 30)
-  return all.slice(0, 25)
+  const surf = pointsSurface.value
+  return all
+    .filter((p) => !q || p.player.toLowerCase().includes(q))
+    .map((p) => {
+      const sets = surf === 'all' ? p.sets : (p.bySurface?.[surf] || {})
+      const n = Object.values(sets).reduce((x, s) => x + (s.n || 0), 0)
+      return { player: p.player, sets, sampleTotal: n }
+    })
+    .filter((p) => p.sampleTotal > 0)
+    .sort((a, b) => b.sampleTotal - a.sampleTotal)
+    .slice(0, q ? 30 : 25)
 })
 
 function loadToday() {
