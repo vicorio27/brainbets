@@ -195,6 +195,38 @@
           :message="reliabilitySearch.trim() ? 'Ese jugador no tiene partidos con detalle punto a punto.' : 'Aún no hay partidos con detalle punto a punto.'"
         />
       </div>
+
+      <!-- Last 3 matches per surface -->
+      <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mt-4">
+        <h3 class="font-semibold text-slate-900 mb-1">Últimos 3 partidos por superficie</h3>
+        <p class="text-xs text-slate-500 mb-3">
+          Partidos FINISHED más recientes de cada jugador en cada superficie (de la base, sin llamadas externas).
+          {{ reliabilitySearch.trim() ? 'Filtrado por el buscador de arriba.' : 'Usa el buscador para un jugador concreto.' }}
+        </p>
+        <div class="space-y-3">
+          <div v-for="p in recentBySurfaceRows" :key="p.player" class="border-t border-slate-100 pt-3 first:border-0 first:pt-0">
+            <div class="font-medium text-slate-900 mb-1">🎾 {{ p.player }}</div>
+            <div v-for="surf in ['clay', 'hard', 'grass']" :key="surf" v-show="p.surfaces[surf]" class="mb-2 last:mb-0">
+              <div class="text-xs font-medium text-slate-600 mb-0.5">{{ surfaceLabel(surf) }}</div>
+              <ul class="text-sm text-slate-700 space-y-0.5">
+                <li v-for="(mt, i) in (p.surfaces[surf] || [])" :key="i" class="flex flex-wrap items-baseline gap-x-2">
+                  <span class="font-semibold" :class="mt.result === 'W' ? 'text-green-700' : mt.result === 'L' ? 'text-red-600' : 'text-slate-500'">
+                    {{ mt.result || '·' }} {{ mt.score || '' }}
+                  </span>
+                  <span>vs {{ mt.opponent || '?' }}</span>
+                  <span class="text-xs text-slate-500">{{ mt.date }}<span v-if="mt.tournament"> · {{ mt.tournament }}</span></span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        <EmptyState
+          v-if="!recentBySurfaceRows.length"
+          icon="🎾"
+          title="Sin partidos"
+          :message="reliabilitySearch.trim() ? 'Ese jugador no tiene partidos terminados en la base.' : 'Escribe un nombre en el buscador.'"
+        />
+      </div>
     </div>
 
     <!-- Bets view: highest-confidence picks across today's tennis matches -->
@@ -857,11 +889,21 @@ const pointsPerSetRows = computed(() => {
     .slice(0, q ? 30 : 25)
 })
 
+// Last 3 matches per surface, "Fiabilidad" tab. Only shown when searching a
+// player (per-match rows for every player would be huge).
+const recentBySurfaceRows = computed(() => {
+  const all = matchesStore.playerRecentBySurface?.players || []
+  const q = reliabilitySearch.value.trim().toLowerCase()
+  if (!q) return all.slice(0, 8)
+  return all.filter((p) => p.player.toLowerCase().includes(q)).slice(0, 20)
+})
+
 function loadToday() {
   matchesStore.fetchByDate(getUtcTodayStr())
   matchesStore.fetchPlayerSetStats(getUtcTodayStr())
   matchesStore.fetchPredictionReliability()
   matchesStore.fetchPlayerPointsPerSet()
+  matchesStore.fetchPlayerRecentBySurface()
   predictionsStore.fetchLatest()
 }
 

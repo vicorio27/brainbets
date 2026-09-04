@@ -83,6 +83,17 @@ def get_router() -> APIRouter:
         player with per-set point data. Optional `player` substring filter."""
         return service.get_player_points_per_set(player=player)
 
+    @r.get("/player-recent-by-surface")
+    async def get_player_recent_by_surface(
+        player: Optional[str] = Query(None),
+        limit: int = Query(3, ge=1, le=10),
+        service: DataService = Depends(get_data_service),
+    ):
+        """The last `limit` finished matches per surface for tennis players
+        (opponent, result, score, tournament, date) — read from the DB, no
+        external calls. Optional `player` substring filter."""
+        return service.get_player_recent_by_surface(player=player, limit=limit)
+
     @r.get("/{match_id}/serve-stats")
     async def get_match_serve_stats(match_id: str, service: DataService = Depends(get_data_service)):
         """Serve/return profile (hold/break %, first-serve %, tiebreak record)

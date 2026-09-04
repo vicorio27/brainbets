@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from src.domain.models import (
     Competitor,
     CompetitorEloHistory,
+    League,
     Match,
     MatchCompetitor,
     MatchScore,
@@ -1179,3 +1180,149 @@ def compute_player_points_per_set(
         "generatedAt": datetime.utcnow().isoformat() + "Z",
         "players": players,
     }
+
+
+def compute_player_recent_by_surface(
+    db: Session, player: Optional[str] = None, limit: int = 3
+) -> Dict[str, Any]:
+    """The last ``limit`` FINISHED matches per surface for tennis players.
+
+    Reads purely from PostgreSQL (no api-tennis calls). Optional ``player``
+    substring filter; otherwise returns players sorted by total matches.
+    Each entry: {date, tournament, opponent, result 'W'/'L', score 'sets'}.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import func
+
+    sport = db.query(Sport).filter(Sport.code == "tennis").first()
+    if not sport:
+        return {"generatedAt": datetime.utcnow().isoformat() + "Z", "players": []}
+
+    # Candidate competitors. Without a player filter, restrict to those seen
+    # recently so this can never scan the whole (37k-row) history.
+    comp_q = db.query(Competitor.id, Competitor.name).filter(
+        Competitor.sport_id == sport.id
+    )
+    if player:
+        comp_q = comp_q.filter(
+            func.lower(Competitor.name).like(f"%{player.strip().lower()}%")
+        )
+    else:
+        recent_since = datetime.utcnow() - timedelta(days=200)
+        recent_ids = (
+            db.query(MatchCompetitor.competitor_id)
+            .join(Match, Match.id == MatchCompetitor.match_id)
+            .filter(Match.sport_id == sport.id, Match.match_date >= recent_since)
+            .distinct()
+        )
+        comp_q = comp_q.filter(Competitor.id.in_(recent_ids))
+    comp_names = {cid: name for cid, name in comp_q.all()}
+    if not comp_names:
+        return {"generatedAt": datetime.utcnow().isoformat() + "Z", "players": []}
+
+    # Step 1: light, date-ordered scan. Stop once every (player, surface)
+    # bucket we care about is full.
+    need = {cid: {} for cid in comp_names}
+    kept: Dict[Any, Dict[str, list]] = {}
+    match_ids: Set[Any] = set()
+    q = (
+        db.query(
+            MatchCompetitor.competitor_id,
+            MatchCompetitor.side,
+            Match.id,
+            Match.match_date,
+            Match.league_id,
+            Match.extra_data["surface"].astext,
+        )
+        .select_from(Match)
+        .join(MatchCompetitor, MatchCompetitor.match_id == Match.id)
+        .filter(Match.sport_id == sport.id, Match.status == "FINISHED")
+        .filter(MatchCompetitor.competitor_id.in_(list(comp_names.keys())))
+        .order_by(Match.match_date.desc())
+    )
+    remaining = len(comp_names)
+    for cid, side, mid, mdate, league_id, surf_raw in q.yield_per(500):
+        if remaining <= 0:
+            break
+        surf = normalize_surface(surf_raw)
+        if not surf:
+            continue
+        buckets = kept.setdefault(cid, {})
+        bucket = buckets.setdefault(surf, [])
+        if len(bucket) >= limit:
+            continue
+        bucket.append(
+            {
+                "match_id": mid,
+                "side": side,
+                "league_id": league_id,
+                "date": mdate.date().isoformat() if mdate else None,
+            }
+        )
+        match_ids.add(mid)
+        # a competitor is "done" once it has `limit` on each of the 3 surfaces
+        done = need[cid]
+        done[surf] = len(bucket)
+        if sum(1 for v in done.values() if v >= limit) >= 3:
+            remaining -= 1
+
+    if not match_ids:
+        return {"generatedAt": datetime.utcnow().isoformat() + "Z", "players": []}
+
+    # Step 2: batch-load opponents, scores and league names for the kept matches.
+    opponents: Dict[Any, list] = {}
+    for mc_mid, mc_cid, mc_name in (
+        db.query(MatchCompetitor.match_id, MatchCompetitor.competitor_id, Competitor.name)
+        .join(Competitor, Competitor.id == MatchCompetitor.competitor_id)
+        .filter(MatchCompetitor.match_id.in_(match_ids))
+        .all()
+    ):
+        opponents.setdefault(mc_mid, []).append((mc_cid, mc_name))
+    scores = {
+        s.match_id: s
+        for s in db.query(MatchScore)
+        .filter(MatchScore.match_id.in_(match_ids), MatchScore.period == "FULL_TIME")
+        .all()
+    }
+    league_ids = {b["league_id"] for ms in kept.values() for arr in ms.values() for b in arr}
+    leagues = {
+        lid: name
+        for lid, name in db.query(League.id, League.name).filter(League.id.in_(league_ids)).all()
+    }
+
+    out = []
+    for cid, by_surf in kept.items():
+        surfaces_out: Dict[str, list] = {}
+        for surf, arr in by_surf.items():
+            rows_out = []
+            for b in arr:
+                opp = next(
+                    (nm for ocid, nm in opponents.get(b["match_id"], []) if ocid != cid),
+                    None,
+                )
+                sc = scores.get(b["match_id"])
+                result = score_str = None
+                if sc and sc.home_score is not None and sc.away_score is not None:
+                    is_home = b["side"] in ("player1", "home")
+                    mine = sc.home_score if is_home else sc.away_score
+                    theirs = sc.away_score if is_home else sc.home_score
+                    result = "W" if mine > theirs else ("L" if mine < theirs else None)
+                    score_str = f"{mine}-{theirs}"
+                rows_out.append(
+                    {
+                        "date": b["date"],
+                        "tournament": leagues.get(b["league_id"]),
+                        "opponent": opp,
+                        "result": result,
+                        "score": score_str,
+                    }
+                )
+            if rows_out:
+                surfaces_out[surf] = rows_out
+        if surfaces_out:
+            total = sum(len(v) for v in surfaces_out.values())
+            out.append({"player": comp_names[cid], "surfaces": surfaces_out, "total": total})
+
+    out.sort(key=lambda p: p["total"], reverse=True)
+    return {"generatedAt": datetime.utcnow().isoformat() + "Z", "players": out}

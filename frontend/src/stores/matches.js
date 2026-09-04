@@ -7,6 +7,7 @@ export const useMatchesStore = defineStore('matches', {
     playerSetStats: null,
     predictionReliability: null,
     playerPointsPerSet: null,
+    playerRecentBySurface: null,
     loading: false,
     error: null
   }),
@@ -74,6 +75,14 @@ export const useMatchesStore = defineStore('matches', {
         this.playerPointsPerSet = data
       } catch (err) {
         this.playerPointsPerSet = null
+      }
+    },
+    async fetchPlayerRecentBySurface() {
+      try {
+        const { data } = await api.get('/matches/player-recent-by-surface')
+        this.playerRecentBySurface = data
+      } catch (err) {
+        this.playerRecentBySurface = null
       }
     }
   }

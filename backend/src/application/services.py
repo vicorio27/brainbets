@@ -91,6 +91,14 @@ class DataService:
 
         return _compute(self.db, player=player)
 
+    def get_player_recent_by_surface(
+        self, player: Optional[str] = None, limit: int = 3
+    ) -> Dict[str, Any]:
+        """Last N finished matches per surface for tennis players (from the DB)."""
+        from src.application.tennis_stats_service import compute_player_recent_by_surface as _compute
+
+        return _compute(self.db, player=player, limit=limit)
+
     # ------------------------------------------------------------------
     # Matches
     # ------------------------------------------------------------------
