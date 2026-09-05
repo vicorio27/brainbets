@@ -1,6 +1,24 @@
 <template>
   <div>
-    <h1 class="text-2xl font-bold text-slate-900 mb-6">Dashboard</h1>
+    <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 mb-4">
+      <h1 class="text-2xl font-bold text-slate-900">Dashboard</h1>
+      <div class="flex items-center gap-3">
+        <span class="text-xs text-slate-500 text-right">
+          <span v-if="dash">
+            Collect {{ ago(dash.lastMatchesUpdate) }} · Predict {{ ago(dash.lastPredictionsUpdate) }} · Validate {{ ago(dash.lastResultsUpdate) }}<br />
+          </span>
+          Cargado {{ lastLoadedAt ? fmtClock(lastLoadedAt) : '—' }}
+        </span>
+        <button
+          @click="refresh"
+          :disabled="refreshing"
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-60"
+        >
+          <span :class="{ 'animate-spin': refreshing }">↻</span>
+          {{ refreshing ? 'Actualizando…' : 'Actualizar' }}
+        </button>
+      </div>
+    </div>
 
     <!-- Tabs -->
     <div class="border-b border-slate-200 mb-6">
@@ -561,11 +579,40 @@
 import { ref, computed, onMounted } from 'vue'
 import { useMatchesStore } from '../stores/matches.js'
 import { usePredictionsStore } from '../stores/predictions.js'
+import { useAnalyticsStore } from '../stores/analytics.js'
 import MatchCard from '../components/MatchCard.vue'
 import EmptyState from '../components/EmptyState.vue'
 
 const matchesStore = useMatchesStore()
 const predictionsStore = usePredictionsStore()
+const analyticsStore = useAnalyticsStore()
+
+const lastLoadedAt = ref(null)
+const refreshing = ref(false)
+const dash = computed(() => analyticsStore.dashboard)
+
+function fmtClock(d) {
+  return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'America/Bogota' })
+}
+function ago(iso) {
+  if (!iso) return '—'
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000)
+  if (mins < 1) return 'ahora'
+  if (mins < 60) return `hace ${mins} min`
+  const h = Math.floor(mins / 60)
+  if (h < 24) return `hace ${h} h`
+  return `hace ${Math.floor(h / 24)} d`
+}
+async function refresh() {
+  if (refreshing.value) return
+  refreshing.value = true
+  try {
+    await Promise.all([loadToday(), analyticsStore.fetchDashboard()])
+    lastLoadedAt.value = new Date()
+  } finally {
+    refreshing.value = false
+  }
+}
 
 const tabs = [
   { id: 'today', label: 'Hoy' },
@@ -899,15 +946,18 @@ const recentBySurfaceRows = computed(() => {
 })
 
 function loadToday() {
-  matchesStore.fetchByDate(getUtcTodayStr())
-  matchesStore.fetchPlayerSetStats(getUtcTodayStr())
-  matchesStore.fetchPredictionReliability()
-  matchesStore.fetchPlayerPointsPerSet()
-  matchesStore.fetchPlayerRecentBySurface()
-  predictionsStore.fetchLatest()
+  return Promise.all([
+    matchesStore.fetchByDate(getUtcTodayStr()),
+    matchesStore.fetchPlayerSetStats(getUtcTodayStr()),
+    matchesStore.fetchPredictionReliability(),
+    matchesStore.fetchPlayerPointsPerSet(),
+    matchesStore.fetchPlayerRecentBySurface(),
+    predictionsStore.fetchLatest()
+  ])
 }
 
-onMounted(() => {
-  loadToday()
+onMounted(async () => {
+  await Promise.all([loadToday(), analyticsStore.fetchDashboard()])
+  lastLoadedAt.value = new Date()
 })
 </script>
