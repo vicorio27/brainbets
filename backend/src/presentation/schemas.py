@@ -29,6 +29,14 @@ class TennisMatch(BaseModel):
     # payload: {matchWinner:{p1,p2}, set1Winner:{p1,p2}, numberOfSets:{"3":o,..},
     #           setBetting:{"3:0":o,..}}
     oddsMarkets: Optional[Dict[str, Any]] = None
+    # Live / result state (from our DB — match_scores + prediction_progress).
+    setScores: Optional[List[List[int]]] = None   # games per set, e.g. [[7,6],[6,2]]
+    finalSets: Optional[str] = None               # "3-1" (FINISHED)
+    winner: Optional[str] = None                  # winner name (FINISHED)
+    liveSets: Optional[str] = None                # "2-1" (LIVE)
+    liveGames: Optional[str] = None               # "4-3" current game (LIVE)
+    livePeriod: Optional[str] = None              # "Set 3"
+    liveUpdatedAt: Optional[str] = None
     tournamentTier: Optional[int] = None
     groundType: Optional[str] = None
     countryPlayer1: Optional[str] = None
@@ -44,6 +52,8 @@ class FootballMatch(BaseModel):
     eventDate: str
     eventTime: Optional[str] = None
     status: Optional[str] = None
+    homeScore: Optional[int] = None   # goals (live or final, from our DB)
+    awayScore: Optional[int] = None
     homePosition: Optional[int] = None
     awayPosition: Optional[int] = None
     homeForm: Optional[str] = None

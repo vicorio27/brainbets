@@ -169,11 +169,21 @@ class DataService:
             return None
         return {f.features.get("side"): f.features for f in features if f.features.get("side")}
 
-    def _match_to_football_schema(self, match: Match) -> Optional[FootballMatch]:
+    def _match_to_football_schema(
+        self, match: Match, live: Optional[Dict[str, Any]] = None
+    ) -> Optional[FootballMatch]:
         home = next((c for c in match.competitors if c.side == "home"), None)
         away = next((c for c in match.competitors if c.side == "away"), None)
         if not home or not away:
             return None
+
+        live = live or {}
+        _fin, _prog = live.get("final"), live.get("prog")
+        _h_goals = _a_goals = None
+        if match.status == "FINISHED" and _fin and _fin.home_score is not None:
+            _h_goals, _a_goals = _fin.home_score, _fin.away_score or 0
+        elif match.status == "LIVE" and _prog is not None:
+            _h_goals, _a_goals = _prog.home_score or 0, _prog.away_score or 0
 
         # Elo ratings are general (no season/league); Poisson params are season/league-specific
         home_elo_stat = self._competitor_stat(str(home.competitor_id))
@@ -210,6 +220,8 @@ class DataService:
             eventDate=match.match_date.strftime("%Y-%m-%d") if match.match_date else None,
             eventTime=match.match_date.strftime("%H:%M") if match.match_date else None,
             status=match.status,
+            homeScore=_h_goals,
+            awayScore=_a_goals,
             homePosition=home.pre_match_ranking,
             awayPosition=away.pre_match_ranking,
             homeForm=home.pre_match_form,
@@ -284,7 +296,56 @@ class DataService:
                 form_chars.append("D")
         return "".join(reversed(form_chars))
 
-    def _match_to_tennis_schema(self, match: Match) -> Optional[TennisMatch]:
+    def _live_state_map(self, match_ids: List[Any]) -> Dict[Any, Dict[str, Any]]:
+        """{match_id: {"final": MatchScore|None, "prog": latest PredictionProgress|None}}.
+
+        Two batched queries (no per-match round trips). Read purely from our DB.
+        """
+        if not match_ids:
+            return {}
+        from sqlalchemy import func
+
+        finals = {
+            s.match_id: s
+            for s in self.db.query(MatchScore)
+            .filter(MatchScore.match_id.in_(match_ids), MatchScore.period == "FULL_TIME")
+            .all()
+        }
+        latest = (
+            self.db.query(
+                PredictionProgress.match_id,
+                func.max(PredictionProgress.snapshot_at).label("mx"),
+            )
+            .filter(PredictionProgress.match_id.in_(match_ids))
+            .group_by(PredictionProgress.match_id)
+            .subquery()
+        )
+        progs = {
+            p.match_id: p
+            for p in self.db.query(PredictionProgress)
+            .join(
+                latest,
+                (PredictionProgress.match_id == latest.c.match_id)
+                & (PredictionProgress.snapshot_at == latest.c.mx),
+            )
+            .all()
+        }
+        return {mid: {"final": finals.get(mid), "prog": progs.get(mid)} for mid in match_ids}
+
+    @staticmethod
+    def _tennis_set_scores(match: Match) -> Optional[List[List[int]]]:
+        rows = ((match.extra_data or {}).get("score_stats") or {}).get("sets") or []
+        out = []
+        for r in rows:
+            try:
+                out.append([int(r.get("p1") or 0), int(r.get("p2") or 0)])
+            except (TypeError, ValueError):
+                continue
+        return out or None
+
+    def _match_to_tennis_schema(
+        self, match: Match, live: Optional[Dict[str, Any]] = None
+    ) -> Optional[TennisMatch]:
         p1 = next((c for c in match.competitors if c.side == "player1"), None)
         p2 = next((c for c in match.competitors if c.side == "player2"), None)
         if not p1 or not p2:
@@ -304,6 +365,27 @@ class DataService:
         form_p2 = p2.pre_match_form or self._tennis_recent_form(
             str(p2.competitor_id), before_date=match.match_date, limit=5
         )
+
+        # --- live / result state ---
+        set_scores = self._tennis_set_scores(match)
+        final_sets = winner = live_sets = live_games = live_period = live_updated = None
+        live = live or {}
+        fin = live.get("final")
+        prog = live.get("prog")
+        if match.status == "FINISHED" and fin and fin.home_score is not None and fin.away_score is not None:
+            final_sets = f"{fin.home_score}-{fin.away_score}"
+            if fin.home_score != fin.away_score:
+                winner = (p1 if fin.home_score > fin.away_score else p2).competitor.name
+        elif match.status == "LIVE" and prog is not None:
+            live_sets = f"{prog.home_score}-{prog.away_score}"
+            live_period = prog.period_label
+            live_updated = prog.snapshot_at.isoformat() if prog.snapshot_at else None
+            if prog.notes:
+                import re as _re
+                m = _re.search(r"(\d+)\s*-\s*(\d+)\s*games", prog.notes)
+                if m:
+                    live_games = f"{m.group(1)}-{m.group(2)}"
+
         return TennisMatch(
             matchId=match.external_id or str(match.id),
             eventId=self._extract_event_id(match.external_id),
@@ -328,6 +410,13 @@ class DataService:
             oddsPlayer1=float(p1.pre_match_odds) if p1 and p1.pre_match_odds is not None else None,
             oddsPlayer2=float(p2.pre_match_odds) if p2 and p2.pre_match_odds is not None else None,
             oddsMarkets=meta.get("odds_markets"),
+            setScores=set_scores,
+            finalSets=final_sets,
+            winner=winner,
+            liveSets=live_sets,
+            liveGames=live_games,
+            livePeriod=live_period,
+            liveUpdatedAt=live_updated,
             tournamentTier=meta.get("tournament_tier"),
             groundType=meta.get("ground_type"),
             countryPlayer1=p1.competitor.country,
@@ -340,6 +429,7 @@ class DataService:
         if not matches:
             return None
 
+        live_map = self._live_state_map([m.id for m in matches])
         football = []
         tennis = []
         latest_created = None
@@ -349,11 +439,11 @@ class DataService:
                 latest_created = match.created_at
 
             if match.sport and match.sport.code == "football":
-                schema = self._match_to_football_schema(match)
+                schema = self._match_to_football_schema(match, live_map.get(match.id))
                 if schema:
                     football.append(schema)
             elif match.sport and match.sport.code == "tennis":
-                schema = self._match_to_tennis_schema(match)
+                schema = self._match_to_tennis_schema(match, live_map.get(match.id))
                 if schema:
                     tennis.append(schema)
 
@@ -421,6 +511,7 @@ class DataService:
             if not matches:
                 return None
 
+        live_map = self._live_state_map([m.id for m in matches])
         football = []
         tennis = []
         latest_created = None
@@ -430,11 +521,11 @@ class DataService:
                 latest_created = match.created_at
 
             if match.sport and match.sport.code == "football":
-                schema = self._match_to_football_schema(match)
+                schema = self._match_to_football_schema(match, live_map.get(match.id))
                 if schema:
                     football.append(schema)
             elif match.sport and match.sport.code == "tennis":
-                schema = self._match_to_tennis_schema(match)
+                schema = self._match_to_tennis_schema(match, live_map.get(match.id))
                 if schema:
                     tennis.append(schema)
 

@@ -42,6 +42,22 @@
             {{ sport === 'tennis' ? match.player2 : match.awayTeam }}
           </div>
         </div>
+
+        <!-- Live / result score -->
+        <div v-if="scoreLine" class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span
+            v-if="match.status === 'LIVE'"
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700"
+          >
+            <span class="w-1.5 h-1.5 rounded-full bg-red-600 animate-pulse"></span> EN VIVO
+          </span>
+          <span
+            v-else
+            class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-200 text-slate-700"
+          >Final</span>
+          <span class="text-sm font-bold text-slate-900">{{ scoreLine }}</span>
+          <span v-if="setScoresStr" class="text-xs text-slate-500">{{ setScoresStr }}</span>
+        </div>
         <div class="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-600">
           <span v-if="match.eventTime && match.eventTime !== '00:00'" class="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-100">
             🕒 {{ formatTime(match.eventTime) }}
@@ -92,6 +108,32 @@ const props = defineProps({
     type: Object,
     default: null
   }
+})
+
+// Live / final score line, from our DB (no api-tennis call).
+const scoreLine = computed(() => {
+  const m = props.match
+  if (props.sport === 'tennis') {
+    if (m.status === 'FINISHED' && m.finalSets) {
+      return m.winner ? `${m.finalSets} · ${m.winner}` : m.finalSets
+    }
+    if (m.status === 'LIVE' && m.liveSets) {
+      const g = m.liveGames ? ` · ${m.liveGames}` : ''
+      const p = m.livePeriod ? ` (${m.livePeriod})` : ''
+      return `${m.liveSets} sets${g}${p}`
+    }
+    return null
+  }
+  // football
+  if (m.homeScore != null && m.awayScore != null && (m.status === 'LIVE' || m.status === 'FINISHED')) {
+    return `${m.homeScore}-${m.awayScore}`
+  }
+  return null
+})
+const setScoresStr = computed(() => {
+  const s = props.match.setScores
+  if (!Array.isArray(s) || !s.length) return null
+  return s.map((x) => `${x[0]}-${x[1]}`).join('  ')
 })
 
 // One compact line per player that has enough validated history on this surface.
