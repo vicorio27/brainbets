@@ -838,6 +838,30 @@ def get_router() -> APIRouter:
 
         return train_calibration(db)
 
+    @r.post("/train/ensemble-weights")
+    async def train_ensemble_weights_endpoint(
+        db: Session = Depends(get_db),
+    ):
+        """Recompute tennis ensemble weights from validated Match Winner outcomes.
+
+        Fits non-negative weights per data-availability regime (both real
+        Elo/surface-Elo, only real Elo, or rank proxies only) and stores them
+        in /storage/models/tennis_ensemble_weights.json. The prediction engine
+        fetches them via GET /predict/tennis-ensemble-weights (no redeploy
+        needed after retraining); a regime falls back to its historical
+        hardcoded weights until it has 30+ complete validated outcomes.
+        """
+        from src.application.ensemble_weights_service import train_ensemble_weights
+
+        return train_ensemble_weights(db)
+
+    @r.get("/predict/tennis-ensemble-weights")
+    async def get_tennis_ensemble_weights_endpoint():
+        """Return the current per-regime tennis ensemble weights."""
+        from src.application.ensemble_weights_service import get_ensemble_weights
+
+        return {"regimes": get_ensemble_weights()}
+
     @r.post("/predict/tennis-ml")
     async def predict_tennis_ml_endpoint(
         payload: Dict[str, Any],

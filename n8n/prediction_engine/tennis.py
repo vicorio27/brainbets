@@ -353,6 +353,47 @@ def compute_ml_tennis_batch(matches: List[Dict[str, Any]]) -> Optional[List[Opti
     return None
 
 
+DEFAULT_ENSEMBLE_WEIGHTS: Dict[str, Dict[str, float]] = {
+    'both': {'surface_elo': 0.25, 'elo': 0.20, 'xgboost': 0.10, 'catboost': 0.10, 'ml': 0.20, 'odds': 0.15},
+    'elo_only': {'surface_elo': 0.15, 'elo': 0.20, 'xgboost': 0.15, 'catboost': 0.10, 'ml': 0.25, 'odds': 0.15},
+    'rank_only': {'surface_elo': 0.10, 'elo': 0.10, 'xgboost': 0.15, 'catboost': 0.15, 'ml': 0.25, 'odds': 0.25},
+}
+
+_ENSEMBLE_WEIGHTS_CACHE: Dict[str, Any] = {}
+
+
+def _fetch_ensemble_weights() -> Dict[str, Dict[str, float]]:
+    """Fetch data-fitted ensemble weights from the backend, once per process.
+
+    The backend fits these from validated/failed Match Winner outcomes (see
+    ensemble_weights_service.py); falls back to the historical hardcoded
+    weights if the backend is unreachable or a regime lacks enough data.
+    """
+    if 'weights' in _ENSEMBLE_WEIGHTS_CACHE:
+        return _ENSEMBLE_WEIGHTS_CACHE['weights']
+
+    url = os.environ.get('BACKEND_URL', 'http://backend:8000')
+    api_key = os.environ.get('INTERNAL_API_KEY', '')
+    endpoint = f'{url}/api/v1/internal/predict/tennis-ensemble-weights'
+    weights = DEFAULT_ENSEMBLE_WEIGHTS
+    req = urllib.request.Request(
+        endpoint,
+        headers={'X-Internal-Api-Key': api_key},
+        method='GET',
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read().decode('utf-8'))
+            fetched = result.get('regimes')
+            if fetched and all(regime in fetched for regime in DEFAULT_ENSEMBLE_WEIGHTS):
+                weights = fetched
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, ValueError):
+        pass
+
+    _ENSEMBLE_WEIGHTS_CACHE['weights'] = weights
+    return weights
+
+
 def ensemble_tennis(
     elo_probs: Dict[str, float],
     surface_elo_probs: Dict[str, float],
@@ -365,40 +406,29 @@ def ensemble_tennis(
 ) -> Dict[str, Any]:
     """Ensemble with odds, ML model and dynamic weighting based on data quality.
 
-    When real Elo ratings are available we trust the Elo/Surface-Elo models
-    more. When only rank proxies are available we lean more on the market
-    odds, the trained ML model and the ranking/form heuristics.
+    Weights come from `_fetch_ensemble_weights()` (data-fitted from validated
+    outcomes when available, hardcoded fallback otherwise), keyed by regime:
+    both real Elo ratings available, only general Elo, or rank proxies only.
     """
     has_ml = ml_probs is not None
     has_odds = odds_probs is not None
 
     if has_real_elo and has_real_surface_elo:
-        weights = {
-            'surface_elo': 0.25,
-            'elo': 0.20,
-            'xgboost': 0.10,
-            'catboost': 0.10,
-            'ml': 0.20 if has_ml else 0.0,
-            'odds': 0.15 if has_odds else 0.0,
-        }
+        regime = 'both'
     elif has_real_elo:
-        weights = {
-            'surface_elo': 0.15,
-            'elo': 0.20,
-            'xgboost': 0.15,
-            'catboost': 0.10,
-            'ml': 0.25 if has_ml else 0.0,
-            'odds': 0.15 if has_odds else 0.0,
-        }
+        regime = 'elo_only'
     else:
-        weights = {
-            'surface_elo': 0.10,
-            'elo': 0.10,
-            'xgboost': 0.15,
-            'catboost': 0.15,
-            'ml': 0.25 if has_ml else 0.0,
-            'odds': 0.25 if has_odds else 0.0,
-        }
+        regime = 'rank_only'
+
+    base_weights = _fetch_ensemble_weights().get(regime, DEFAULT_ENSEMBLE_WEIGHTS[regime])
+    weights = {
+        'surface_elo': base_weights['surface_elo'],
+        'elo': base_weights['elo'],
+        'xgboost': base_weights['xgboost'],
+        'catboost': base_weights['catboost'],
+        'ml': base_weights['ml'] if has_ml else 0.0,
+        'odds': base_weights['odds'] if has_odds else 0.0,
+    }
 
     values_p1 = [
         surface_elo_probs['player1'],
