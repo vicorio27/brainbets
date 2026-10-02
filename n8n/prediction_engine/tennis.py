@@ -4,12 +4,13 @@ import math
 import os
 import urllib.error
 import urllib.request
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from common import (
     confidence_from_prob,
     ev_and_kelly,
     format_probabilities,
+    glicko2_expected_score,
     normalize_ranking,
     parse_form,
     poisson_pmf,
@@ -72,11 +73,15 @@ def compute_elo_tennis(
     p2_form: float,
     p1_elo: Optional[float] = None,
     p2_elo: Optional[float] = None,
+    p1_rd: Optional[float] = None,
+    p2_rd: Optional[float] = None,
 ) -> Dict[str, float]:
-    """Compute general Elo probabilities for tennis.
+    """Compute general rating-based probabilities for tennis.
 
-    Uses real Elo ratings from the backend when available, otherwise falls
-    back to a log-scaled rank-based proxy.
+    Uses real Glicko-2 rating + RD (rating deviation) from the backend when
+    available — RD widens the probability toward 50% for players with
+    unreliable ratings (a debutant, someone off a long layoff) — otherwise
+    falls back to a log-scaled rank-based proxy with a plain-Elo logistic.
     """
     if p1_elo is not None and p2_elo is not None:
         p1_rating = float(p1_elo)
@@ -88,7 +93,10 @@ def compute_elo_tennis(
     p1_rating += p1_form * 60
     p2_rating += p2_form * 60
 
-    p1_expected = 1.0 / (1.0 + 10.0 ** ((p2_rating - p1_rating) / 400.0))
+    if p1_rd is not None and p2_rd is not None:
+        p1_expected = glicko2_expected_score(p1_rating, p1_rd, p2_rating, p2_rd)
+    else:
+        p1_expected = 1.0 / (1.0 + 10.0 ** ((p2_rating - p1_rating) / 400.0))
     p2_expected = 1.0 - p1_expected
 
     return {
@@ -107,11 +115,14 @@ def compute_surface_elo(
     p2_aces: float,
     p1_surface_elo: Optional[float] = None,
     p2_surface_elo: Optional[float] = None,
+    p1_surface_rd: Optional[float] = None,
+    p2_surface_rd: Optional[float] = None,
 ) -> Dict[str, float]:
-    """Compute surface-adjusted Elo probabilities.
+    """Compute surface-adjusted rating probabilities.
 
-    Uses real surface-specific Elo ratings from the backend when available,
-    otherwise falls back to base Elo + aces-based surface adjustment.
+    Uses real surface-specific Glicko-2 rating + RD from the backend when
+    available, otherwise falls back to base Elo + aces-based surface
+    adjustment.
     """
     surface = (surface or 'hard').lower()
     base_elo = compute_elo_tennis(p1_rank, p2_rank, p1_form, p2_form)
@@ -119,7 +130,10 @@ def compute_surface_elo(
     if p1_surface_elo is not None and p2_surface_elo is not None:
         p1_rating = float(p1_surface_elo)
         p2_rating = float(p2_surface_elo)
-        p1_prob = 1.0 / (1.0 + 10.0 ** ((p2_rating - p1_rating) / 400.0))
+        if p1_surface_rd is not None and p2_surface_rd is not None:
+            p1_prob = glicko2_expected_score(p1_rating, p1_surface_rd, p2_rating, p2_surface_rd)
+        else:
+            p1_prob = 1.0 / (1.0 + 10.0 ** ((p2_rating - p1_rating) / 400.0))
         return {'player1': p1_prob, 'player2': 1.0 - p1_prob}
 
     # Surface affinity adjustment based on aces average (surrogate for surface preference)
@@ -394,6 +408,115 @@ def _fetch_ensemble_weights() -> Dict[str, Dict[str, float]]:
     return weights
 
 
+# --- Exact Set Score: empirical prior (redesign, 2026-10-02) ---------------
+# The market used to be priced from a pure i.i.d.-per-set binomial (every set
+# won with the same probability, independent of the previous one). That
+# over-predicts clean sweeps for favorites and under-predicts matches going
+# the distance -- exactly the shape of a market that showed a statistically
+# significant loss which got WORSE over time (see bankroll_service.py's
+# significance test and temporal_stability). `exact_score_prior_service.py`
+# fits the empirical alternative from the full historical dataset (tens of
+# thousands of matches, not just the live-era validated sample): given the
+# ranking gap and best-of format, how many sets did REAL matches actually
+# take? This blends that empirical distribution with the old i.i.d. one,
+# weighted by how much historical data backs each (best_of, rank-gap)
+# bucket -- falling back to the pure i.i.d. formula where there isn't one.
+
+_EXACT_SCORE_PRIOR_CACHE: Dict[str, Any] = {}
+
+# Mirrors exact_score_prior_service.RANK_BUCKETS on the backend -- keep both
+# in sync if either changes.
+_EXACT_SCORE_RANK_BUCKETS: Tuple[Tuple[float, float, str], ...] = (
+    (0, 10, '0-10'), (10, 25, '10-25'), (25, 50, '25-50'),
+    (50, 100, '50-100'), (100, float('inf'), '100+'),
+)
+# Pseudo-sample count at which the empirical bucket gets half the blend
+# weight (shrink = samples / (samples + this)) -- same ridge-shrinkage
+# pattern as ensemble_weights_service.PRIOR_STRENGTH, scaled up because
+# these buckets have thousands of real samples to lean on, not dozens.
+EXACT_SCORE_PRIOR_STRENGTH = 200.0
+
+
+def _rank_bucket_label(rank_diff: float) -> str:
+    for lo, hi, label in _EXACT_SCORE_RANK_BUCKETS:
+        if lo <= rank_diff < hi:
+            return label
+    return _EXACT_SCORE_RANK_BUCKETS[-1][2]
+
+
+def _fetch_exact_score_priors() -> Dict[str, Any]:
+    """Fetch the empirical exact-set-score prior artifact, once per process."""
+    if 'priors' in _EXACT_SCORE_PRIOR_CACHE:
+        return _EXACT_SCORE_PRIOR_CACHE['priors']
+
+    url = os.environ.get('BACKEND_URL', 'http://backend:8000')
+    api_key = os.environ.get('INTERNAL_API_KEY', '')
+    endpoint = f'{url}/api/v1/internal/predict/tennis-exact-score-prior'
+    priors: Dict[str, Any] = {}
+    req = urllib.request.Request(
+        endpoint,
+        headers={'X-Internal-Api-Key': api_key},
+        method='GET',
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read().decode('utf-8'))
+            priors = result.get('priors') or {}
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, ValueError):
+        pass
+
+    _EXACT_SCORE_PRIOR_CACHE['priors'] = priors
+    return priors
+
+
+def _empirical_sets_lost(best_of: int, rank_diff: float) -> Optional[Tuple[Dict[int, float], int, str]]:
+    """Empirical P(the match winner lost k sets) for this (best_of, rank
+    gap), or None if that bucket hasn't accumulated enough historical
+    matches yet (see exact_score_prior_service.MIN_SAMPLES_PER_BUCKET)."""
+    priors = _fetch_exact_score_priors()
+    if not priors:
+        return None
+    label = _rank_bucket_label(rank_diff)
+    key = f'bo{best_of}_{label}'
+    entry = priors.get(key) or priors.get(f'bo{best_of}_unknown')
+    if not entry:
+        return None
+    dist = {int(k): v for k, v in (entry.get('distribution') or {}).items()}
+    return dist, int(entry.get('samples', 0)), key
+
+
+def _iid_sets_lost(p: float, best_of: int) -> Dict[int, float]:
+    """P(a player with single-set win probability p lost exactly k sets),
+    GIVEN that player wins the match -- a pure reparameterization of the old
+    i.i.d. exact-score formulas (same p inverted from the match probability
+    by `_match_prob_to_set_prob`), expressed as a distribution instead of
+    joint per-scoreline probabilities so it can be blended with the
+    empirical one below."""
+    q = 1.0 - p
+    if best_of >= 5:
+        raw = {0: p ** 3, 1: 3.0 * (p ** 3) * q, 2: 6.0 * (p ** 3) * (q ** 2)}
+    else:
+        raw = {0: p ** 2, 1: 2.0 * (p ** 2) * q}
+    total = sum(raw.values())
+    return {k: (v / total if total > 0 else 0.0) for k, v in raw.items()}
+
+
+def _blend_sets_lost(p: float, best_of: int, rank_diff: float) -> Tuple[Dict[int, float], Optional[Dict[str, Any]]]:
+    """Blend the i.i.d. conditional distribution with the empirical one,
+    weighted by the empirical bucket's sample size. Returns (distribution,
+    debug_info_or_None) -- debug_info goes straight into reasoningData so
+    the blend is visible/auditable on every prediction."""
+    iid = _iid_sets_lost(p, best_of)
+    empirical = _empirical_sets_lost(best_of, rank_diff)
+    if not empirical:
+        return iid, None
+    dist, samples, bucket_key = empirical
+    shrink = samples / (samples + EXACT_SCORE_PRIOR_STRENGTH)
+    blended = {k: shrink * dist.get(k, 0.0) + (1.0 - shrink) * iid.get(k, 0.0) for k in iid}
+    debug = {'bucket': bucket_key, 'samples': samples, 'empiricalWeight': round(shrink, 3)}
+    return blended, debug
+
+
 def ensemble_tennis(
     elo_probs: Dict[str, float],
     surface_elo_probs: Dict[str, float],
@@ -551,6 +674,10 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
     p2_elo = safe_get(match, 'elo_player2')
     p1_surface_elo = safe_get(match, 'elo_surface_player1')
     p2_surface_elo = safe_get(match, 'elo_surface_player2')
+    p1_rd = safe_get(match, 'rating_deviation_player1')
+    p2_rd = safe_get(match, 'rating_deviation_player2')
+    p1_surface_rd = safe_get(match, 'rating_deviation_surface_player1')
+    p2_surface_rd = safe_get(match, 'rating_deviation_surface_player2')
     odds_player1 = safe_get(match, 'odds_player1')
     odds_player2 = safe_get(match, 'odds_player2')
 
@@ -585,10 +712,12 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
     has_real_elo = p1_elo is not None and p2_elo is not None
     has_real_surface_elo = p1_surface_elo is not None and p2_surface_elo is not None
 
-    elo_probs = compute_elo_tennis(p1_rank, p2_rank, p1_form, p2_form, p1_elo, p2_elo)
+    elo_probs = compute_elo_tennis(
+        p1_rank, p2_rank, p1_form, p2_form, p1_elo, p2_elo, p1_rd, p2_rd,
+    )
     surface_elo_probs = compute_surface_elo(
         p1_rank, p2_rank, p1_form, p2_form, surface, p1_aces, p2_aces,
-        p1_surface_elo, p2_surface_elo,
+        p1_surface_elo, p2_surface_elo, p1_surface_rd, p2_surface_rd,
     )
     xgboost_probs = compute_xgboost_tennis(p1_rank, p2_rank, p1_form, p2_form, p1_aces, p2_aces, h2h)
     catboost_probs = compute_catboost_tennis(p1_rank, p2_rank, surface, tournament, p1_form, p2_form, tournament_tier)
@@ -631,6 +760,13 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
 
     elo_source = 'real' if has_real_elo else 'estimado por ranking'
     surface_elo_source = 'real' if has_real_surface_elo else 'estimado por superficie/aces'
+    uncertainty_line = ''
+    if p1_rd is not None and p2_rd is not None and max(p1_rd, p2_rd) >= 100:
+        shakier = p1 if p1_rd >= p2_rd else p2
+        uncertainty_line = (
+            f" Incertidumbre elevada en el rating de {shakier} (RD {round(max(p1_rd, p2_rd),0)}), "
+            f"la probabilidad ya está ajustada hacia 50/50 por esto."
+        )
     odds_line = ''
     if odds_probs is not None:
         odds_line = (
@@ -655,7 +791,7 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
         f"Elo general ({elo_source}): {round(elo_probs['player1']*100,1)}% a {round(elo_probs['player2']*100,1)}%. "
         f"Elo en {surface} ({surface_elo_source}): {round(surface_elo_probs['player1']*100,1)}% a "
         f"{round(surface_elo_probs['player2']*100,1)}%. "
-        f"H2H: {h2h[0]}-{h2h[1]}.{odds_line}{ml_line}{feature_source}"
+        f"H2H: {h2h[0]}-{h2h[1]}.{odds_line}{ml_line}{feature_source}{uncertainty_line}"
     )
 
     fmt_label = 'al mejor de 5 sets (Grand Slam)' if best_of >= 5 else 'al mejor de 3 sets'
@@ -664,23 +800,17 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
         f"Probabilidad de más de {sets_line} sets: {round(close_match_prob*100,1)}%."
     )
 
-    # Exact set score, binomial over i.i.d. sets for the match format.
-    if best_of >= 5:
-        exact_scores = {
-            f'{p1} 3-0': set_p1 ** 3,
-            f'{p1} 3-1': 3.0 * (set_p1 ** 3) * set_p2,
-            f'{p1} 3-2': 6.0 * (set_p1 ** 3) * (set_p2 ** 2),
-            f'{p2} 3-0': set_p2 ** 3,
-            f'{p2} 3-1': 3.0 * (set_p2 ** 3) * set_p1,
-            f'{p2} 3-2': 6.0 * (set_p2 ** 3) * (set_p1 ** 2),
-        }
-    else:
-        exact_scores = {
-            f'{p1} 2-0': set_p1 ** 2,
-            f'{p1} 2-1': 2.0 * (set_p1 ** 2) * set_p2,
-            f'{p2} 2-0': set_p2 ** 2,
-            f'{p2} 2-1': 2.0 * (set_p2 ** 2) * set_p1,
-        }
+    # Exact set score: each player's "sets lost given they win" distribution,
+    # blended with the empirical historical frequency for this (best_of,
+    # ranking gap) -- see _blend_sets_lost. Reduces to the old pure i.i.d.
+    # formula when that bucket has no artifact yet (empirical_debug=None).
+    p1_sets_lost, empirical_debug = _blend_sets_lost(set_p1, best_of, rank_diff)
+    p2_sets_lost, _ = _blend_sets_lost(set_p2, best_of, rank_diff)
+    exact_scores = {}
+    for lost, prob in p1_sets_lost.items():
+        exact_scores[f'{p1} {sets_to_win}-{lost}'] = ensemble['player1'] * prob
+    for lost, prob in p2_sets_lost.items():
+        exact_scores[f'{p2} {sets_to_win}-{lost}'] = ensemble['player2'] * prob
     best_exact = max(exact_scores, key=exact_scores.get)
 
     set1_winner = p1 if set_p1 >= set_p2 else p2
@@ -807,6 +937,12 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
                 'ml': format_probabilities(ml_probs) if ml_probs else None,
                 'eloSource': elo_source,
                 'surfaceEloSource': surface_elo_source,
+                'ratingDeviation': {
+                    'player1': p1_rd,
+                    'player2': p2_rd,
+                    'surfacePlayer1': p1_surface_rd,
+                    'surfacePlayer2': p2_surface_rd,
+                } if any(v is not None for v in (p1_rd, p2_rd, p1_surface_rd, p2_surface_rd)) else None,
                 'tournamentTier': tournament_tier,
                 'featureService': {
                     'p1WinRate': p1_win_rate,
@@ -847,11 +983,12 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
             'modelContributions': ensemble['model_contributions'],
             'reasoning': exact_reasoning,
             'reasoningData': {
-                'model': 'binomial_sets',
+                'model': 'empirical_blend' if empirical_debug else 'binomial_sets',
                 'setProbability': format_probabilities({
                     'player1': set_p1,
                     'player2': set_p2,
                 }),
+                'empiricalPrior': empirical_debug,
                 'oddsDecimal': exact_odds_decimal,
             },
         },

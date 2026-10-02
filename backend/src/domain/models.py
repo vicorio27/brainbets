@@ -189,6 +189,8 @@ class CompetitorStat(Base):
     form_string = Column(String(20))
     current_elo = Column(Numeric(8, 2), default=1500)
     current_surface_elo = Column(Numeric(8, 2), default=1500)
+    rating_deviation = Column(Numeric(8, 2), default=350)
+    volatility = Column(Numeric(10, 6), default=0.06)
     extra_data = Column(JSONB, default=dict)
     calculated_at = Column(DateTime(timezone=True), default=now_utc)
 
@@ -213,6 +215,9 @@ class CompetitorEloHistory(Base):
     match_id = Column(UUID(as_uuid=True), ForeignKey("matches.id"))
     elo_before = Column(Numeric(8, 2), nullable=False)
     elo_after = Column(Numeric(8, 2), nullable=False)
+    rd_before = Column(Numeric(8, 2))
+    rd_after = Column(Numeric(8, 2))
+    volatility_after = Column(Numeric(10, 6))
     surface = Column(String(30))
     calculated_at = Column(DateTime(timezone=True), default=now_utc)
 

@@ -73,6 +73,7 @@ services:
       - INTERNAL_API_KEY=${INTERNAL_API_KEY}
       - RAPIDAPI_KEY=${RAPIDAPI_KEY:-}
       - FOOTBALL_DATA_ORG_TOKEN=${FOOTBALL_DATA_ORG_TOKEN:-}
+      - TENNIS_API_KEY=${TENNIS_API_KEY:-}
     volumes:
       - ./storage:/storage
       - ./storage/historical_raw:/tmp/historical_raw

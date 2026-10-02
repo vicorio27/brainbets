@@ -862,6 +862,29 @@ def get_router() -> APIRouter:
 
         return {"regimes": get_ensemble_weights()}
 
+    @r.post("/train/exact-score-prior")
+    async def train_exact_score_prior_endpoint(
+        db: Session = Depends(get_db),
+    ):
+        """Recompute the empirical exact-set-score prior from every finished
+        tennis match with a full-time score (historical ingestion + live).
+
+        Redesign of the "Exact Set Score" market: replaces part of the old
+        pure i.i.d.-binomial-per-set formula with the real historical
+        frequency of straight-sets vs. going-the-distance, bucketed by
+        ranking gap and best-of-3/5. See `exact_score_prior_service.py`.
+        """
+        from src.application.exact_score_prior_service import train_exact_score_prior
+
+        return train_exact_score_prior(db)
+
+    @r.get("/predict/tennis-exact-score-prior")
+    async def get_tennis_exact_score_prior_endpoint():
+        """Return the full empirical exact-set-score prior artifact."""
+        from src.application.exact_score_prior_service import get_exact_score_priors
+
+        return {"priors": get_exact_score_priors()}
+
     @r.post("/predict/tennis-ml")
     async def predict_tennis_ml_endpoint(
         payload: Dict[str, Any],
@@ -945,6 +968,23 @@ def get_router() -> APIRouter:
         """
         snapshots = [s.model_dump() for s in payload.snapshots]
         return process_snapshots(db, snapshots)
+
+    @r.post("/matches/tennis/closing-odds/capture")
+    async def capture_tennis_closing_odds(
+        window_hours: int = 6,
+        db: Session = Depends(get_db),
+    ):
+        """Snapshot current odds for tennis matches starting within
+        `window_hours`, for Closing Line Value (CLV) tracking.
+
+        Self-contained on purpose: fetches directly from api-tennis (needs
+        TENNIS_API_KEY in the backend's own environment, not just n8n's live
+        workflow), so the caller (an n8n node, or a manual trigger) only
+        needs to POST here on a schedule -- no date/payload logic required.
+        """
+        from src.application.clv_service import capture_closing_odds
+
+        return capture_closing_odds(db, window_hours=window_hours)
 
     @r.get("/cache")
     async def get_cached_response(

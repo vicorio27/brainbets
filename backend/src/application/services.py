@@ -197,6 +197,8 @@ class DataService:
 
         home_elo = float(home_elo_stat.current_elo) if home_elo_stat and home_elo_stat.current_elo else None
         away_elo = float(away_elo_stat.current_elo) if away_elo_stat and away_elo_stat.current_elo else None
+        home_elo_rd = float(home_elo_stat.rating_deviation) if home_elo_stat and home_elo_stat.rating_deviation else None
+        away_elo_rd = float(away_elo_stat.rating_deviation) if away_elo_stat and away_elo_stat.rating_deviation else None
 
         home_poisson = (home_poisson_stat.extra_data or {}).get("poisson", {}) if home_poisson_stat else {}
         away_poisson = (away_poisson_stat.extra_data or {}).get("poisson", {}) if away_poisson_stat else {}
@@ -239,6 +241,8 @@ class DataService:
             statsDataQuality=meta.get("stats_data_quality"),
             homeElo=home_elo,
             awayElo=away_elo,
+            ratingDeviationHomeTeam=home_elo_rd,
+            ratingDeviationAwayTeam=away_elo_rd,
             homeAttack=home_poisson.get("home_attack"),
             homeDefense=home_poisson.get("home_defense"),
             awayAttack=away_poisson.get("away_attack"),
@@ -407,6 +411,10 @@ class DataService:
             eloPlayer2=float(overall_p2.current_elo) if overall_p2 and overall_p2.current_elo else None,
             eloSurfacePlayer1=float(surface_p1.current_elo) if surface_p1 and surface_p1.current_elo else None,
             eloSurfacePlayer2=float(surface_p2.current_elo) if surface_p2 and surface_p2.current_elo else None,
+            ratingDeviationPlayer1=float(overall_p1.rating_deviation) if overall_p1 and overall_p1.rating_deviation else None,
+            ratingDeviationPlayer2=float(overall_p2.rating_deviation) if overall_p2 and overall_p2.rating_deviation else None,
+            ratingDeviationSurfacePlayer1=float(surface_p1.rating_deviation) if surface_p1 and surface_p1.rating_deviation else None,
+            ratingDeviationSurfacePlayer2=float(surface_p2.rating_deviation) if surface_p2 and surface_p2.rating_deviation else None,
             oddsPlayer1=float(p1.pre_match_odds) if p1 and p1.pre_match_odds is not None else None,
             oddsPlayer2=float(p2.pre_match_odds) if p2 and p2.pre_match_odds is not None else None,
             oddsMarkets=meta.get("odds_markets"),

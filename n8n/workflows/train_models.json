@@ -21,6 +21,93 @@
     },
     {
       "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 3 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        250,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/train/models",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "options": {
+          "timeout": 600000
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "jsonBody": {
+          "sports": ["football", "tennis"],
+          "run_elo": true,
+          "run_poisson": true
+        }
+      },
+      "id": "trigger-training-scheduled",
+      "name": "Trigger Model Training (Scheduled)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nconst elo = result.elo || {};\nconst poisson = result.poisson || {};\nconst lines = Object.entries(elo).map(([sport, counts]) => {\n  const total = Object.values(counts).reduce((a, b) => a + b, 0);\n  return `${sport}: ${total} ratings`;\n});\nconst msg = `<b>BrainBets - Modelos Entrenados (cron diario)</b>\\n\\nElo:\\n${lines.join('\\n') || 'N/A'}\\n\\nPoisson: ${Object.keys(poisson).length > 0 ? 'OK' : 'N/A'}`;\nreturn [{ json: { telegramMessage: msg, result: result } }];"
+      },
+      "id": "prepare-notify-scheduled",
+      "name": "Prepare Notify (Scheduled)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        650,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot__TELEGRAM_TOKEN__/sendMessage",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "options": {},
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\"}",
+        "jsonBody": {
+          "chat_id": "__TELEGRAM_CHAT_ID__",
+          "text": "={{ $json.telegramMessage || 'BrainBets - Entrenamiento completado' }}",
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "telegram-notify-scheduled",
+      "name": "Telegram Notification (Scheduled)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        850,
+        480
+      ]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "http://backend:8000/api/v1/internal/train/models",
         "sendBody": true,
@@ -107,6 +194,39 @@
         [
           {
             "node": "Trigger Model Training",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Trigger Model Training (Scheduled)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Model Training (Scheduled)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Notify (Scheduled)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Notify (Scheduled)": {
+      "main": [
+        [
+          {
+            "node": "Telegram Notification (Scheduled)",
             "type": "main",
             "index": 0
           }

@@ -24,6 +24,9 @@
             <router-link to="/analytics" class="text-sm font-medium text-slate-600 hover:text-blue-600">
               Analytics
             </router-link>
+            <router-link to="/caja" class="text-sm font-medium text-slate-600 hover:text-blue-600">
+              Caja
+            </router-link>
           </div>
           <div class="flex items-center sm:hidden">
             <button
@@ -72,6 +75,14 @@
             :class="{ 'bg-slate-50 text-blue-600': $route.path === '/analytics' }"
           >
             Analytics
+          </router-link>
+          <router-link
+            to="/caja"
+            @click="mobileMenuOpen = false"
+            class="block px-3 py-2 rounded-md text-base font-medium text-slate-600 hover:text-blue-600 hover:bg-slate-50"
+            :class="{ 'bg-slate-50 text-blue-600': $route.path === '/caja' }"
+          >
+            Caja
           </router-link>
         </div>
       </div>

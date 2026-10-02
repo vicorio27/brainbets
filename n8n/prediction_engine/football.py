@@ -6,6 +6,7 @@ from common import (
     confidence_from_prob,
     ev_and_kelly,
     format_probabilities,
+    glicko2_expected_score,
     normalize_ranking,
     parse_form,
     poisson_pmf,
@@ -23,11 +24,15 @@ def compute_elo(
     away_form_score: float,
     home_elo: Optional[float] = None,
     away_elo: Optional[float] = None,
+    home_rd: Optional[float] = None,
+    away_rd: Optional[float] = None,
 ) -> Dict[str, float]:
-    """Compute Elo-style probabilities for a football match.
+    """Compute rating-based probabilities for a football match.
 
-    Uses real Elo ratings from the backend when available, otherwise falls
-    back to rank-based proxies.
+    Uses real Glicko-2 rating + RD (rating deviation) from the backend when
+    available — RD widens the probability toward 50% for teams with
+    unreliable ratings — otherwise falls back to rank-based proxies with a
+    plain-Elo logistic.
     """
     if home_elo is not None and away_elo is not None:
         home_rating = float(home_elo)
@@ -45,8 +50,12 @@ def compute_elo(
     home_rating += 65
 
     # Expected scores
-    home_expected = 1.0 / (1.0 + 10.0 ** ((away_rating - home_rating) / 400.0))
-    away_expected = 1.0 / (1.0 + 10.0 ** ((home_rating - away_rating) / 400.0))
+    if home_rd is not None and away_rd is not None:
+        home_expected = glicko2_expected_score(home_rating, home_rd, away_rating, away_rd)
+        away_expected = 1.0 - home_expected
+    else:
+        home_expected = 1.0 / (1.0 + 10.0 ** ((away_rating - home_rating) / 400.0))
+        away_expected = 1.0 / (1.0 + 10.0 ** ((home_rating - away_rating) / 400.0))
 
     # Draw probability (inversely related to rating difference)
     diff = abs(home_rating - away_rating)
@@ -289,6 +298,8 @@ def predict_football(match: Dict[str, Any]) -> List[Dict[str, Any]]:
     away_rank = normalize_ranking(safe_get(match, 'away_position'), 50)
     home_elo = safe_get(match, 'home_elo')
     away_elo = safe_get(match, 'away_elo')
+    home_rd = safe_get(match, 'rating_deviation_home_team')
+    away_rd = safe_get(match, 'rating_deviation_away_team')
     home_xg = float(safe_get(match, 'home_xg', 1.5) or 1.5)
     away_xg = float(safe_get(match, 'away_xg', 1.2) or 1.2)
     home_xg_against = safe_get(match, 'home_xg_against')
@@ -320,7 +331,9 @@ def predict_football(match: Dict[str, Any]) -> List[Dict[str, Any]]:
     away_odds = safe_get(match, 'away_odds')
     odds_probs = compute_odds_football(home_odds, draw_odds, away_odds)
 
-    elo_probs = compute_elo(home_rank, away_rank, home_form, away_form, home_elo, away_elo)
+    elo_probs = compute_elo(
+        home_rank, away_rank, home_form, away_form, home_elo, away_elo, home_rd, away_rd,
+    )
     poisson_result = compute_poisson(
         home_xg, away_xg, home_form, away_form,
         home_xg_against=home_xg_against, away_xg_against=away_xg_against,
@@ -435,6 +448,10 @@ def predict_football(match: Dict[str, Any]) -> List[Dict[str, Any]]:
                     'away': away_odds,
                 } if home_odds is not None and draw_odds is not None and away_odds is not None else None,
                 'headToHead': h2h,
+                'ratingDeviation': {
+                    'home': home_rd,
+                    'away': away_rd,
+                } if home_rd is not None or away_rd is not None else None,
                 'expertConsensus': expert,
                 'homeForm': safe_get(match, 'home_form'),
                 'awayForm': safe_get(match, 'away_form'),

@@ -77,6 +77,36 @@
     {
       "parameters": {
         "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/matches/tennis/closing-odds/capture",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "window_hours",
+              "value": "6"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "capture-closing-odds",
+      "name": "Capture Closing Odds",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "onError": "continueRegularOutput",
+      "position": [
+        650,
+        550
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
         "url": "http://backend:8000/api/v1/internal/validate/predictions",
         "sendQuery": true,
         "queryParameters": {
@@ -247,6 +277,17 @@
       ]
     },
     "Update Tennis First": {
+      "main": [
+        [
+          {
+            "node": "Capture Closing Odds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Capture Closing Odds": {
       "main": [
         [
           {

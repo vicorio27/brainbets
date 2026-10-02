@@ -754,6 +754,18 @@ const setStatsPlayers = computed(() => matchesStore.playerSetStats?.players || [
 const minEdge = ref(0.05)
 const minConfidence = ref(50)
 
+// Markets excluded from every betting-recommendation surface (picks,
+// parlays, "apuesta del día") while under review/redesign. "Exact Set
+// Score" showed a statistically significant loss that got WORSE in the
+// second half of its history (see Caja's "¿El edge se sostiene en el
+// tiempo?"), so it's paused here on 2026-10-02 pending a redesign of how
+// the engine prices 6-way exact-score markets. Predictions keep being
+// generated and validated for it (still visible on PredictionDetail) --
+// this only stops it from being recommended as something to stake on.
+// Mirrored on the backend as bankroll_service.PAUSED_BETTING_MARKETS --
+// update both sides together.
+const PAUSED_BETTING_MARKETS = new Set(['Exact Set Score'])
+
 const tennisMatchById = computed(() => {
   const map = {}
   for (const m of matchesStore.latest?.tennis || []) map[m.matchId] = m
@@ -775,6 +787,7 @@ const bettingRecs = computed(() => {
   // Collect EVERY tennis pick for today, per match.
   for (const p of predictionsStore.latest?.predictions || []) {
     if (String(p.sport).toLowerCase() !== 'tennis') continue
+    if (PAUSED_BETTING_MARKETS.has(p.market)) continue
     if (p.eventDate && p.eventDate !== today) continue
     const conf = p.calibratedConfidence ?? p.confidence
     const m = tennisMatchById.value[p.matchId] || {}
@@ -866,6 +879,7 @@ const comboPool = computed(() => {
   const byMatch = {}
   for (const p of predictionsStore.latest?.predictions || []) {
     if (String(p.sport).toLowerCase() !== 'tennis') continue
+    if (PAUSED_BETTING_MARKETS.has(p.market)) continue
     if (p.eventDate && p.eventDate !== today) continue
     const odd = comboLegOdd(p)
     const prob = comboLegProb(p)
@@ -938,6 +952,7 @@ const pickCandidates = computed(() => {
   const out = []
   for (const p of predictionsStore.latest?.predictions || []) {
     if (String(p.sport).toLowerCase() !== 'tennis') continue
+    if (PAUSED_BETTING_MARKETS.has(p.market)) continue
     if (p.eventDate && p.eventDate !== today) continue
     const odd = comboLegOdd(p)
     const prob = comboLegProb(p)

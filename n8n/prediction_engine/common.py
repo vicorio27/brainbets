@@ -39,6 +39,32 @@ def sigmoid(x: float) -> float:
         return z / (1.0 + z)
 
 
+_GLICKO2_SCALE = 173.7178
+
+
+def glicko2_expected_score(rating_a: float, rd_a: float, rating_b: float, rd_b: float) -> float:
+    """Win probability for `a` against `b` from Glicko-2 rating + RD pairs.
+
+    Shared by both `tennis.py` and `football.py` so the same rating-plus-
+    uncertainty math backs both sports: it combines each player's RD (rating
+    deviation — how reliable their rating is, high for a debutant or someone
+    off a long layoff, low for a long stable run of matches) into the
+    win-probability estimate, shrinking it toward 50% exactly when the model
+    should be less confident. Symmetric: glicko2_expected_score(a, b) +
+    glicko2_expected_score(b, a) == 1. Mirrors
+    `backend/src/application/glicko2.py::expected_score` (the training-side
+    twin, kept separate because n8n scripts don't import backend code).
+    """
+    mu_a = (rating_a - 1500.0) / _GLICKO2_SCALE
+    mu_b = (rating_b - 1500.0) / _GLICKO2_SCALE
+    phi_a = rd_a / _GLICKO2_SCALE
+    phi_b = rd_b / _GLICKO2_SCALE
+    phi_combined = math.sqrt(phi_a * phi_a + phi_b * phi_b)
+    g = 1.0 / math.sqrt(1.0 + 3.0 * phi_combined * phi_combined / (math.pi * math.pi))
+    x = max(min(-g * (mu_a - mu_b), 700.0), -700.0)
+    return 1.0 / (1.0 + math.exp(x))
+
+
 def normalize_ranking(rank: Optional[int], default: int = 100) -> int:
     """Return a sensible ranking value."""
     if rank is None or rank <= 0:
@@ -94,6 +120,12 @@ def safe_get(d: Dict[str, Any], key: str, default: Any = None) -> Any:
         'elo_player2': 'eloPlayer2',
         'elo_surface_player1': 'eloSurfacePlayer1',
         'elo_surface_player2': 'eloSurfacePlayer2',
+        'rating_deviation_player1': 'ratingDeviationPlayer1',
+        'rating_deviation_player2': 'ratingDeviationPlayer2',
+        'rating_deviation_surface_player1': 'ratingDeviationSurfacePlayer1',
+        'rating_deviation_surface_player2': 'ratingDeviationSurfacePlayer2',
+        'rating_deviation_home_team': 'ratingDeviationHomeTeam',
+        'rating_deviation_away_team': 'ratingDeviationAwayTeam',
         'odds_player1': 'oddsPlayer1',
         'odds_player2': 'oddsPlayer2',
         'odds_markets': 'oddsMarkets',

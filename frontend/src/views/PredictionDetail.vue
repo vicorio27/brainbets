@@ -118,7 +118,16 @@
                   Calibrada con resultados reales · modelo: {{ predictionsStore.detail.prediction.confidence }}%
                 </p>
               </div>
-              <div v-if="evValue != null" class="bg-slate-50 rounded-lg p-4 md:col-span-2">
+              <div v-if="isPausedMarket" class="bg-amber-50 border border-amber-200 rounded-lg p-4 md:col-span-2">
+                <h4 class="text-xs font-semibold text-amber-800 uppercase tracking-wider mb-1">⏸️ Mercado en pausa</h4>
+                <p class="text-sm text-amber-800">
+                  "{{ predictionsStore.detail.prediction.market }}" no se recomienda para apostar: mostró una pérdida
+                  estadísticamente significativa que además empeoró con el tiempo. Se sigue prediciendo y validando
+                  para juntar datos, pero no aparece en las recomendaciones de la pestaña Apuestas ni en la Caja por
+                  defecto mientras se rediseña.
+                </p>
+              </div>
+              <div v-else-if="evValue != null" class="bg-slate-50 rounded-lg p-4 md:col-span-2">
                 <h4 class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
                   Valor de la apuesta (Edge{{ usesCalibratedEv ? ' calibrado' : '' }})
                 </h4>
@@ -555,6 +564,12 @@ function pctText(v) {
   return v == null ? '-' : Math.round(v * 100) + '%'
 }
 
+// Mirrors bankroll_service.PAUSED_BETTING_MARKETS / Dashboard.vue's
+// PAUSED_BETTING_MARKETS -- update all three together.
+const PAUSED_MARKETS = new Set(['Exact Set Score'])
+const isPausedMarket = computed(() =>
+  PAUSED_MARKETS.has(predictionsStore.detail?.prediction?.market)
+)
 const evValue = computed(() => {
   const p = predictionsStore.detail?.prediction
   return p?.calibratedExpectedValue ?? p?.expectedValue ?? null
@@ -672,6 +687,18 @@ const reasoningItems = computed(() => {
 
   for (const [key, value] of Object.entries(data)) {
     if (key === 'model' || key === 'expectedScore' || key === 'expertConsensus') continue
+    // Rating deviation (Glicko-2 uncertainty) is a magnitude (0-350), not a
+    // probability — skip the generic 0-100% bars renderer below, which would
+    // clamp/scale it into a misleading "100%"-looking bar.
+    if (key === 'ratingDeviation' && value && typeof value === 'object') {
+      const parts = Object.entries(value)
+        .filter(([, v]) => typeof v === 'number')
+        .map(([k, v]) => `${formatKey(k)}: ${Math.round(v)}`)
+      if (parts.length) {
+        items.push({ label: 'Incertidumbre del rating (RD)', type: 'value', value: parts.join(' · ') })
+      }
+      continue
+    }
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       const numericValues = Object.fromEntries(
         Object.entries(value).filter(([, v]) => typeof v === 'number')

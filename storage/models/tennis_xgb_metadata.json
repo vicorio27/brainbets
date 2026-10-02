@@ -14,9 +14,9 @@
     "p1_matches_last_30_days",
     "p2_matches_last_30_days"
   ],
-  "train_accuracy": 0.9981,
-  "test_accuracy": 0.998,
-  "samples": 14761,
+  "train_accuracy": 0.9884,
+  "test_accuracy": 0.9864,
+  "samples": 14759,
   "max_matches_used": 15000,
-  "trained_at": "2026-07-04T03:29:30.832862+00:00"
+  "trained_at": "2026-10-02T03:18:22.234498+00:00"
 }

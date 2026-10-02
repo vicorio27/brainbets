@@ -23,6 +23,10 @@ class TennisMatch(BaseModel):
     eloPlayer2: Optional[float] = None
     eloSurfacePlayer1: Optional[float] = None
     eloSurfacePlayer2: Optional[float] = None
+    ratingDeviationPlayer1: Optional[float] = None
+    ratingDeviationPlayer2: Optional[float] = None
+    ratingDeviationSurfacePlayer1: Optional[float] = None
+    ratingDeviationSurfacePlayer2: Optional[float] = None
     oddsPlayer1: Optional[float] = None
     oddsPlayer2: Optional[float] = None
     # Decimal odds for the other predicted markets, from the same get_odds
@@ -71,6 +75,8 @@ class FootballMatch(BaseModel):
     statsDataQuality: Optional[str] = None
     homeElo: Optional[float] = None
     awayElo: Optional[float] = None
+    ratingDeviationHomeTeam: Optional[float] = None
+    ratingDeviationAwayTeam: Optional[float] = None
     homeAttack: Optional[float] = None
     homeDefense: Optional[float] = None
     awayAttack: Optional[float] = None

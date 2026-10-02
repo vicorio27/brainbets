@@ -772,6 +772,39 @@ GET /api/v1/analytics/accuracy
 GET /api/v1/analytics/dashboard
 ```
 
+```http
+GET /api/v1/analytics/bankroll?initial=100&strategy=percent&stakePct=2&target=2&days=365
+```
+
+Simulador de caja: backtest sobre las predicciones ya validadas **que tienen cuota guardada**.
+Parámetros: `initial`, `strategy` (`percent` | `flat` | `kelly`), `stakePct`, `kellyMultiplier`,
+`maxStakePct`, `target` (múltiplo objetivo, 2 = duplicar), `days`, `sport`, `market`,
+`minConfidence`, `minEv`, `useCalibrated`, `sims`, `horizonDays`.
+Devuelve `sample` (cobertura de cuotas), `backtest` (curva diaria, yield, drawdown),
+`projection` (días para llegar al objetivo), `monteCarlo` (p10/p50/p90 y prob. de quiebra),
+`byMarket` (qué mercados pagan, con test de significancia y CLV) y `stability` (¿el edge
+se sostiene en la primera vs. la segunda mitad del historial?). "Exact Set Score" está
+excluido del universo por defecto (`PAUSED_BETTING_MARKETS`) mientras se evalúa su rediseño
+— pasar `market=Exact Set Score` explícito lo sigue mostrando, para monitoreo.
+
+```http
+POST /api/v1/internal/matches/tennis/closing-odds/capture?window_hours=6
+```
+
+Interno. Captura la cuota de tenis justo antes del saque inicial (Closing Line Value) para
+los partidos que arrancan dentro de `window_hours`, guardada en
+`matches.extra_data.odds_markets_closing`. Llamado por el nodo "Capture Closing Odds" de
+`validation_db` cada hora.
+
+```http
+POST /api/v1/internal/train/exact-score-prior
+GET  /api/v1/internal/predict/tennis-exact-score-prior
+```
+
+Internos. Entrena (desde todo el histórico de tenis con marcador final) y sirve el prior
+empírico de marcador exacto por sets — ver `exact_score_prior_service.py` y el apartado de
+rediseño de "Exact Set Score" en `AGENTS.md`.
+
 ---
 
 # Roadmap
