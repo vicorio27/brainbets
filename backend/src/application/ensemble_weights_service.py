@@ -38,7 +38,21 @@ MIN_SAMPLES = 30
 # because another correlated signal explained the same variance marginally
 # better in that particular sample. This keeps early fits close to the
 # historical constants and lets them drift only as more data accumulates.
-PRIOR_STRENGTH = 20.0
+#
+# 100 was picked empirically via ensemble_walkforward_service.py, not chosen
+# up front: the original value of 20 was shown by the walk-forward check to
+# actively lose to the hardcoded DEFAULT_WEIGHTS on held-out data at every
+# tested cutoff (-4 to -6 points of accuracy on the "both" regime's ~230
+# validated outcomes) -- the fit was real, but it didn't generalize, meaning
+# 20 pseudo-samples wasn't enough shrinkage for how few real samples exist
+# so far. 100 was the smallest value in a sweep (20/50/100/200/400/800/1600)
+# that stopped losing to the baseline across most cutoffs while still
+# letting the real data move the weights (200+ converges to indistinguishable
+# from the defaults given today's sample sizes). Re-run the walk-forward
+# check (GET /internal/validate/tennis-ensemble-walkforward) after the
+# validated sample grows substantially -- the right shrinkage shrinks as the
+# real sample does.
+PRIOR_STRENGTH = 100.0
 
 # The constants that were hardcoded in `ensemble_tennis` before weights became
 # data-driven. Served as-is for a regime until it has >= MIN_SAMPLES complete

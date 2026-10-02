@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "trained_at": "2026-10-02T11:44:04.595794+00:00",
+  "trained_at": "2026-10-02T18:35:54.674679+00:00",
   "min_samples": 30,
   "model_keys": [
     "surface_elo",
@@ -13,14 +13,14 @@
   "regimes": {
     "both": {
       "weights": {
-        "surface_elo": 0.2196,
-        "elo": 0.1903,
-        "xgboost": 0.1209,
-        "catboost": 0.1469,
-        "ml": 0.0762,
-        "odds": 0.2461
+        "surface_elo": 0.2515,
+        "elo": 0.2033,
+        "xgboost": 0.1024,
+        "catboost": 0.1089,
+        "ml": 0.1584,
+        "odds": 0.1755
       },
-      "samples": 189,
+      "samples": 195,
       "source": "fitted"
     },
     "elo_only": {
@@ -37,12 +37,12 @@
     },
     "rank_only": {
       "weights": {
-        "surface_elo": 0.0912,
-        "elo": 0.08,
-        "xgboost": 0.152,
-        "catboost": 0.1572,
-        "ml": 0.2022,
-        "odds": 0.3174
+        "surface_elo": 0.0951,
+        "elo": 0.0934,
+        "xgboost": 0.1505,
+        "catboost": 0.1513,
+        "ml": 0.2401,
+        "odds": 0.2696
       },
       "samples": 31,
       "source": "fitted"

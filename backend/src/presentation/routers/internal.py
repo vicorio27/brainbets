@@ -885,6 +885,24 @@ def get_router() -> APIRouter:
 
         return {"priors": get_exact_score_priors()}
 
+    @r.get("/validate/tennis-ensemble-walkforward")
+    async def tennis_ensemble_walkforward_endpoint(
+        cutoff_frac: float = 0.7,
+        db: Session = Depends(get_db),
+    ):
+        """Walk-forward check for the Match Winner ensemble weights: fit on
+        the earliest `cutoff_frac` of validated outcomes per regime, score
+        the frozen result on the rest, and compare against the hardcoded
+        defaults and against today's fit-on-everything weights (both scored
+        on that same held-out set). Read-only diagnostic -- does not persist
+        anything or affect what the live engine serves. See
+        ensemble_walkforward_service.py for why this is the version of
+        "walk-forward" that actually matters here.
+        """
+        from src.application.ensemble_walkforward_service import walk_forward_ensemble
+
+        return walk_forward_ensemble(db, cutoff_frac=cutoff_frac)
+
     @r.post("/predict/tennis-ml")
     async def predict_tennis_ml_endpoint(
         payload: Dict[str, Any],

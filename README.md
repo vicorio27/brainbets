@@ -805,6 +805,16 @@ Internos. Entrena (desde todo el histórico de tenis con marcador final) y sirve
 empírico de marcador exacto por sets — ver `exact_score_prior_service.py` y el apartado de
 rediseño de "Exact Set Score" en `AGENTS.md`.
 
+```http
+GET /api/v1/internal/validate/tennis-ensemble-walkforward?cutoff_frac=0.7
+```
+
+Interno, solo diagnóstico (no persiste nada). Ajusta los pesos del ensemble de Match Winner
+con la primera porción cronológica del histórico validado, los congela, y los evalúa contra
+la porción que nunca vieron — comparando contra las constantes hardcodeadas y contra el ajuste
+con todos los datos (lo que sirve el motor hoy). Ver `ensemble_walkforward_service.py` y el
+hallazgo de `PRIOR_STRENGTH` en `AGENTS.md`.
+
 ---
 
 # Roadmap
