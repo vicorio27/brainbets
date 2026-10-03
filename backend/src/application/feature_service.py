@@ -456,6 +456,18 @@ class FeatureService:
             (before_date - last_date).days if last_date else None
         )
 
+        # Tournament of the competitor's immediately-previous match (rows is
+        # already date-descending), for the engine's travel/jet-lag proxy on
+        # Set 1 Winner (see n8n/prediction_engine/tennis.py's
+        # `_travel_disruption`): a short turnaround into a tournament in a
+        # different region is the closest signal we can derive from data we
+        # already collect -- real travel distance/timezone isn't collected.
+        previous_tournament = None
+        if rows:
+            previous_match = rows[0][0]
+            if previous_match.league is not None:
+                previous_tournament = previous_match.league.name
+
         all_last20 = rows[:20]
         surface_rows = [
             (m, mc, s)
@@ -534,6 +546,7 @@ class FeatureService:
             "side": side,
             "surface": surface,
             "days_since_last_match": days_since_last_match,
+            "previous_tournament": previous_tournament,
             "last_20": _tennis_aggregate(all_last20),
             "surface_last_20": _tennis_aggregate(surface_rows),
             "h2h": self._h2h_record(competitor_id, opponent_id, before_date),

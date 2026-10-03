@@ -54,6 +54,170 @@ def _win_rate_from_features(features: Optional[Dict[str, Any]], side: str, key: 
     return None
 
 
+# --- Set 1 Winner: travel/jet-lag proxy -------------------------------
+# A player who just flew in for a short-turnaround match -- unfamiliar
+# courts/balls/crowd, body clock still elsewhere -- is a classic "slow
+# starter in set 1" story. Real travel distance/timezone isn't collected
+# (api-tennis gives no tournament location), so this uses the closest proxy
+# buildable from data already in hand: did the player's PREVIOUS match
+# (FeatureService.previous_tournament) happen in a different coarse region
+# from this one, with only a few days to adjust (days_since_last_match)?
+# Deliberately coarse and capped small -- a plausible proxy, not measured
+# ground truth, nudging Set 1 Winner only (by set 2 a player has settled
+# in; Match Winner/Total Sets/Exact Set Score are untouched).
+TOURNAMENT_REGION: Dict[str, str] = {
+    # North America
+    'us open': 'north_america', 'indian wells': 'north_america', 'miami': 'north_america',
+    'canada': 'north_america', 'toronto': 'north_america', 'montreal': 'north_america',
+    'cincinnati': 'north_america', 'washington': 'north_america', 'atlanta': 'north_america',
+    'houston': 'north_america', 'dallas': 'north_america', 'newport': 'north_america',
+    'winston-salem': 'north_america', 'los cabos': 'north_america', 'acapulco': 'north_america',
+    'mexico': 'north_america',
+    # South America
+    'rio de janeiro': 'south_america', 'rio open': 'south_america', 'buenos aires': 'south_america',
+    'santiago': 'south_america', 'cordoba': 'south_america', 'bogota': 'south_america',
+    'sao paulo': 'south_america',
+    # Europe
+    'wimbledon': 'europe', 'roland garros': 'europe', 'french open': 'europe',
+    'monte-carlo': 'europe', 'monte carlo': 'europe', 'madrid': 'europe', 'rome': 'europe',
+    'roma': 'europe', 'barcelona': 'europe', 'halle': 'europe', 'queen': 'europe',
+    'hamburg': 'europe', 'vienna': 'europe', 'basel': 'europe', 'paris': 'europe',
+    'rotterdam': 'europe', 'marseille': 'europe', 'montpellier': 'europe', 'metz': 'europe',
+    'munich': 'europe', 'geneva': 'europe', 'lyon': 'europe', 'stuttgart': 'europe',
+    'eastbourne': 'europe', 'bastad': 'europe', 'gstaad': 'europe', 'umag': 'europe',
+    'kitzbuhel': 'europe', 'estoril': 'europe', 'marrakech': 'europe', 'belgrade': 'europe',
+    'budapest': 'europe', 'sofia': 'europe', 'antwerp': 'europe', 'stockholm': 'europe',
+    'moselle': 'europe',
+    # Asia-Pacific
+    'australian open': 'asia_pacific', 'shanghai': 'asia_pacific', 'beijing': 'asia_pacific',
+    'tokyo': 'asia_pacific', 'china': 'asia_pacific', 'japan': 'asia_pacific',
+    'adelaide': 'asia_pacific', 'brisbane': 'asia_pacific', 'auckland': 'asia_pacific',
+    'chengdu': 'asia_pacific', 'zhuhai': 'asia_pacific', 'astana': 'asia_pacific',
+    'seoul': 'asia_pacific', 'hong kong': 'asia_pacific', 'singapore': 'asia_pacific',
+    # Middle East / Africa
+    'dubai': 'middle_east_africa', 'doha': 'middle_east_africa', 'qatar': 'middle_east_africa',
+    'rabat': 'middle_east_africa', 'tel aviv': 'middle_east_africa', 'almaty': 'middle_east_africa',
+}
+
+# Beyond this many days there was time to adjust even across regions; below
+# it (or with no data) there's nothing to flag. Within the window, less
+# elapsed time means more disruption (linear taper).
+_TRAVEL_DAYS_WINDOW = (0, 4)
+# Max probability taken away from the traveling player's Set 1 chances.
+_TRAVEL_MAX_PENALTY = 0.04
+
+
+def _tournament_region(tournament_name: Optional[str]) -> Optional[str]:
+    t = (tournament_name or '').lower()
+    for key, region in TOURNAMENT_REGION.items():
+        if key in t:
+            return region
+    return None
+
+
+def _travel_disruption(
+    previous_tournament: Optional[str],
+    current_tournament: Optional[str],
+    days_since_last_match: Optional[float],
+) -> float:
+    """Probability penalty (0 to `_TRAVEL_MAX_PENALTY`) on this player's Set
+    1 chances from a likely short-turnaround cross-region trip. Zero unless
+    both tournaments are classified into DIFFERENT regions and the gap falls
+    inside `_TRAVEL_DAYS_WINDOW`."""
+    if days_since_last_match is None:
+        return 0.0
+    lo, hi = _TRAVEL_DAYS_WINDOW
+    if not (lo <= days_since_last_match <= hi):
+        return 0.0
+    prev_region = _tournament_region(previous_tournament)
+    current_region = _tournament_region(current_tournament)
+    if not prev_region or not current_region or prev_region == current_region:
+        return 0.0
+    recency = 1.0 - (days_since_last_match - lo) / max(1, hi - lo)
+    return _TRAVEL_MAX_PENALTY * recency
+
+
+def _travel_adjusted_set1_probs(
+    set_p1: float,
+    set_p2: float,
+    features: Optional[Dict[str, Any]],
+    tournament: Optional[str],
+) -> Tuple[float, float]:
+    """Nudge the per-set win probabilities for the Set 1 Winner market only
+    -- `set_p1`/`set_p2` themselves stay untouched for Total Sets/Exact Set
+    Score, which have nothing to do with who looked rusty in set 1."""
+    p1_features = (features or {}).get('player1') or {}
+    p2_features = (features or {}).get('player2') or {}
+    p1_penalty = _travel_disruption(
+        p1_features.get('previous_tournament'), tournament, p1_features.get('days_since_last_match'),
+    )
+    p2_penalty = _travel_disruption(
+        p2_features.get('previous_tournament'), tournament, p2_features.get('days_since_last_match'),
+    )
+    adjusted_p1 = set_p1 - p1_penalty + p2_penalty
+    adjusted_p1 = min(max(adjusted_p1, 0.01), 0.99)
+    return adjusted_p1, 1.0 - adjusted_p1
+
+
+# --- Long layoff / injury-return rust -----------------------------------
+# A player can carry a "good" ranking into a tournament despite months out
+# hurt -- ATP ranking decays slowly, and protected rankings exist precisely
+# so an injured player doesn't fall off the list while they're out. Glicko-2
+# RD already widens the general-Elo signal's OWN uncertainty for a long gap
+# (elo_service.py's idle-time inflation feeds compute_elo_tennis via p1_rd/
+# p2_rd, and the reasoning text already flags "incertidumbre elevada" when
+# RD >= 100) -- but the other five ensemble signals have no idea: surface
+# Elo without a real surface-RD fallback, the two heuristics, the ML model
+# and market odds all take a stale ranking/rating at face value. This adds
+# a separate, modest penalty directly to the MATCH-LEVEL ensemble
+# probability -- after the six signals are combined, not inside any one of
+# them -- so it reaches every set-derived market (Total Sets, Exact Set
+# Score, Set 1 Winner) together with Match Winner. Unlike the travel/jet-lag
+# proxy above (deliberately Set-1-only), ring rust from a long layoff is a
+# whole-match effect, not a slow-start-then-fine one.
+_LAYOFF_DAYS_THRESHOLD = 45   # below this: normal rest/rotation, no adjustment
+_LAYOFF_DAYS_FULL = 180       # at/above this: the full penalty applies
+_LAYOFF_MAX_PENALTY = 0.06    # match-win probability taken from the returning player
+
+
+def _layoff_penalty(days_since_last_match: Optional[float]) -> float:
+    if days_since_last_match is None or days_since_last_match < _LAYOFF_DAYS_THRESHOLD:
+        return 0.0
+    span = _LAYOFF_DAYS_FULL - _LAYOFF_DAYS_THRESHOLD
+    severity = min(1.0, (days_since_last_match - _LAYOFF_DAYS_THRESHOLD) / span)
+    return _LAYOFF_MAX_PENALTY * severity
+
+
+def _layoff_adjusted_ensemble(
+    ensemble: Dict[str, Any],
+    features: Optional[Dict[str, Any]],
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Nudge the match-level ensemble probability for a player coming back
+    from a long layoff, independent of what their ranking says. Returns the
+    (possibly unchanged) ensemble plus debug info for reasoningData, or None
+    when neither player qualifies."""
+    p1_features = (features or {}).get('player1') or {}
+    p2_features = (features or {}).get('player2') or {}
+    p1_days = p1_features.get('days_since_last_match')
+    p2_days = p2_features.get('days_since_last_match')
+    p1_penalty = _layoff_penalty(p1_days)
+    p2_penalty = _layoff_penalty(p2_days)
+    if p1_penalty == 0.0 and p2_penalty == 0.0:
+        return ensemble, None
+
+    adjusted_p1 = ensemble['player1'] - p1_penalty + p2_penalty
+    adjusted_p1 = min(max(adjusted_p1, 0.02), 0.98)
+    if round(adjusted_p1, 4) == round(ensemble['player1'], 4):
+        return ensemble, None  # penalties canceled out -- nothing distinguishing to report
+
+    debug = {
+        'player1DaysSinceLastMatch': p1_days,
+        'player2DaysSinceLastMatch': p2_days,
+        'adjustment': round(adjusted_p1 - ensemble['player1'], 4),
+    }
+    return {**ensemble, 'player1': adjusted_p1, 'player2': 1.0 - adjusted_p1}, debug
+
+
 def rank_to_elo(rank: int, top_rating: float = 2300.0, spread: float = 250.0) -> float:
     """Convert an ATP/WTA ranking into a plausible Elo rating.
 
@@ -731,6 +895,7 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
         has_real_elo=has_real_elo,
         has_real_surface_elo=has_real_surface_elo,
     )
+    ensemble, layoff_debug = _layoff_adjusted_ensemble(ensemble, features)
 
     winner_key = 'player1' if ensemble['player1'] > ensemble['player2'] else 'player2'
     winner = p1 if winner_key == 'player1' else p2
@@ -767,6 +932,14 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
             f" Incertidumbre elevada en el rating de {shakier} (RD {round(max(p1_rd, p2_rd),0)}), "
             f"la probabilidad ya está ajustada hacia 50/50 por esto."
         )
+    layoff_line = ''
+    if layoff_debug:
+        rustier = p1 if layoff_debug['adjustment'] < 0 else p2
+        rustier_days = layoff_debug['player1DaysSinceLastMatch'] if rustier == p1 else layoff_debug['player2DaysSinceLastMatch']
+        layoff_line = (
+            f" {rustier} vuelve de {round(rustier_days)} días sin competir — probabilidad ajustada "
+            f"{abs(round(layoff_debug['adjustment']*100,1))} puntos en su contra pese al ranking."
+        )
     odds_line = ''
     if odds_probs is not None:
         odds_line = (
@@ -791,7 +964,7 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
         f"Elo general ({elo_source}): {round(elo_probs['player1']*100,1)}% a {round(elo_probs['player2']*100,1)}%. "
         f"Elo en {surface} ({surface_elo_source}): {round(surface_elo_probs['player1']*100,1)}% a "
         f"{round(surface_elo_probs['player2']*100,1)}%. "
-        f"H2H: {h2h[0]}-{h2h[1]}.{odds_line}{ml_line}{feature_source}{uncertainty_line}"
+        f"H2H: {h2h[0]}-{h2h[1]}.{odds_line}{ml_line}{feature_source}{uncertainty_line}{layoff_line}"
     )
 
     fmt_label = 'al mejor de 5 sets (Grand Slam)' if best_of >= 5 else 'al mejor de 3 sets'
@@ -813,8 +986,22 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
         exact_scores[f'{p2} {sets_to_win}-{lost}'] = ensemble['player2'] * prob
     best_exact = max(exact_scores, key=exact_scores.get)
 
-    set1_winner = p1 if set_p1 >= set_p2 else p2
-    set1_prob = max(set_p1, set_p2)
+    # Set 1 Winner gets its own (possibly travel-adjusted) pair of set
+    # probabilities -- set_p1/set_p2 themselves stay untouched for Total
+    # Sets/Exact Set Score, which aren't about who looked rusty in set 1.
+    set1_p1, set1_p2 = _travel_adjusted_set1_probs(set_p1, set_p2, features, tournament)
+    travel_debug = None
+    if (set1_p1, set1_p2) != (set_p1, set_p2):
+        travel_debug = {
+            'player1DaysSinceLastMatch': (features.get('player1') or {}).get('days_since_last_match'),
+            'player2DaysSinceLastMatch': (features.get('player2') or {}).get('days_since_last_match'),
+            'player1PreviousTournament': (features.get('player1') or {}).get('previous_tournament'),
+            'player2PreviousTournament': (features.get('player2') or {}).get('previous_tournament'),
+            'adjustment': round(set1_p1 - set_p1, 4),
+        }
+
+    set1_winner = p1 if set1_p1 >= set1_p2 else p2
+    set1_prob = max(set1_p1, set1_p2)
 
     exact_reasoning = (
         f"Marcador exacto más probable: {best_exact} "
@@ -826,6 +1013,10 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
     set1_reasoning = (
         f"Ganador más probable del Set 1: {set1_winner} "
         f"({round(set1_prob*100,1)}% por set, derivado del ensemble de partido)."
+        + (
+            f" Ajustado por posible desgaste de viaje (llegó hace poco de un torneo en otra región)."
+            if travel_debug else ""
+        )
     )
 
     # --- EV / Kelly for the set-level markets, using the odds for those exact
@@ -951,6 +1142,12 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
                     'p2SurfaceWinRate': p2_surface_win_rate,
                     'h2h': h2h_feature,
                 } if features else None,
+                # 'model' stays 'ensemble' even when adjusted below -- it's
+                # how ensemble_weights_service._extract_row recognizes a
+                # trainable Match Winner row; the layoff nudge is reported
+                # separately instead of changing it (unlike Set 1 Winner's
+                # travel-adjusted model label, nothing else filters on this).
+                'layoffAdjustment': layoff_debug,
             },
         },
         {
@@ -999,17 +1196,18 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
             'expectedValue': set1_ev['expected_value'],
             'kellyFraction': set1_ev['kelly_fraction'],
             'probabilities': format_probabilities({
-                'player1': set_p1,
-                'player2': set_p2,
+                'player1': set1_p1,
+                'player2': set1_p2,
             }),
             'modelContributions': ensemble['model_contributions'],
             'reasoning': set1_reasoning,
             'reasoningData': {
-                'model': 'binomial_sets',
+                'model': 'binomial_sets_travel_adjusted' if travel_debug else 'binomial_sets',
                 'setProbability': format_probabilities({
-                    'player1': set_p1,
-                    'player2': set_p2,
+                    'player1': set1_p1,
+                    'player2': set1_p2,
                 }),
+                'travelAdjustment': travel_debug,
                 'oddsDecimal': set1_odds_decimal,
             },
         },
