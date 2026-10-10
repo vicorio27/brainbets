@@ -686,6 +686,84 @@
         </div>
       </template>
 
+      <!-- Laboratorio: modelos en prueba contra la casa -->
+      <div v-show="tab === 'laboratorio'" class="bg-white rounded-xl border border-slate-200 p-4 mb-5">
+        <h2 class="text-lg font-semibold text-slate-900">¿El saque ayuda a ganarle a la casa en el primer set?</h2>
+        <p class="text-xs text-slate-500 mb-3">
+          Un modelo de prueba que suma a la cuota de la casa lo que sabemos de cada jugador (saque, resto, tiebreaks,
+          descanso y carga de partidos). No cambia ninguna predicción: solo mide, con cada partido nuevo, si esas
+          señales aciertan más que la cuota sola. Cuando lo demuestre, se incorpora al motor.
+        </p>
+        <p v-if="!lab" class="text-sm text-slate-500">Todavía no hay reporte; se genera con el entrenamiento diario.</p>
+        <template v-else>
+          <div class="flex flex-wrap items-center gap-3 mb-4">
+            <span class="inline-block rounded-full px-3 py-1 text-sm font-medium" :class="labStatus.cls">{{ labStatus.text }}</span>
+            <span class="text-sm text-slate-700">{{ labStatus.detail }}</span>
+          </div>
+          <div class="h-1.5 rounded-full bg-slate-100 overflow-hidden mb-4" role="progressbar" :aria-valuenow="lab.verdict.matches" :aria-valuemax="lab.verdict.needed" aria-label="Partidos nuevos evaluados">
+            <div class="h-full rounded-full bg-blue-500" :style="{ width: Math.min(100, (lab.verdict.matches / lab.verdict.needed) * 100) + '%' }"></div>
+          </div>
+          <div class="overflow-x-auto" tabindex="0">
+            <table class="min-w-full text-sm">
+              <thead>
+                <tr class="text-left text-xs text-slate-500 uppercase tracking-wider">
+                  <th class="py-2 pr-4">Prueba</th>
+                  <th class="py-2 px-3">Partidos</th>
+                  <th class="py-2 px-3">Error de la casa</th>
+                  <th class="py-2 px-3">Error del modelo</th>
+                  <th class="py-2 px-3">Mejora (IC 95%)</th>
+                  <th class="py-2 px-3">Apostando su edge &gt; 3%</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in labRows" :key="row.label" class="border-t border-slate-100">
+                  <td class="py-2 pr-4">
+                    <span class="font-medium text-slate-900">{{ row.label }}</span>
+                    <span class="block text-xs text-slate-500">{{ row.note }}</span>
+                  </td>
+                  <td class="py-2 px-3 text-slate-600">{{ row.data.matches || 0 }}</td>
+                  <template v-if="row.data.matches">
+                    <td class="py-2 px-3 text-slate-600">{{ row.data.logLossMarket }}</td>
+                    <td class="py-2 px-3 text-slate-600">{{ row.data.logLossModel }}</td>
+                    <td class="py-2 px-3 whitespace-nowrap">
+                      <span class="font-semibold" :class="row.data.improvement > 0 ? 'text-green-700' : 'text-red-700'">
+                        {{ row.data.improvement > 0 ? '+' : '' }}{{ row.data.improvement }}
+                      </span>
+                      <span class="text-xs text-slate-500">({{ row.data.improvementCiLow }} a {{ row.data.improvementCiHigh }})</span>
+                    </td>
+                    <td class="py-2 px-3 whitespace-nowrap text-slate-600">
+                      <template v-if="row.data.bets">
+                        {{ row.data.bets }} apuestas, yield {{ signedPct(row.data.yield) }}
+                        <span class="text-xs text-slate-500">({{ signedPct(row.data.yieldCiLow) }} a {{ signedPct(row.data.yieldCiHigh) }})</span>
+                      </template>
+                      <span v-else class="text-xs text-slate-500">ninguna</span>
+                    </td>
+                  </template>
+                  <td v-else colspan="4" class="py-2 px-3 text-xs text-slate-500">sin partidos todavía</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="text-xs text-slate-500 mt-3">
+            "Error" es el log-loss: más bajo es mejor. La mejora solo cuenta como real cuando todo su intervalo queda
+            por encima de cero. El primer vistazo no vale como prueba porque con esos mismos partidos se eligió qué
+            señales usar.
+          </p>
+          <div v-if="lab.weights" class="mt-4">
+            <h3 class="text-sm font-semibold text-slate-900 mb-1">Qué señales pesan más hoy</h3>
+            <p class="text-xs text-slate-500 mb-2">
+              Positivo: tener más de eso que el rival hace ganar el primer set más veces de lo que la cuota dice.
+            </p>
+            <ul class="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-1 text-sm">
+              <li v-for="w in lab.weights" :key="w.feature" class="flex justify-between">
+                <span class="text-slate-600">{{ w.label }}</span>
+                <span class="font-medium" :class="w.weight >= 0 ? 'text-slate-900' : 'text-red-700'">{{ w.weight > 0 ? '+' : '' }}{{ w.weight }}</span>
+              </li>
+            </ul>
+          </div>
+        </template>
+      </div>
+
       <!-- Advertencia única -->
       <p class="text-xs text-slate-500 px-1">
         Es un backtest, no una promesa: asume que consigues las mismas cuotas, que el modelo sigue rindiendo igual,
@@ -750,8 +828,39 @@ const tabs = computed(() => [
   { id: 'mercados', label: 'Por mercado' },
   { id: 'hoy', label: 'Hoy', hint: today.value?.bets ? `(${today.value.bets})` : '' },
   { id: 'historico', label: 'Histórico y simulación' },
-  { id: 'auditoria', label: 'Auditoría' }
+  { id: 'auditoria', label: 'Auditoría' },
+  { id: 'laboratorio', label: 'Laboratorio' }
 ])
+
+// Shadow model under test against the bookmaker (set1_lab_service).
+const lab = computed(() => store.lab?.set1 || null)
+const labRows = computed(() => {
+  if (!lab.value) return []
+  return [
+    {
+      label: `Partidos nuevos (después del ${lab.value.frozenAt})`,
+      note: 'La prueba que cuenta: nadie los había visto al elegir las señales.',
+      data: lab.value.postFreeze || {}
+    },
+    {
+      label: 'Primer vistazo (todo el histórico)',
+      note: 'Solo orientativo.',
+      data: lab.value.allWalkForward || {}
+    }
+  ]
+})
+const labStatus = computed(() => {
+  const v = lab.value?.verdict || {}
+  const progress = `${v.matches ?? 0} de ${v.needed ?? 0} partidos nuevos evaluados.`
+  return (
+    {
+      juntando_muestra: { text: 'Juntando muestra', cls: 'bg-slate-100 text-slate-700', detail: `${progress} Todavía no se puede concluir nada.` },
+      no_demostrado: { text: 'No demostrado', cls: 'bg-amber-100 text-amber-800', detail: `${progress} La mejora no se distingue del azar.` },
+      demostrado: { text: 'Demostrado', cls: 'bg-green-100 text-green-800', detail: `${progress} Le gana a la cuota: listo para incorporarse al motor.` },
+      descartado: { text: 'Descartado', cls: 'bg-red-100 text-red-800', detail: `${progress} Empeora frente a la cuota.` }
+    }[v.level] || { text: '–', cls: 'bg-slate-100 text-slate-600', detail: '' }
+  )
+})
 const smallSample = computed(() => (sim.value?.backtest?.bets || 0) < 100)
 const anyRealEdge = computed(() =>
   marketCajas.value.some((r) => r.level === 'edge_real' || r.level === 'ya_alcanzado')
@@ -926,5 +1035,8 @@ function run() {
   store.simulate(params)
 }
 
-onMounted(run)
+onMounted(() => {
+  run()
+  store.fetchLab()
+})
 </script>

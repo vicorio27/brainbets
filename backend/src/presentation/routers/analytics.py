@@ -29,6 +29,14 @@ def get_router() -> APIRouter:
     async def get_dashboard(service: DataService = Depends(get_data_service)):
         return service.get_dashboard_summary()
 
+    @r.get("/lab")
+    def get_lab():
+        """Shadow models under test against the bookmaker (read from the
+        artifact the daily training writes; nothing is computed here)."""
+        from src.application.set1_lab_service import get_lab_report
+
+        return {"set1": get_lab_report()}
+
     # Plain `def` on purpose: the per-market Monte Carlo takes a few seconds
     # of CPU, and a sync endpoint runs in the threadpool instead of freezing
     # the event loop for every other request (see gotcha #47).

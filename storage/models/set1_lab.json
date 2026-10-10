@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "trained_at": "2026-10-10T16:59:07.218487+00:00",
+  "market": "Set 1 Winner",
+  "frozenAt": "2026-10-10",
+  "rows": 123,
+  "allWalkForward": {
+    "matches": 61,
+    "from": "2026-09-08",
+    "to": "2026-10-10",
+    "logLossMarket": 0.6149,
+    "logLossModel": 0.5803,
+    "improvement": 0.0347,
+    "improvementCiLow": -0.024,
+    "improvementCiHigh": 0.0887,
+    "bets": 45,
+    "yield": 9.6,
+    "yieldCiLow": -18.4,
+    "yieldCiHigh": 37.5
+  },
+  "postFreeze": {
+    "matches": 0
+  },
+  "weights": [
+    {
+      "feature": "load",
+      "label": "Partidos en los \u00faltimos 10 d\u00edas",
+      "weight": 0.301
+    },
+    {
+      "feature": "hold",
+      "label": "Juegos de saque ganados",
+      "weight": 0.194
+    },
+    {
+      "feature": "fs",
+      "label": "Puntos ganados con 1er saque",
+      "weight": 0.162
+    },
+    {
+      "feature": "aces",
+      "label": "Aces por partido",
+      "weight": 0.08
+    },
+    {
+      "feature": "fresh",
+      "label": "Jug\u00f3 ayer",
+      "weight": 0.065
+    },
+    {
+      "feature": "brk",
+      "label": "Juegos de resto ganados",
+      "weight": 0.014
+    },
+    {
+      "feature": "s1",
+      "label": "Primeros sets ganados",
+      "weight": -0.013
+    },
+    {
+      "feature": "rest",
+      "label": "D\u00edas de descanso",
+      "weight": 0.006
+    },
+    {
+      "feature": "tb",
+      "label": "Tiebreaks ganados",
+      "weight": -0.001
+    }
+  ],
+  "verdict": {
+    "level": "juntando_muestra",
+    "matches": 0,
+    "needed": 300
+  }
+}

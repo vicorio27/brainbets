@@ -4,6 +4,7 @@ import api from './api.js'
 export const useBankrollStore = defineStore('bankroll', {
   state: () => ({
     simulation: null,
+    lab: null,
     loading: false,
     error: null
   }),
@@ -19,6 +20,14 @@ export const useBankrollStore = defineStore('bankroll', {
         this.simulation = null
       } finally {
         this.loading = false
+      }
+    },
+    async fetchLab() {
+      try {
+        const { data } = await api.get('/analytics/lab')
+        this.lab = data
+      } catch (err) {
+        this.lab = null
       }
     }
   }

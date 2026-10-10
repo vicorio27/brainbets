@@ -874,6 +874,16 @@ def get_router() -> APIRouter:
             except Exception as e:
                 logging.exception("[train] market anchor failed")
                 result["market_anchor"] = {"status": "error", "error": str(e)}
+        if payload.get("run_set1_lab", True):
+            # Shadow model only: refreshes its forward test, serves nothing.
+            from src.application.set1_lab_service import run_lab
+
+            try:
+                lab = run_lab(db)
+                result["set1_lab"] = {k: lab[k] for k in ("rows", "postFreeze", "verdict")}
+            except Exception as e:
+                logging.exception("[train] set1 lab failed")
+                result["set1_lab"] = {"status": "error", "error": str(e)}
         if payload.get("run_ensemble_weights", True):
             from src.application.ensemble_weights_service import train_ensemble_weights
 
@@ -899,6 +909,16 @@ def get_router() -> APIRouter:
         from src.application.calibration_service import train_calibration
 
         return train_calibration(db)
+
+    @r.post("/train/set1-lab")
+    def run_set1_lab_endpoint(
+        db: Session = Depends(get_db),
+    ):
+        """Re-run the Set 1 shadow model's walk-forward test (serve/return/
+        workload signals vs the bookmaker). Reports only; serves nothing."""
+        from src.application.set1_lab_service import run_lab
+
+        return run_lab(db)
 
     @r.post("/train/market-anchor")
     def train_market_anchor_endpoint(
