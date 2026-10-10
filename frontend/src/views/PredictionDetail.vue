@@ -129,7 +129,7 @@
               </div>
               <div v-else-if="evValue != null" class="bg-slate-50 rounded-lg p-4 md:col-span-2">
                 <h4 class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                  Valor de la apuesta (Edge{{ usesCalibratedEv ? ' calibrado' : '' }})
+                  Valor de la apuesta (Edge{{ isAnchoredEv ? ' anclado a la cuota' : ' del modelo' }})
                 </h4>
                 <div class="flex items-center gap-3 flex-wrap">
                   <span
@@ -143,8 +143,20 @@
                   </span>
                   <span class="text-xs text-slate-500">Regla: solo apostar con edge mayor a 5%</span>
                 </div>
-                <p v-if="usesCalibratedEv && predictionsStore.detail.prediction.expectedValue != null && predictionsStore.detail.prediction.expectedValue !== evValue" class="text-xs text-slate-500 mt-2">
-                  Edge crudo del modelo: {{ (predictionsStore.detail.prediction.expectedValue * 100).toFixed(1) }}% · el edge calibrado usa la probabilidad ajustada con resultados reales.
+                <p v-if="isAnchoredEv" class="text-xs text-slate-500 mt-2">
+                  La casa le da {{ Math.round(predictionsStore.detail.prediction.marketProbability * 100) }}% (sin su margen)
+                  y el modelo {{ Math.round(predictionsStore.detail.prediction.modelProbability * 100) }}%. El edge mezcla las dos
+                  con {{ Math.round((predictionsStore.detail.prediction.modelWeight ?? 0) * 100) }}% de peso para el modelo, que es lo
+                  que el histórico justifica hoy.
+                  <span v-if="modelEvValue != null">Edge del modelo solo: {{ formatEdge(modelEvValue) }}.</span>
+                  <span v-if="predictionsStore.detail.prediction.expectedValue != null"> Edge crudo: {{ formatEdge(predictionsStore.detail.prediction.expectedValue) }}.</span>
+                </p>
+                <p v-else-if="predictionsStore.detail.prediction.expectedValue != null && predictionsStore.detail.prediction.expectedValue !== evValue" class="text-xs text-slate-500 mt-2">
+                  Edge crudo del modelo: {{ formatEdge(predictionsStore.detail.prediction.expectedValue) }} · el edge calibrado usa la probabilidad ajustada con resultados reales.
+                </p>
+                <p v-if="evSuspicious" class="text-xs text-amber-700 mt-2">
+                  ⚠ Edge sospechoso: cuando el modelo ha visto más de 20% de ventaja, el mercado ha tenido razón
+                  (prometía +34% y rindió −24% en el histórico). No lo tomes como valor.
                 </p>
               </div>
             </div>
@@ -487,6 +499,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { usePredictionsStore } from '../stores/predictions.js'
 import { formatDateTimeIso } from '../utils/format.js'
+import { betEdge, betKelly, modelEdge, isSuspicious, edgeBadgeClass, formatEdge } from '../utils/edge.js'
 
 const route = useRoute()
 
@@ -570,24 +583,19 @@ const PAUSED_MARKETS = new Set(['Exact Set Score'])
 const isPausedMarket = computed(() =>
   PAUSED_MARKETS.has(predictionsStore.detail?.prediction?.market)
 )
-const evValue = computed(() => {
-  const p = predictionsStore.detail?.prediction
-  return p?.calibratedExpectedValue ?? p?.expectedValue ?? null
-})
-const usesCalibratedEv = computed(() => predictionsStore.detail?.prediction?.calibratedExpectedValue != null)
-const evPctText = computed(() => {
-  if (evValue.value == null) return '-'
-  const pct = evValue.value * 100
-  return (pct > 0 ? '+' : '') + pct.toFixed(1) + '%'
-})
+// Edge to act on: anchored to the bookmaker's price when the pick has odds
+// (utils/edge.js); the model's own edge is shown next to it for reference.
+const evValue = computed(() => betEdge(predictionsStore.detail?.prediction))
+const isAnchoredEv = computed(() => predictionsStore.detail?.prediction?.betEdge != null)
+const modelEvValue = computed(() => modelEdge(predictionsStore.detail?.prediction))
+const evSuspicious = computed(() => isSuspicious(evValue.value) || isSuspicious(modelEvValue.value))
+const evPctText = computed(() => (evValue.value == null ? '-' : formatEdge(evValue.value)))
 const evClass = computed(() => {
   if (evValue.value == null) return 'bg-slate-100 text-slate-800'
-  if (evValue.value >= 0.05) return 'bg-green-100 text-green-800'
-  if (evValue.value >= 0) return 'bg-yellow-100 text-yellow-800'
-  return 'bg-red-100 text-red-800'
+  return edgeBadgeClass(evValue.value)
 })
 const stakePct = computed(() => {
-  const k = predictionsStore.detail?.prediction?.kellyFraction
+  const k = betKelly(predictionsStore.detail?.prediction)
   if (k == null || k <= 0) return null
   // Fracción de Kelly conservadora: 1/4 del Kelly completo
   return ((k / 4) * 100).toFixed(1)

@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "trained_at": "2026-10-10T16:44:21.644847+00:00",
+  "min_samples": 150,
+  "prior_strength": 30.0,
+  "default_weight": 0.1,
+  "markets": {
+    "tennis|Match Winner": {
+      "weight": 0.1,
+      "samples": 184,
+      "logLossMarket": 0.6191,
+      "logLossModel": 0.6639,
+      "logLossBlend": 0.6183
+    }
+  },
+  "sports": {
+    "tennis": {
+      "weight": 0.1,
+      "samples": 452,
+      "logLossMarket": 0.6032,
+      "logLossModel": 0.6301,
+      "logLossBlend": 0.6026
+    }
+  },
+  "global": {
+    "weight": 0.1,
+    "samples": 452,
+    "logLossMarket": 0.6032,
+    "logLossModel": 0.6301,
+    "logLossBlend": 0.6026
+  }
+}

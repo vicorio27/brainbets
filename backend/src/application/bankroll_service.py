@@ -29,11 +29,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session, joinedload
 
-from src.application.calibration_service import (
-    _NO_CALIBRATED_EV_MARKETS,
-    _odds_for_outcome,
-    calibrated_probability,
-)
+from src.application.calibration_service import _odds_for_outcome
+from src.application.market_anchor_service import anchored_probability, model_probability
 from src.application.clv_service import closing_odds_for_prediction, compute_clv
 from src.domain.models import (
     Match,
@@ -420,6 +417,67 @@ def build_verdict(
     return out
 
 
+def caja_by_market(
+    bets: Sequence[Bet],
+    initial: float,
+    plan: StakePlan,
+    target_multiple: float,
+    sims: int = 400,
+    horizon_days: int = 365,
+) -> List[Dict[str, Any]]:
+    """The whole caja answer once per market, side by side.
+
+    Each row is exactly what `simulate` would say if the caller filtered to
+    that market (same backtest, projection, Monte Carlo and verdict), plus a
+    leading row for the default betting universe (every non-paused market
+    together), so the markets can be compared without re-running the filter.
+    `bets` must include paused markets; they come back flagged `paused`.
+    """
+
+    def _row(sport: Optional[str], market: Optional[str], items: Sequence[Bet]) -> Dict[str, Any]:
+        backtest = simulate_bankroll(items, initial, plan)
+        projection = project_to_target(backtest, target_multiple)
+        mc = monte_carlo(
+            items,
+            initial,
+            plan,
+            target_multiple,
+            bets_per_day=backtest.get("betsPerDay") or 0,
+            sims=sims,
+            horizon_days=horizon_days,
+        )
+        verdict = build_verdict(items, backtest, projection, mc)
+        return {
+            "sport": sport,
+            "market": market,
+            "paused": market in PAUSED_BETTING_MARKETS,
+            "bets": backtest["bets"],
+            "final": backtest["final"],
+            "profit": backtest["profit"],
+            "yield": backtest["yield"],
+            "winRate": backtest["winRate"],
+            "avgOdds": backtest["avgOdds"],
+            "maxDrawdown": backtest["maxDrawdown"],
+            "daysToTarget": projection["daysToTarget"],
+            "probReachTarget": mc.get("probReachTarget"),
+            "probRuin": mc.get("probRuin"),
+            "level": verdict["level"],
+            "reasons": verdict["reasons"],
+        }
+
+    groups: Dict[Tuple[str, str], List[Bet]] = {}
+    for bet in bets:
+        groups.setdefault((bet.sport, bet.market), []).append(bet)
+
+    rows = [_row(sport, market, items) for (sport, market), items in groups.items()]
+    rows.sort(key=lambda r: (r["paused"], -(r["final"] or 0.0)))
+
+    active = [b for b in bets if b.market not in PAUSED_BETTING_MARKETS]
+    if active:
+        rows.insert(0, _row(None, None, active))
+    return rows
+
+
 def breakdown_by_market(bets: Sequence[Bet]) -> List[Dict[str, Any]]:
     """Flat 1-unit yield per (sport, market), with a significance check.
 
@@ -567,11 +625,42 @@ class OpenBet:
     confidence: int
     won: Optional[bool] = None  # None while the match has not been validated
     started: bool = False       # kick-off time passed (or match no longer SCHEDULED)
+    model_probability: Optional[float] = None  # the model alone, before anchoring
+
+
+# An edge this large has historically been the model disagreeing with a
+# market that was right (20-50% promised, -24% realized on 2026-10-10).
+SUSPICIOUS_EDGE = 0.20
+
+
+def _bet_probability(
+    sport: str,
+    market: str,
+    confidence: int,
+    reasoning_data: Optional[Dict[str, Any]],
+    odds: float,
+    odds_markets: Optional[Dict[str, Any]],
+    use_calibrated: bool,
+) -> Tuple[float, float]:
+    """(probability to stake on, the model's own probability).
+
+    The first is anchored to the bookmaker's price (see
+    `market_anchor_service`); with `use_calibrated=False` both are the raw
+    model confidence, for comparing against the untouched model.
+    """
+    raw = confidence / 100.0
+    if not use_calibrated:
+        return raw, raw
+    anchored = anchored_probability(sport, market, confidence, reasoning_data, odds, odds_markets)
+    if anchored:
+        return anchored["probability"], anchored["modelProbability"]
+    model = model_probability(sport, market, confidence)
+    return (model if model is not None else raw,) * 2
 
 
 def _passes_edge(probability: float, odds: float, min_edge: Optional[float]) -> bool:
     """Edge = p * odds - 1 with the probability the simulation stakes on
-    (calibrated when available), the same number the UI shows per bet."""
+    (market-anchored when available), the same number the UI shows per bet."""
     return min_edge is None or probability * odds - 1.0 >= min_edge
 
 
@@ -621,6 +710,15 @@ def plan_today(
                 "odds": round(bet.odds, 3),
                 "probability": round(bet.probability * 100, 1),
                 "edge": round((bet.probability * bet.odds - 1.0) * 100, 1),
+                "modelEdge": (
+                    round((bet.model_probability * bet.odds - 1.0) * 100, 1)
+                    if bet.model_probability is not None
+                    else None
+                ),
+                "suspicious": (
+                    bet.model_probability is not None
+                    and bet.model_probability * bet.odds - 1.0 > SUSPICIOUS_EDGE
+                ),
                 "stake": round(stake, 2),
                 "winProfit": round(win_profit, 2),
                 "expectedProfit": round(exp_profit, 2),
@@ -706,6 +804,11 @@ def aggressive_plan(
         "odds": round(best.odds, 3),
         "probability": round(p * 100, 1),
         "edge": round(edge * 100, 1),
+        "modelEdge": (
+            round((best.model_probability * best.odds - 1.0) * 100, 1)
+            if best.model_probability is not None
+            else None
+        ),
         "kellyPct": round(_kelly_fraction(p, best.odds) * 100, 1),
     }
     out["allIn"] = {
@@ -785,13 +888,15 @@ def load_today_bets(
             continue
 
         confidence = int(prediction.confidence or 0)
-        probability = None
-        # Multi-outcome markets are not binary picks: the calibration curve
-        # (fit on binary picks) does not apply to them.
-        if use_calibrated and prediction.market.lower() not in _NO_CALIBRATED_EV_MARKETS:
-            probability = calibrated_probability(sport_row.code, prediction.market, confidence)
-        if probability is None:
-            probability = confidence / 100.0
+        probability, model_prob = _bet_probability(
+            sport_row.code,
+            prediction.market,
+            confidence,
+            prediction.reasoning_data,
+            odds,
+            (match.extra_data or {}).get("odds_markets"),
+            use_calibrated,
+        )
 
         if not _passes_edge(probability, odds, min_edge):
             continue
@@ -814,6 +919,7 @@ def load_today_bets(
                 confidence=confidence,
                 won=won,
                 started=match.status != "SCHEDULED" or match.match_date <= now,
+                model_probability=model_prob,
             )
         )
     return open_bets, without_odds
@@ -831,6 +937,7 @@ def load_bets(
     min_ev: Optional[float] = None,
     use_calibrated: bool = True,
     min_edge: Optional[float] = None,
+    include_paused: bool = False,
 ) -> Tuple[List[Bet], Dict[str, Any]]:
     """Settled predictions with known odds, oldest first, plus sample stats."""
     query = (
@@ -852,7 +959,7 @@ def load_bets(
         query = query.filter(Sport.code == sport)
     if market:
         query = query.filter(Prediction.market == market)
-    else:
+    elif not include_paused:
         # No explicit market filter: default to the betting universe, which
         # excludes paused markets (see PAUSED_BETTING_MARKETS). An explicit
         # `market=` for a paused one still works, for monitoring.
@@ -862,7 +969,9 @@ def load_bets(
     if min_ev is not None:
         query = query.filter(Prediction.expected_value >= min_ev)
 
-    rows = query.order_by(Match.match_date.asc()).all()
+    # Prediction.id breaks ties: the Monte Carlo resamples by position, so two
+    # loads of the same bets must come back in the same order.
+    rows = query.order_by(Match.match_date.asc(), Prediction.id.asc()).all()
 
     bets: List[Bet] = []
     without_odds = 0
@@ -895,11 +1004,15 @@ def load_bets(
             continue
 
         confidence = int(prediction.confidence or 0)
-        probability = None
-        if use_calibrated:
-            probability = calibrated_probability(sport_row.code, prediction.market, confidence)
-        if probability is None:
-            probability = confidence / 100.0
+        probability, _model_prob = _bet_probability(
+            sport_row.code,
+            prediction.market,
+            confidence,
+            prediction.reasoning_data,
+            odds,
+            (match.extra_data or {}).get("odds_markets"),
+            use_calibrated,
+        )
 
         if not _passes_edge(probability, odds, min_edge):
             below_edge += 1
@@ -1001,6 +1114,19 @@ def simulate(
         horizon_days=horizon_days,
     )
 
+    # Every market at once (paused ones included, flagged) under the same
+    # non-market filters, for the side-by-side comparison.
+    all_market_bets, _ = load_bets(
+        db,
+        days=days,
+        sport=sport,
+        min_confidence=min_confidence,
+        min_ev=min_ev,
+        use_calibrated=use_calibrated,
+        min_edge=min_edge,
+        include_paused=True,
+    )
+
     # Loaded without the edge filter: the aggressive block needs the whole
     # slate to say "nothing has positive edge today" instead of going blank.
     today_all, today_without_odds = load_today_bets(
@@ -1041,6 +1167,9 @@ def simulate(
         "projection": projection,
         "monteCarlo": mc,
         "verdict": build_verdict(bets, backtest, projection, mc),
+        "marketCajas": caja_by_market(
+            all_market_bets, initial, plan, target_multiple, sims=sims, horizon_days=horizon_days
+        ),
         "byMarket": breakdown_by_market(bets),
         "stability": temporal_stability(bets),
     }

@@ -57,9 +57,14 @@
                   :class="edgeClass(edgeOf(pred))"
                   :title="edgeTitle(pred)"
                 >
-                  {{ formatEdge(edgeOf(pred)) }}
+                  {{ isSuspicious(edgeOf(pred)) ? '⚠ ' : '' }}{{ formatEdge(edgeOf(pred)) }}
                 </span>
                 <span v-else class="text-xs text-slate-500">-</span>
+                <span
+                  v-if="pred.betEdge != null && isSuspicious(modelEdge(pred))"
+                  class="block text-[10px] text-amber-700 mt-0.5"
+                  title="Un edge del modelo mayor a 20% suele ser el modelo equivocándose contra el mercado"
+                >⚠ modelo {{ formatEdge(modelEdge(pred), 0) }}</span>
               </td>
               <td class="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-600 hidden sm:table-cell">
                 <div v-if="pred.modelContributions" class="flex items-center gap-1 w-24 sm:w-32">
@@ -100,6 +105,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { formatDateTime } from '../utils/format.js'
+import { betEdge, betKelly, modelEdge, isSuspicious, edgeBadgeClass, edgeExplanation, formatEdge } from '../utils/edge.js'
 
 const route = useRoute()
 
@@ -200,38 +206,22 @@ function getStatusClass(status) {
   }
 }
 
-function edgeClass(ev) {
-  if (ev >= 0.05) return 'bg-green-100 text-green-800'
-  if (ev >= 0) return 'bg-yellow-100 text-yellow-800'
-  return 'bg-red-100 text-red-800'
-}
-
-function edgeOf(pred) {
-  // Prefer the calibrated edge (probability adjusted with real outcomes);
-  // fall back to the raw model edge.
-  return pred.calibratedExpectedValue ?? pred.expectedValue ?? null
-}
-
-function formatEdge(ev) {
-  const pct = ev * 100
-  return (pct > 0 ? '+' : '') + pct.toFixed(1) + '%'
-}
+// Market-anchored edge first; the model's own edge only when the pick has
+// no bookmaker price to anchor to (see utils/edge.js).
+const edgeOf = betEdge
+const edgeClass = edgeBadgeClass
 
 function edgeTitle(pred) {
   const ev = edgeOf(pred)
-  const parts = []
-  if (pred.calibratedExpectedValue != null && pred.expectedValue != null && pred.calibratedExpectedValue !== pred.expectedValue) {
-    parts.push(`Edge calibrado: ${(ev * 100).toFixed(1)}% (crudo: ${(pred.expectedValue * 100).toFixed(1)}%)`)
-  } else {
-    parts.push(`Edge: ${(ev * 100).toFixed(1)}% (prob x cuota - 1)`)
-  }
-  if (pred.kellyFraction != null && pred.kellyFraction > 0) {
-    parts.push(`Kelly: ${(pred.kellyFraction * 100).toFixed(1)}% bankroll`)
+  const parts = [edgeExplanation(pred)]
+  const kelly = betKelly(pred)
+  if (kelly != null && kelly > 0) {
+    parts.push(`Kelly: ${(kelly * 100).toFixed(1)}% bankroll`)
   }
   if (ev < 0.05) {
     parts.push('Edge < 5%: no apostar')
   }
-  return parts.join(' | ')
+  return parts.filter(Boolean).join(' | ')
 }
 
 function formatKey(key) {

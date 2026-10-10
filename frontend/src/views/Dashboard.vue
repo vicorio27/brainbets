@@ -153,6 +153,79 @@
         </p>
       </div>
 
+      <!-- Career record + Elo per surface, any player in the historical base -->
+      <div v-if="reliabilitySearch.trim().length >= 2" class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mb-4">
+        <h3 class="font-semibold text-slate-900 mb-1">Rendimiento por superficie (histórico)</h3>
+        <p class="text-xs text-slate-500 mb-3">
+          Récord de victorias y derrotas y Elo actual en cada superficie, sobre todos los partidos terminados
+          de la base (desde 2010). Incluye jugadores sin partido hoy.
+        </p>
+        <p v-if="careerLoading && !surfaceCareerPlayers.length" class="text-sm text-slate-500">Buscando…</p>
+        <div class="space-y-4">
+          <div v-for="p in surfaceCareerPlayers" :key="p.name" class="border-t border-slate-100 pt-3 first:border-0 first:pt-0">
+            <div class="flex flex-wrap items-baseline gap-x-3 mb-2">
+              <span class="font-medium text-slate-900">🎾 {{ p.name }}</span>
+              <span class="text-xs text-slate-500">
+                {{ p.wins }}-{{ p.losses }} en {{ p.played }} partidos<span v-if="p.eloOverall"> · Elo general {{ Math.round(p.eloOverall) }}</span>
+              </span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div v-for="surf in ['hard', 'clay', 'grass']" :key="surf" class="text-sm">
+                <div class="flex justify-between text-slate-700 mb-1">
+                  <span>{{ surfaceLabel(surf) }}</span>
+                  <span v-if="p.surfaces[surf]" class="font-semibold">{{ Math.round(p.surfaces[surf].win_rate * 100) }}%</span>
+                  <span v-else class="text-xs text-slate-500">sin partidos</span>
+                </div>
+                <div class="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                  <div class="h-full rounded-full" :class="SURFACE_BAR[surf]" :style="{ width: (p.surfaces[surf] ? p.surfaces[surf].win_rate * 100 : 0) + '%' }"></div>
+                </div>
+                <div class="text-xs text-slate-500 mt-1">
+                  <template v-if="p.surfaces[surf]">
+                    {{ p.surfaces[surf].wins }}-{{ p.surfaces[surf].losses }}
+                    · sets {{ p.surfaces[surf].sets_won }}-{{ p.surfaces[surf].sets_lost }}
+                  </template>
+                  <span v-if="p.eloBySurface[surf]"> · Elo {{ Math.round(p.eloBySurface[surf]) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Playing profile: serve / return / tiebreaks vs the rest of the tour -->
+            <div v-if="p.profile && p.profile.matches" class="mt-3 pt-3 border-t border-slate-100">
+              <div class="flex flex-wrap items-center gap-2 mb-2">
+                <span class="text-sm font-medium text-slate-700">Perfil de juego</span>
+                <span
+                  v-for="t in p.profile.tags"
+                  :key="t.label"
+                  class="px-2 py-0.5 rounded-full text-xs font-medium"
+                  :class="t.kind === 'strength' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
+                >{{ t.label }}</span>
+                <span v-if="!p.profile.tags.length && p.profile.sample !== 'insuficiente'" class="text-xs text-slate-500">
+                  sin un rasgo que destaque frente al circuito
+                </span>
+              </div>
+              <dl class="grid grid-cols-2 sm:grid-cols-5 gap-x-4 gap-y-2 text-sm">
+                <div v-for="m in profileMetrics(p.profile)" :key="m.label">
+                  <dt class="text-xs text-slate-500">{{ m.label }}</dt>
+                  <dd class="font-semibold text-slate-900">{{ m.value }}</dd>
+                  <dd v-if="m.rank" class="text-xs text-slate-500">{{ m.rank }}</dd>
+                </div>
+              </dl>
+              <p class="text-xs mt-2" :class="p.profile.sample === 'ok' ? 'text-slate-500' : 'text-amber-700'">
+                Sobre {{ p.profile.matches }} partidos con estadísticas desde {{ p.profile.from }}.
+                <span v-if="p.profile.sample === 'insuficiente'">Muy pocos para etiquetar o comparar con el circuito.</span>
+                <span v-else-if="p.profile.sample === 'corta'">Muestra corta: tómalo como orientación.</span>
+              </p>
+            </div>
+            <p v-else class="text-xs text-slate-500 mt-3">
+              Sin estadísticas de saque y resto para este jugador (solo existen desde finales de julio de 2026).
+            </p>
+          </div>
+        </div>
+        <p v-if="!careerLoading && !surfaceCareerPlayers.length" class="text-sm text-slate-500">
+          Ningún jugador de la base coincide con ese nombre. Prueba solo con el apellido.
+        </p>
+      </div>
+
       <!-- Global table (no search) -->
       <div v-if="!reliabilitySearch.trim()" class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mb-4">
         <h3 class="font-semibold text-slate-900 mb-3">Global — todos los jugadores</h3>
@@ -401,8 +474,13 @@
                   class="text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
                   :title="pick.kelly != null ? `Kelly: ${(pick.kelly * 100).toFixed(1)}% · stake sugerido = ¼ Kelly. Solo apostar si edge > 5%.` : ''"
                 >
-                  edge {{ (pick.edge * 100).toFixed(0) }}%
+                  edge {{ formatEdge(pick.edge) }}
                 </span>
+                <span
+                  v-if="isSuspicious(pick.modelEdge)"
+                  class="text-[10px] text-amber-700 whitespace-nowrap"
+                  title="Un edge del modelo mayor a 20% suele ser el modelo equivocándose contra el mercado"
+                >⚠ modelo {{ formatEdge(pick.modelEdge, 0) }}</span>
                 <span v-else class="text-xs text-slate-500 whitespace-nowrap">sin cuota</span>
                 <span
                   class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold whitespace-nowrap"
@@ -638,12 +716,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useMatchesStore } from '../stores/matches.js'
 import { usePredictionsStore } from '../stores/predictions.js'
 import { useAnalyticsStore } from '../stores/analytics.js'
 import MatchCard from '../components/MatchCard.vue'
 import EmptyState from '../components/EmptyState.vue'
+import { betEdge, betKelly, betProbability, modelEdge, isSuspicious, formatEdge } from '../utils/edge.js'
 
 const matchesStore = useMatchesStore()
 const predictionsStore = usePredictionsStore()
@@ -806,8 +885,11 @@ const bettingRecs = computed(() => {
       market: p.market,
       prediction: p.prediction,
       confidence: conf,
-      edge: p.expectedValue ?? null,
-      kelly: p.kellyFraction ?? null
+      // Anchored to the bookmaker's price; the model's own edge rides along
+      // so an implausible one can be flagged next to it.
+      edge: betEdge(p),
+      modelEdge: modelEdge(p),
+      kelly: betKelly(p)
     })
   }
 
@@ -854,10 +936,9 @@ function comboLegOdd(p) {
   return null
 }
 function comboLegProb(p) {
-  // Exact Set Score's "confidence" is already P(scoreline); its calibrated
-  // value is meaningless (binary curve). Everything else uses calibrated.
-  const c = p.market === 'Exact Set Score' ? p.confidence : (p.calibratedConfidence ?? p.confidence)
-  return c != null ? c / 100 : null
+  // Market-anchored probability when the pick has odds; otherwise the
+  // model's (calibrated, raw for Exact Set Score) -- see utils/edge.js.
+  return betProbability(p)
 }
 
 // Model overconfidence compounds in a parlay, so the tolerance for the
@@ -956,9 +1037,7 @@ const pickCandidates = computed(() => {
     if (p.eventDate && p.eventDate !== today) continue
     const odd = comboLegOdd(p)
     const prob = comboLegProb(p)
-    const edge = p.market === 'Exact Set Score'
-      ? (p.expectedValue ?? null)
-      : (p.calibratedExpectedValue ?? p.expectedValue ?? null)
+    const edge = betEdge(p)
     if (odd == null || odd <= 1 || prob == null || edge == null) continue
     if (edge <= 0 || prob < 0.42) continue
     const div = Math.abs(prob - 1 / odd)
@@ -977,7 +1056,9 @@ const pickCandidates = computed(() => {
       tournament: m.tournament || null,
       time: m.eventTime || p.eventTime || null,
       odd, prob, edge, kelly,
-      why: `El modelo le da ${Math.round(prob * 100)}% y la casa ${Math.round((1 / odd) * 100)}% (cuota ${odd.toFixed(2)}) → edge +${(edge * 100).toFixed(0)}%.`
+      why: p.betEdge != null
+        ? `La casa le da ${Math.round(p.marketProbability * 100)}% (cuota ${odd.toFixed(2)}, sin su margen) y el modelo ${Math.round(p.modelProbability * 100)}%; mezclados dan ${Math.round(prob * 100)}% → edge ${formatEdge(edge)}.`
+        : `El modelo le da ${Math.round(prob * 100)}% y la casa ${Math.round((1 / odd) * 100)}% (cuota ${odd.toFixed(2)}) → edge ${formatEdge(edge)}.`
     })
   }
   return out.sort((a, b) => (b.strong - a.strong) || (b.score - a.score))
@@ -999,6 +1080,45 @@ const SURFACE_ES = { clay: '🟠 Arcilla', hard: '🔵 Dura', grass: '🟢 Hierb
 function surfaceLabel(s) {
   return SURFACE_ES[s] || s
 }
+// Career record + Elo per surface: searched server-side (the whole historical
+// base is too big to preload), debounced on the same search box.
+const SURFACE_BAR = { hard: 'bg-blue-500', clay: 'bg-orange-500', grass: 'bg-green-500' }
+function profileMetrics(profile) {
+  const pc = (v) => (v == null ? '–' : Math.round(v * 100) + '%')
+  const rank = (key) => {
+    const r = profile.percentiles?.[key]
+    return r == null ? '' : `mejor que el ${r}% del circuito`
+  }
+  const tb = profile.tiebreaksPlayed
+    ? `${profile.tiebreaksWon}-${profile.tiebreaksPlayed - profile.tiebreaksWon}`
+    : '–'
+  return [
+    { label: 'Aces por partido', value: profile.acesPerMatch ?? '–', rank: rank('acesPerMatch') },
+    { label: 'Juegos de saque ganados', value: pc(profile.holdPct), rank: rank('holdPct') },
+    { label: 'Juegos de resto ganados', value: pc(profile.breakPct), rank: rank('breakPct') },
+    { label: 'Puntos con 1er saque', value: pc(profile.firstServeWonPct), rank: rank('firstServeWonPct') },
+    { label: 'Tiebreaks (G-P)', value: tb, rank: '' }
+  ]
+}
+const careerLoading = ref(false)
+const surfaceCareerPlayers = computed(() => matchesStore.playerSurfaceCareer?.players || [])
+let careerTimer = null
+watch(reliabilitySearch, (value) => {
+  const q = value.trim()
+  clearTimeout(careerTimer)
+  matchesStore.playerSurfaceCareerQuery = q
+  if (q.length < 2) {
+    matchesStore.playerSurfaceCareer = null
+    careerLoading.value = false
+    return
+  }
+  careerLoading.value = true
+  careerTimer = setTimeout(async () => {
+    await matchesStore.fetchPlayerSurfaceCareer(q)
+    if (matchesStore.playerSurfaceCareerQuery === q) careerLoading.value = false
+  }, 400)
+})
+
 const reliabilityMinSample = computed(() => matchesStore.predictionReliability?.minSample ?? 4)
 const reliabilityOverall = computed(() => matchesStore.predictionReliability?.overall || {})
 const reliabilityPlayers = computed(() => matchesStore.predictionReliability?.players || [])

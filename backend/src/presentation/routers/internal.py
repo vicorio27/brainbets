@@ -864,6 +864,16 @@ def get_router() -> APIRouter:
             except Exception as e:
                 logging.exception("[train] calibration failed")
                 result["calibration"] = {"status": "error", "error": str(e)}
+        if payload.get("run_market_anchor", True):
+            # After calibration on purpose: the anchor blends the calibrated
+            # probability with the market's.
+            from src.application.market_anchor_service import train_market_anchor
+
+            try:
+                result["market_anchor"] = train_market_anchor(db)
+            except Exception as e:
+                logging.exception("[train] market anchor failed")
+                result["market_anchor"] = {"status": "error", "error": str(e)}
         if payload.get("run_ensemble_weights", True):
             from src.application.ensemble_weights_service import train_ensemble_weights
 
@@ -889,6 +899,16 @@ def get_router() -> APIRouter:
         from src.application.calibration_service import train_calibration
 
         return train_calibration(db)
+
+    @r.post("/train/market-anchor")
+    def train_market_anchor_endpoint(
+        db: Session = Depends(get_db),
+    ):
+        """Refit how much the model counts against the bookmaker's price
+        (per market, sport and globally) from settled pre-match bets."""
+        from src.application.market_anchor_service import train_market_anchor
+
+        return train_market_anchor(db)
 
     @r.post("/train/ensemble-weights")
     async def train_ensemble_weights_endpoint(

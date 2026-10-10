@@ -91,6 +91,12 @@ class DataService:
 
         return _compute(self.db, player=player)
 
+    def search_player_surface_career(self, player: str, limit: int = 8) -> Dict[str, Any]:
+        """Career W-L and Elo per surface for any tennis player, by name."""
+        from src.application.tennis_stats_service import search_player_surface_career as _compute
+
+        return _compute(self.db, player=player, limit=limit)
+
     def get_player_recent_by_surface(
         self, player: Optional[str] = None, limit: int = 3
     ) -> Dict[str, Any]:
@@ -570,6 +576,17 @@ class DataService:
             home_name,
             away_name,
         )
+        from src.application.calibration_service import _odds_for_outcome
+        from src.application.market_anchor_service import anchored_probability
+
+        anchored = anchored_probability(
+            sport_code,
+            prediction.market,
+            prediction.confidence,
+            prediction.reasoning_data,
+            _odds_for_outcome(prediction.reasoning_data, prediction.predicted_outcome, home_name, away_name),
+            (prediction.match.extra_data or {}).get("odds_markets") if prediction.match else None,
+        ) or {}
         return PredictionSchema(
             predictionId=str(prediction.id),
             matchId=prediction.match.external_id if prediction.match else None,
@@ -591,6 +608,11 @@ class DataService:
             kellyFraction=float(prediction.kelly_fraction) if prediction.kelly_fraction is not None else None,
             calibratedConfidence=calibrated_conf,
             calibratedExpectedValue=calibrated_ev,
+            betProbability=round(anchored["probability"], 4) if anchored else None,
+            betEdge=round(anchored["edge"], 4) if anchored else None,
+            marketProbability=round(anchored["marketProbability"], 4) if anchored else None,
+            modelProbability=round(anchored["modelProbability"], 4) if anchored else None,
+            modelWeight=anchored.get("modelWeight"),
         )
 
     def get_latest_predictions(self) -> Optional[PredictionsResponse]:

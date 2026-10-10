@@ -29,8 +29,11 @@ def get_router() -> APIRouter:
     async def get_dashboard(service: DataService = Depends(get_data_service)):
         return service.get_dashboard_summary()
 
+    # Plain `def` on purpose: the per-market Monte Carlo takes a few seconds
+    # of CPU, and a sync endpoint runs in the threadpool instead of freezing
+    # the event loop for every other request (see gotcha #47).
     @r.get("/bankroll")
-    async def get_bankroll(
+    def get_bankroll(
         initial: float = Query(100.0, gt=0, le=1_000_000_000),
         strategy: str = Query("percent", pattern="^(percent|flat|kelly)$"),
         stake_pct: float = Query(2.0, ge=0.1, le=50.0, alias="stakePct"),

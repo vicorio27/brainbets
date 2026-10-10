@@ -8,6 +8,8 @@ export const useMatchesStore = defineStore('matches', {
     predictionReliability: null,
     playerPointsPerSet: null,
     playerRecentBySurface: null,
+    playerSurfaceCareer: null,
+    playerSurfaceCareerQuery: '',
     loading: false,
     error: null
   }),
@@ -75,6 +77,15 @@ export const useMatchesStore = defineStore('matches', {
         this.playerPointsPerSet = data
       } catch (err) {
         this.playerPointsPerSet = null
+      }
+    },
+    async fetchPlayerSurfaceCareer(player) {
+      try {
+        const { data } = await api.get('/matches/player-surface-career', { params: { player } })
+        // A slower earlier request must not overwrite a newer search.
+        if (data.query === this.playerSurfaceCareerQuery) this.playerSurfaceCareer = data
+      } catch (err) {
+        this.playerSurfaceCareer = null
       }
     },
     async fetchPlayerRecentBySurface() {

@@ -118,6 +118,13 @@ class Prediction(BaseModel):
     kellyFraction: Optional[float] = None
     calibratedConfidence: Optional[int] = None
     calibratedExpectedValue: Optional[float] = None
+    # Market-anchored view (only when the pick has odds): the probability and
+    # edge to act on. The calibrated/raw fields above stay as the model's own.
+    betProbability: Optional[float] = None
+    betEdge: Optional[float] = None
+    marketProbability: Optional[float] = None
+    modelProbability: Optional[float] = None
+    modelWeight: Optional[float] = None
 
 class PredictionsResponse(BaseModel):
     generatedAt: str

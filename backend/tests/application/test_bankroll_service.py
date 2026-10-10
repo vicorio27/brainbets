@@ -305,6 +305,35 @@ def test_verdict_says_it_loses_when_the_backtest_shrinks():
     assert _verdict_for(bets)["level"] == "pierde"
 
 
+# ----------------------------------------------------------------------
+# Caja per market
+# ----------------------------------------------------------------------
+def test_caja_by_market_matches_filtering_to_that_market():
+    winners = [make_bet(i + 1, won=i % 5 != 0, market="Set 1 Winner") for i in range(60)]
+    losers = [make_bet(i + 1, won=i % 3 == 0, market="Match Winner") for i in range(60)]
+    plan = StakePlan(strategy="percent", stake_pct=5.0)
+
+    rows = bs.caja_by_market(winners + losers, 100.0, plan, 2.0, sims=50)
+    by_market = {r["market"]: r for r in rows}
+
+    alone = bs.simulate_bankroll(winners, 100.0, plan)
+    assert by_market["Set 1 Winner"]["final"] == alone["final"]
+    assert by_market["Set 1 Winner"]["final"] > 100.0
+    assert by_market["Match Winner"]["level"] == "pierde"
+
+
+def test_caja_by_market_leads_with_the_active_universe_and_flags_paused():
+    active = [make_bet(i + 1, won=i % 2 == 0, market="Match Winner") for i in range(40)]
+    paused = [make_bet(i + 1, won=False, market="Exact Set Score") for i in range(40)]
+
+    rows = bs.caja_by_market(active + paused, 100.0, StakePlan(), 2.0, sims=20)
+
+    assert rows[0]["market"] is None
+    assert rows[0]["bets"] == 40  # paused market stays out of the combined row
+    assert rows[-1]["market"] == "Exact Set Score"
+    assert rows[-1]["paused"] is True
+
+
 def test_monte_carlo_without_bets_returns_no_data():
     mc = bs.monte_carlo([], initial=100.0, plan=StakePlan(), target_multiple=2.0, bets_per_day=0)
 

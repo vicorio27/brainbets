@@ -364,6 +364,55 @@ def compute_surface_career(db: Session, competitor_id: Any) -> Dict[str, Any]:
     }
 
 
+def search_player_surface_career(db: Session, player: str, limit: int = 8) -> Dict[str, Any]:
+    """Career record and Elo per surface for any tennis player, by name.
+
+    Unlike `get_match_surface_stats` this does not need the player to have a
+    match loaded: it searches every tennis competitor (historical ingestion
+    included). Every word of the query must appear in the name, in any order,
+    and the players with the most matches come first.
+    """
+    from sqlalchemy import func
+
+    words = [w for w in (player or "").strip().split() if w]
+    if not words or len("".join(words)) < 2:
+        return {"query": player, "players": []}
+
+    query = (
+        db.query(Competitor, func.count(MatchCompetitor.id).label("links"))
+        .join(Sport, Sport.id == Competitor.sport_id)
+        .join(MatchCompetitor, MatchCompetitor.competitor_id == Competitor.id)
+        .filter(Sport.code == "tennis")
+    )
+    for word in words:
+        query = query.filter(Competitor.name.ilike(f"%{word}%"))
+    candidates = (
+        query.group_by(Competitor.id)
+        .order_by(func.count(MatchCompetitor.id).desc())
+        .limit(limit)
+        .all()
+    )
+
+    style = compute_player_profiles(db)
+    players = []
+    for comp, _links in candidates:
+        career = compute_surface_career(db, comp.id)
+        surfaces = career["surfaces"]
+        players.append(
+            {
+                "name": comp.name,
+                "played": sum(s["played"] for s in surfaces.values()),
+                "wins": sum(s["wins"] for s in surfaces.values()),
+                "losses": sum(s["losses"] for s in surfaces.values()),
+                "surfaces": surfaces,
+                "eloOverall": career["elo_overall"],
+                "eloBySurface": career["elo_by_surface"],
+                "profile": style["profiles"].get(comp.id),
+            }
+        )
+    return {"query": player, "players": players, "tour": style["tour"]}
+
+
 def get_match_surface_stats(db: Session, external_match_id: str) -> Optional[Dict[str, Any]]:
     """Surface career stats for both competitors of a match (by external id).
 
@@ -768,6 +817,114 @@ def aggregate_serve_stats(
         "tiebreaksPlayed": tb_played,
         "tiebreaksWon": tb_won,
     }
+
+
+PROFILE_MIN_MATCHES = 5
+PROFILE_METRICS = ("acesPerMatch", "holdPct", "breakPct", "firstServeWonPct")
+_profile_cache: Dict[str, Any] = {"at": 0.0, "data": None}
+
+
+def compute_player_profiles(db: Session, ttl_seconds: int = 600) -> Dict[str, Any]:
+    """What each tennis player is good at, from the serve/return stats stored
+    per match: aces, service games held, return games won (breaks), points
+    won behind the first serve, and tiebreak record.
+
+    Every metric comes with the player's percentile among players with at
+    least `PROFILE_MIN_MATCHES` matches of data, and the tags are derived from
+    those percentiles (top/bottom fifth). There is no rally data in the source
+    (shot depth, rally length), so baseline style cannot be measured here.
+
+    Cached in-process: the search box calls this on every keystroke.
+    """
+    import time
+
+    now = time.time()
+    if _profile_cache["data"] is not None and now - _profile_cache["at"] < ttl_seconds:
+        return _profile_cache["data"]
+
+    rows = (
+        db.query(Match, MatchCompetitor)
+        .join(MatchCompetitor, MatchCompetitor.match_id == Match.id)
+        .join(Sport, Sport.id == Match.sport_id)
+        .filter(Sport.code == "tennis")
+        .filter(Match.status == "FINISHED")
+        .filter(Match.extra_data["score_stats"].isnot(None))
+        .order_by(Match.match_date.desc())
+        .all()
+    )
+    links: Dict[Any, List[Tuple[Match, MatchCompetitor]]] = {}
+    for m, mc in rows:
+        links.setdefault(mc.competitor_id, []).append((m, mc))
+
+    profiles: Dict[Any, Dict[str, Any]] = {}
+    for competitor_id, items in links.items():
+        stats = aggregate_serve_stats(items, max_matches=40)
+        aces: List[float] = []
+        for m, mc in items[:40]:
+            ss = (m.extra_data or {}).get("score_stats") or {}
+            value = ss.get("homeAces" if mc.side in ("player1", "home") else "awayAces")
+            if value is not None:
+                try:
+                    aces.append(float(value))
+                except (TypeError, ValueError):
+                    pass
+        profiles[competitor_id] = {
+            "matches": stats["serveMatches"],
+            "acesMatches": len(aces),
+            "acesPerMatch": round(sum(aces) / len(aces), 1) if aces else None,
+            "holdPct": stats["holdPct"],
+            "breakPct": stats["breakPct"],
+            "firstServeWonPct": stats["firstServeWonPct"],
+            "tiebreaksPlayed": stats["tiebreaksPlayed"],
+            "tiebreaksWon": stats["tiebreaksWon"],
+            "from": to_bogota(items[-1][0].match_date).strftime("%Y-%m-%d"),
+        }
+
+    eligible = [p for p in profiles.values() if p["matches"] >= PROFILE_MIN_MATCHES]
+    tour: Dict[str, Any] = {"players": len(eligible)}
+    for metric in PROFILE_METRICS:
+        values = sorted(p[metric] for p in eligible if p[metric] is not None)
+        tour[metric] = round(sum(values) / len(values), 3) if values else None
+        for p in profiles.values():
+            if p["matches"] < PROFILE_MIN_MATCHES or p[metric] is None or len(values) < 10:
+                p.setdefault("percentiles", {})[metric] = None
+                continue
+            below = sum(1 for v in values if v < p[metric])
+            p.setdefault("percentiles", {})[metric] = round(100 * below / (len(values) - 1)) if len(values) > 1 else None
+
+    for p in profiles.values():
+        pct = p["percentiles"]
+        tags: List[Dict[str, str]] = []
+
+        def _top(metric: str) -> bool:
+            return pct.get(metric) is not None and pct[metric] >= 80
+
+        def _bottom(metric: str) -> bool:
+            return pct.get(metric) is not None and pct[metric] <= 20
+
+        if _top("acesPerMatch") or _top("holdPct"):
+            tags.append({"kind": "strength", "label": "Gran sacador"})
+        if _top("breakPct"):
+            tags.append({"kind": "strength", "label": "Gran restador"})
+        if p["tiebreaksPlayed"] >= 5 and p["tiebreaksWon"] / p["tiebreaksPlayed"] >= 0.65:
+            tags.append({"kind": "strength", "label": "Fuerte en tiebreaks"})
+        if _bottom("holdPct"):
+            tags.append({"kind": "weakness", "label": "Saque vulnerable"})
+        if _bottom("breakPct"):
+            tags.append({"kind": "weakness", "label": "Le cuesta romper"})
+        if p["tiebreaksPlayed"] >= 5 and p["tiebreaksWon"] / p["tiebreaksPlayed"] <= 0.35:
+            tags.append({"kind": "weakness", "label": "Flojo en tiebreaks"})
+        p["tags"] = tags
+        p["sample"] = (
+            "insuficiente" if p["matches"] < PROFILE_MIN_MATCHES
+            else "corta" if p["matches"] < 10
+            else "ok"
+        )
+
+    data = {"profiles": profiles, "tour": tour}
+    _profile_cache["at"] = now
+    _profile_cache["data"] = data
+    return data
 
 
 def compute_match_serve_stats(db: Session, external_match_id: str) -> Optional[Dict[str, Any]]:

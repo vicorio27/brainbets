@@ -83,6 +83,17 @@ def get_router() -> APIRouter:
         player with per-set point data. Optional `player` substring filter."""
         return service.get_player_points_per_set(player=player)
 
+    @r.get("/player-surface-career")
+    def get_player_surface_career(
+        player: str = Query(..., min_length=2, max_length=60),
+        limit: int = Query(8, ge=1, le=20),
+        service: DataService = Depends(get_data_service),
+    ):
+        """Career win-loss record and current Elo on hard/clay/grass for any
+        tennis player whose name contains every word of `player` — covers the
+        whole historical base, not only players with a match loaded."""
+        return service.search_player_surface_career(player=player, limit=limit)
+
     @r.get("/player-recent-by-surface")
     async def get_player_recent_by_surface(
         player: Optional[str] = Query(None),
