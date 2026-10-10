@@ -7,6 +7,8 @@ collection workflow to replace placeholder stats with data-backed values.
 import os
 from collections import defaultdict
 from datetime import datetime, timezone
+
+from src.timezone import to_bogota
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
@@ -126,7 +128,7 @@ def compute_team_form(
         "matches": [
             {
                 "match_id": str(m.id),
-                "date": m.match_date.isoformat() if m.match_date else None,
+                "date": to_bogota(m.match_date).isoformat() if m.match_date else None,
                 "goals_for": _team_goals_in_match(m, competitor_id)[0] if _team_goals_in_match(m, competitor_id) else None,
                 "goals_against": _team_goals_in_match(m, competitor_id)[1] if _team_goals_in_match(m, competitor_id) else None,
             }
@@ -274,7 +276,7 @@ def compute_head_to_head(
         details.append(
             {
                 "match_id": str(match.id),
-                "date": match.match_date.isoformat() if match.match_date else None,
+                "date": to_bogota(match.match_date).isoformat() if match.match_date else None,
                 "home_score": h_score,
                 "away_score": a_score,
             }

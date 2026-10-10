@@ -42,6 +42,10 @@ def get_router() -> APIRouter:
         market: Optional[str] = Query(None),
         min_confidence: int = Query(0, ge=0, le=100, alias="minConfidence"),
         min_ev: Optional[float] = Query(None, alias="minEv"),
+        min_edge: Optional[float] = Query(
+            None, ge=-100.0, le=100.0, alias="minEdge",
+            description="Minimum edge in percent (p*odds-1, calibrated p)",
+        ),
         use_calibrated: bool = Query(True, alias="useCalibrated"),
         sims: int = Query(400, ge=50, le=2000),
         horizon_days: int = Query(365, ge=30, le=1095, alias="horizonDays"),
@@ -65,6 +69,7 @@ def get_router() -> APIRouter:
             use_calibrated=use_calibrated,
             sims=sims,
             horizon_days=horizon_days,
+            min_edge=min_edge / 100.0 if min_edge is not None else None,
         )
 
     return r

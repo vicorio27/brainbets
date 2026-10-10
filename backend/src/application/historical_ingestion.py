@@ -9,6 +9,8 @@ import csv
 import io
 import zipfile
 from datetime import datetime, timedelta, timezone
+
+from src.timezone import BOGOTA_TZ
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
@@ -82,16 +84,16 @@ def _excel_date_to_datetime(value: Any) -> Optional[datetime]:
         return None
     if isinstance(value, datetime):
         if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
+            return value.replace(tzinfo=BOGOTA_TZ)
         return value
     if isinstance(value, (int, float)):
         # Excel serial date (Windows 1900 epoch)
-        base = datetime(1899, 12, 30, tzinfo=timezone.utc)
+        base = datetime(1899, 12, 30, tzinfo=BOGOTA_TZ)
         return base + timedelta(days=float(value))
     if isinstance(value, str):
         for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d/%m/%y", "%m/%d/%Y"):
             try:
-                return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
+                return datetime.strptime(value, fmt).replace(tzinfo=BOGOTA_TZ)
             except ValueError:
                 continue
     return None

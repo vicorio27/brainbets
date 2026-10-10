@@ -156,6 +156,9 @@ def train_ensemble_weights(db: Session) -> Dict[str, Any]:
         .filter(Sport.code == "tennis")
         .filter(Prediction.market == "Match Winner")
         .filter(Prediction.status.in_(["VALIDATED", "FAILED"]))
+        # Post-start predictions carry in-play odds: they would teach the fit
+        # that the odds signal is far better than it is before the match.
+        .filter(Prediction.created_at < Match.match_date)
         .all()
     )
 

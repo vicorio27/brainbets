@@ -238,6 +238,73 @@ def test_monte_carlo_ruins_a_history_that_only_loses():
     assert mc["daysP50"] is None
 
 
+def test_monte_carlo_has_no_median_when_most_scenarios_never_arrive():
+    # 1 winner in 4 at even odds: a few lucky paths double, most don't.
+    bets = [make_bet(1, won=i % 4 == 0) for i in range(40)]
+
+    mc = bs.monte_carlo(
+        bets,
+        initial=100.0,
+        plan=StakePlan(strategy="percent", stake_pct=10.0),
+        target_multiple=1.2,
+        bets_per_day=1.0,
+        sims=200,
+        horizon_days=30,
+    )
+
+    assert 0.0 < mc["probReachTarget"] < 50.0
+    assert mc["daysP50"] is None
+    assert mc["daysP50IfReached"] is not None
+
+
+# ----------------------------------------------------------------------
+# Verdict
+# ----------------------------------------------------------------------
+def _verdict_for(bets, target=2.0, stake_pct=5.0):
+    plan = StakePlan(strategy="percent", stake_pct=stake_pct)
+    backtest = bs.simulate_bankroll(bets, 100.0, plan)
+    projection = bs.project_to_target(backtest, target)
+    mc = bs.monte_carlo(
+        bets, 100.0, plan, target, bets_per_day=backtest.get("betsPerDay") or 0, sims=100
+    )
+    return bs.build_verdict(bets, backtest, projection, mc)
+
+
+def test_verdict_calls_a_short_winning_streak_inconclusive():
+    bets = [make_bet(i + 1, won=True) for i in range(10)]
+
+    verdict = _verdict_for(bets, target=1.2)
+
+    assert verdict["level"] == "no_concluyente"
+    assert "muestra_chica" in verdict["reasons"]
+
+
+def test_verdict_calls_a_noisy_small_profit_inconclusive():
+    # 52% winners at even odds: the backtest grows, the yield is noise.
+    bets = [make_bet(i + 1, won=i % 25 < 13) for i in range(100)]
+
+    verdict = _verdict_for(bets)
+
+    assert verdict["level"] == "no_concluyente"
+    assert "yield_no_significativo" in verdict["reasons"]
+
+
+def test_verdict_recognises_a_large_consistent_edge():
+    bets = [make_bet(i + 1, won=i % 5 != 0) for i in range(200)]  # 80% at 2.0
+
+    verdict = _verdict_for(bets)
+
+    assert verdict["level"] in ("edge_real", "ya_alcanzado")
+    assert verdict["reasons"] == []
+    assert verdict["edge"]["significant"] is True
+
+
+def test_verdict_says_it_loses_when_the_backtest_shrinks():
+    bets = [make_bet(i + 1, won=i % 3 == 0) for i in range(60)]
+
+    assert _verdict_for(bets)["level"] == "pierde"
+
+
 def test_monte_carlo_without_bets_returns_no_data():
     mc = bs.monte_carlo([], initial=100.0, plan=StakePlan(), target_multiple=2.0, bets_per_day=0)
 
@@ -350,3 +417,159 @@ def test_stability_splits_by_date_order_not_insertion_order():
     # regardless of the order bets were passed in.
     assert first["yield"] == 100.0
     assert second["yield"] == -100.0
+
+
+# ----------------------------------------------------------------------
+# Today's slate
+# ----------------------------------------------------------------------
+def make_open_bet(odds=2.0, probability=0.6, won=None, time="10:00", started=False):
+    return bs.OpenBet(
+        prediction_id=f"PRED-{time}-{odds}",
+        match="A vs B",
+        league="Test Open",
+        time=time,
+        sport="tennis",
+        market="Match Winner",
+        selection="A",
+        odds=odds,
+        probability=probability,
+        confidence=int(probability * 100),
+        won=won,
+        started=started,
+    )
+
+
+def test_today_bounds_the_day_between_all_lose_and_all_win():
+    plan = StakePlan(strategy="percent", stake_pct=10.0)
+    today = bs.plan_today(
+        [make_open_bet(odds=2.0, probability=0.6), make_open_bet(odds=3.0, probability=0.4, time="12:00")],
+        initial=100.0,
+        plan=plan,
+    )
+
+    assert today["staked"] == pytest.approx(20.0)
+    assert today["best"]["profit"] == pytest.approx(10.0 * 1.0 + 10.0 * 2.0)
+    assert today["best"]["final"] == pytest.approx(130.0)
+    assert today["worst"]["profit"] == pytest.approx(-20.0)
+    # 10*(0.6*2-1) + 10*(0.4*3-1) = 2 + 2
+    assert today["expected"]["profit"] == pytest.approx(4.0)
+
+
+def test_today_scales_stakes_to_the_daily_exposure_limit():
+    plan = StakePlan(strategy="percent", stake_pct=10.0, max_stake_pct=10.0)
+    today = bs.plan_today([make_open_bet() for _ in range(10)], initial=100.0, plan=plan)
+
+    assert today["exposureCapped"] is True
+    assert today["staked"] == pytest.approx(100.0 * bs.MAX_DAILY_EXPOSURE)
+    assert today["items"][0]["stake"] == pytest.approx(5.0)
+
+
+def test_today_kelly_drops_bets_without_edge():
+    plan = StakePlan(strategy="kelly", kelly_multiplier=1.0, max_stake_pct=50.0)
+    today = bs.plan_today(
+        [make_open_bet(odds=2.0, probability=0.6), make_open_bet(odds=2.0, probability=0.4)],
+        initial=100.0,
+        plan=plan,
+    )
+
+    assert today["bets"] == 1
+    assert today["skippedNoStake"] == 1
+
+
+def test_today_tracks_what_already_settled():
+    plan = StakePlan(strategy="percent", stake_pct=10.0)
+    today = bs.plan_today(
+        [make_open_bet(won=True), make_open_bet(won=False, time="11:00"), make_open_bet(time="12:00")],
+        initial=100.0,
+        plan=plan,
+    )
+
+    assert today["pendingBets"] == 1
+    assert today["pendingStaked"] == pytest.approx(10.0)
+    assert today["realized"]["profit"] == pytest.approx(10.0 - 10.0)
+
+
+def test_today_without_bets_is_not_an_error():
+    today = bs.plan_today([], initial=100.0, plan=StakePlan())
+
+    assert today["bets"] == 0
+    assert today["best"]["profit"] == 0.0
+
+
+def test_min_edge_filter_uses_probability_times_odds():
+    assert bs._passes_edge(0.6, 2.0, None) is True
+    assert bs._passes_edge(0.6, 2.0, 0.05) is True      # edge +20%
+    assert bs._passes_edge(0.64, 1.04, 0.0) is False    # heavy favourite, edge -33%
+
+
+# ----------------------------------------------------------------------
+# Aggressive (all-in) plan
+# ----------------------------------------------------------------------
+def test_aggressive_picks_the_best_pending_edge_and_states_the_risk():
+    plan = bs.aggressive_plan(
+        [
+            make_open_bet(odds=2.0, probability=0.55),               # edge +10%
+            make_open_bet(odds=1.5, probability=0.60, time="11:00"),  # edge -10%
+            make_open_bet(odds=3.0, probability=0.90, won=True),      # already played
+        ],
+        initial=10.0,
+        target_multiple=2.0,
+    )
+
+    assert plan["note"] is None
+    assert plan["pick"]["odds"] == 2.0
+    assert plan["allIn"]["finalIfWin"] == pytest.approx(20.0)
+    assert plan["allIn"]["probLoseAll"] == pytest.approx(45.0)
+    assert plan["chain"]["steps"] == 1
+
+
+def test_aggressive_chain_needs_consecutive_wins_for_a_bigger_target():
+    plan = bs.aggressive_plan(
+        [make_open_bet(odds=2.0, probability=0.5)], initial=10.0, target_multiple=8.0
+    )
+
+    assert plan["chain"]["steps"] == 3
+    assert plan["chain"]["finalIfAllWin"] == pytest.approx(80.0)
+    assert plan["chain"]["probAllWin"] == pytest.approx(12.5)
+
+
+def test_aggressive_flags_a_slate_without_positive_edge():
+    plan = bs.aggressive_plan(
+        [make_open_bet(odds=1.04, probability=0.64)], initial=10.0, target_multiple=2.0
+    )
+
+    assert plan["note"] == "sin_edge_positivo"
+    assert plan["positiveEdgeBets"] == 0
+    assert plan["pick"]["edge"] < 0
+
+
+def test_aggressive_without_pending_bets_says_so():
+    plan = bs.aggressive_plan([make_open_bet(won=False)], initial=10.0, target_multiple=2.0)
+
+    assert plan["note"] == "sin_apuestas"
+    assert plan["pick"] is None
+
+
+def test_aggressive_never_picks_a_match_already_under_way():
+    plan = bs.aggressive_plan(
+        [
+            make_open_bet(odds=3.0, probability=0.9, started=True),   # best edge, but live
+            make_open_bet(odds=2.0, probability=0.55, time="11:00"),
+        ],
+        initial=10.0,
+        target_multiple=2.0,
+    )
+
+    assert plan["pendingBets"] == 1
+    assert plan["pick"]["odds"] == 2.0
+
+
+def test_today_counts_bets_on_matches_not_started_yet():
+    today = bs.plan_today(
+        [make_open_bet(started=True), make_open_bet(time="12:00")],
+        initial=100.0,
+        plan=StakePlan(strategy="percent", stake_pct=10.0),
+    )
+
+    assert today["pendingBets"] == 2
+    assert today["notStartedBets"] == 1

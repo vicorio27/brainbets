@@ -120,6 +120,7 @@ def _load_rows(db: Session) -> List[Dict[str, Any]]:
         .filter(Sport.code == "tennis")
         .filter(Prediction.market == "Match Winner")
         .filter(Prediction.status.in_(["VALIDATED", "FAILED"]))
+        .filter(Prediction.created_at < Match.match_date)  # same rows the live fit uses
         .order_by(Match.match_date.asc())
         .all()
     )

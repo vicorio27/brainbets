@@ -79,6 +79,9 @@ def train_calibration(db: Session) -> Dict[str, Any]:
         .join(Match, Prediction.match_id == Match.id)
         .join(Sport, Match.sport_id == Sport.id)
         .filter(Prediction.status.in_(["VALIDATED", "FAILED"]))
+        # A prediction written after the match started was fed in-play or
+        # final odds: its hit rate says nothing about a pre-match pick.
+        .filter(Prediction.created_at < Match.match_date)
         .all()
     )
 

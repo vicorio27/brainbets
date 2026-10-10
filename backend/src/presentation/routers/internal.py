@@ -26,7 +26,7 @@ from src.application.tennis_stats_service import (
 )
 from src.application.historical_ingestion import run_full_ingestion
 from src.application.poisson_service import run_poisson_training
-from src.timezone import BOGOTA_TZ, today_bogota
+from src.timezone import BOGOTA_TZ, localize_bogota, today_bogota
 from src.application.progress_service import process_snapshots
 from src.application.services import DataService
 from src.application.tennis_ml_service import (
@@ -251,6 +251,9 @@ def _insert_match(
                 match_date = match_date.replace(hour=int(hour), minute=int(minute))
             except Exception:
                 pass
+        # eventDate/eventTime are Bogota wall-clock time without an offset.
+        if match_date:
+            match_date = localize_bogota(match_date)
 
         # Upsert match
         match = (
@@ -606,6 +609,7 @@ def get_router() -> APIRouter:
         updated = 0
         errors = []
 
+        skipped_started = 0
         logging.warning(f"[BULK] received {len(payload.predictions)} predictions, generatedAt={payload.generatedAt}")
 
         generated_at = _parse_iso_datetime(payload.generatedAt) or datetime.now(timezone.utc)
@@ -631,6 +635,16 @@ def get_router() -> APIRouter:
                     db.commit()
                     db.refresh(model)
 
+                # A prediction written after kick-off is not a bet anyone could
+                # have placed: the odds are in-play (or final) and the features
+                # may already contain the result. It would only poison the
+                # backtest, so it is dropped here for every caller.
+                if match.status != "SCHEDULED" or (
+                    match.match_date and match.match_date <= datetime.now(timezone.utc)
+                ):
+                    skipped_started += 1
+                    continue
+
                 prediction_id = raw.get("predictionId") or str(uuid4())
                 confidence = raw.get("confidence", 0) or 0
                 pred_status = raw.get("status", "PENDING")
@@ -638,6 +652,19 @@ def get_router() -> APIRouter:
                     pred_status = "LOW_CONFIDENCE"
 
                 prediction = db.query(Prediction).filter(Prediction.id == prediction_id).first()
+                if not prediction:
+                    # The id carries the match date, so a rescheduled match
+                    # arrives with a NEW id: reuse the row that already exists
+                    # for this (match, market) instead of inserting a duplicate.
+                    prediction = (
+                        db.query(Prediction)
+                        .filter(
+                            Prediction.match_id == match.id,
+                            Prediction.market == raw.get("market", "Unknown"),
+                        )
+                        .order_by(Prediction.created_at.desc())
+                        .first()
+                    )
                 if not prediction:
                     prediction = Prediction(
                         id=prediction_id,
@@ -680,6 +707,8 @@ def get_router() -> APIRouter:
                 db.rollback()
                 errors.append(f"Failed to insert prediction {raw.get('predictionId')}: {str(e)}")
 
+        if skipped_started:
+            logging.warning(f"[BULK] skipped {skipped_started} predictions for matches already started")
         return BulkResponse(inserted=inserted, updated=updated, errors=errors)
 
     @r.post("/results/bulk", response_model=BulkResponse)
@@ -805,8 +834,14 @@ def get_router() -> APIRouter:
             "sports": ["football", "tennis"],
             "run_elo": true,
             "run_poisson": true,
-            "run_tennis_ml": true
+            "run_tennis_ml": true,
+            "run_calibration": true,
+            "run_ensemble_weights": true
         }
+
+        Calibration and ensemble weights ride along by default so the daily
+        `train_models` cron keeps them fresh; each is isolated so a failure
+        there never loses the Elo/Poisson result.
         """
         sports = payload.get("sports", ["football", "tennis"])
         run_elo = payload.get("run_elo", True)
@@ -820,6 +855,23 @@ def get_router() -> APIRouter:
             result["poisson"] = run_poisson_training(db)
         if run_tennis_ml:
             result["tennis_ml"] = train_tennis_ml_model(db)
+
+        if payload.get("run_calibration", True):
+            from src.application.calibration_service import train_calibration
+
+            try:
+                result["calibration"] = train_calibration(db)
+            except Exception as e:
+                logging.exception("[train] calibration failed")
+                result["calibration"] = {"status": "error", "error": str(e)}
+        if payload.get("run_ensemble_weights", True):
+            from src.application.ensemble_weights_service import train_ensemble_weights
+
+            try:
+                result["ensemble_weights"] = train_ensemble_weights(db)
+            except Exception as e:
+                logging.exception("[train] ensemble weights failed")
+                result["ensemble_weights"] = {"status": "error", "error": str(e)}
 
         return result
 

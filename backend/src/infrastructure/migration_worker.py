@@ -8,6 +8,8 @@ import json
 import os
 import time
 from datetime import datetime, timezone
+
+from src.timezone import BOGOTA_TZ
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -151,6 +153,9 @@ def _insert_match(
                 match_date = match_date.replace(hour=int(hour), minute=int(minute))
             except Exception:
                 pass
+        # eventDate/eventTime are Bogota wall-clock time without an offset.
+        if match_date.tzinfo is None:
+            match_date = match_date.replace(tzinfo=BOGOTA_TZ)
 
         match = (
             db.query(Match)

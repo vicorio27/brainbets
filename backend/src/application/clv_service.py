@@ -178,8 +178,8 @@ def compute_clv(our_odds: Optional[float], closing_odds: Optional[float]) -> Opt
     return round(our_odds / closing_odds - 1.0, 4)
 
 
-def _fetch_odds_by_key(date_str: str) -> Dict[str, Any]:
-    """Call api-tennis get_odds directly for one date (backend-side; the
+def _fetch_odds_by_key(date_start: str, date_stop: str) -> Dict[str, Any]:
+    """Call api-tennis get_odds directly for a date range (backend-side; the
     live n8n pipeline does the equivalent for "today" at collection time).
     Deliberately omits `event_type_key`: that parameter filters the odds
     feed down to a fraction of events (see the matching gotcha in AGENTS.md).
@@ -194,19 +194,22 @@ def _fetch_odds_by_key(date_str: str) -> Dict[str, Any]:
             params={
                 "APIkey": api_key,
                 "method": "get_odds",
-                "date_start": date_str,
-                "date_stop": date_str,
+                "date_start": date_start,
+                "date_stop": date_stop,
             },
             timeout=30,
         )
         if resp.status_code != 200:
-            logger.warning(f"[CLV] get_odds returned {resp.status_code} for {date_str}: {resp.text[:200]}")
+            logger.warning(f"[CLV] get_odds returned {resp.status_code} for {date_start}..{date_stop}: {resp.text[:200]}")
             return {}
         data = resp.json()
         result = data.get("result")
-        return result if isinstance(result, dict) else {}
+        if not isinstance(result, dict):
+            logger.warning(f"[CLV] get_odds had no odds for {date_start}..{date_stop}: {str(data)[:200]}")
+            return {}
+        return result
     except Exception as e:
-        logger.warning(f"[CLV] get_odds request failed for {date_str}: {e}")
+        logger.warning(f"[CLV] get_odds request failed for {date_start}..{date_stop}: {e}")
         return {}
 
 
@@ -234,10 +237,15 @@ def capture_closing_odds(db: Session, window_hours: int = 6) -> Dict[str, Any]:
     if not matches:
         return {"matches": 0, "updated": 0, "dates": []}
 
-    dates = sorted({m.match_date.astimezone(BOGOTA_TZ).date().isoformat() for m in matches})
-    odds_by_key: Dict[str, Any] = {}
-    for day in dates:
-        odds_by_key.update(_fetch_odds_by_key(day))
+    # The API files a match under its own calendar, which is not necessarily
+    # the Bogota one, so ask for every day the match could fall on (Bogota
+    # and UTC) in a single ranged call instead of guessing one date.
+    days = set()
+    for m in matches:
+        days.add(m.match_date.astimezone(BOGOTA_TZ).date())
+        days.add(m.match_date.astimezone(timezone.utc).date())
+    dates = [d.isoformat() for d in sorted(days)]
+    odds_by_key = _fetch_odds_by_key(dates[0], dates[-1])
 
     updated = 0
     for m in matches:
@@ -249,8 +257,18 @@ def capture_closing_odds(db: Session, window_hours: int = 6) -> Dict[str, Any]:
         if not parsed:
             continue
         existing = m.extra_data or {}
-        m.extra_data = {**existing, "odds_markets_closing": parsed}
+        # A later snapshot that lost a market keeps the earlier price for it.
+        m.extra_data = {
+            **existing,
+            "odds_markets_closing": {**(existing.get("odds_markets_closing") or {}), **parsed},
+            "odds_markets_closing_at": now.isoformat(),
+        }
         updated += 1
     db.commit()
 
-    return {"matches": len(matches), "updated": updated, "dates": dates}
+    return {
+        "matches": len(matches),
+        "updated": updated,
+        "dates": dates,
+        "oddsEvents": len(odds_by_key),
+    }

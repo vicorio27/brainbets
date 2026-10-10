@@ -38,7 +38,7 @@ from src.presentation.schemas import (
     TennisMatch,
 )
 from src.application.poisson_service import expected_goals_for_fixture
-from src.timezone import today_start_bogota, yesterday_start_bogota
+from src.timezone import to_bogota, today_start_bogota, yesterday_start_bogota
 
 
 class DataService:
@@ -219,8 +219,8 @@ class DataService:
             homeTeam=home.competitor.name,
             awayTeam=away.competitor.name,
             league=match.league.name if match.league else "Unknown",
-            eventDate=match.match_date.strftime("%Y-%m-%d") if match.match_date else None,
-            eventTime=match.match_date.strftime("%H:%M") if match.match_date else None,
+            eventDate=to_bogota(match.match_date).strftime("%Y-%m-%d") if match.match_date else None,
+            eventTime=to_bogota(match.match_date).strftime("%H:%M") if match.match_date else None,
             status=match.status,
             homeScore=_h_goals,
             awayScore=_a_goals,
@@ -396,8 +396,8 @@ class DataService:
             player1=p1.competitor.name,
             player2=p2.competitor.name,
             tournament=match.league.name if match.league else "Unknown",
-            eventDate=match.match_date.strftime("%Y-%m-%d") if match.match_date else None,
-            eventTime=match.match_date.strftime("%H:%M") if match.match_date else None,
+            eventDate=to_bogota(match.match_date).strftime("%Y-%m-%d") if match.match_date else None,
+            eventTime=to_bogota(match.match_date).strftime("%H:%M") if match.match_date else None,
             status=match.status,
             rankingPlayer1=p1.pre_match_ranking,
             rankingPlayer2=p2.pre_match_ranking,
@@ -583,7 +583,7 @@ class DataService:
             probabilities=prediction.probabilities or {},
             modelContributions=prediction.model_contributions or {},
             reasoningData=prediction.reasoning_data or {},
-            eventDate=prediction.match.match_date.strftime("%Y-%m-%d") if prediction.match and prediction.match.match_date else None,
+            eventDate=to_bogota(prediction.match.match_date).strftime("%Y-%m-%d") if prediction.match and prediction.match.match_date else None,
             createdAt=prediction.created_at.isoformat() if prediction.created_at else None,
             homeName=home_name,
             awayName=away_name,

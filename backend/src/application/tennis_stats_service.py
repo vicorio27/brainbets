@@ -7,6 +7,8 @@ real data-backed values.
 import re
 import unicodedata
 from datetime import datetime
+
+from src.timezone import to_bogota
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy.orm import Session
@@ -216,7 +218,7 @@ def compute_tennis_h2h(
             continue
 
         details.append({
-            "date": match.match_date.isoformat() if match.match_date else None,
+            "date": to_bogota(match.match_date).isoformat() if match.match_date else None,
             "player1_score": p1_sets,
             "player2_score": p2_sets,
         })
@@ -662,8 +664,9 @@ def compute_surface_load(
         last_match_surface = None
         last_match_tournament = None
         if last_match and last_match.match_date:
-            last_match_date = last_match.match_date.date().isoformat()
-            rest_days = (match.match_date.date() - last_match.match_date.date()).days
+            last_day = to_bogota(last_match.match_date).date()
+            last_match_date = last_day.isoformat()
+            rest_days = (to_bogota(match.match_date).date() - last_day).days
             last_match_surface = normalize_surface((last_match.extra_data or {}).get("surface"))
             last_match_tournament = last_match.league.name if last_match.league else None
 

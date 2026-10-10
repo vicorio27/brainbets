@@ -3,8 +3,8 @@
     <div class="mb-6">
       <h1 class="text-2xl font-bold text-slate-900">Caja</h1>
       <p class="text-sm text-slate-600 mt-1">
-        Metes un monto, eliges cómo apostar, y la simulación responde con el histórico real:
-        cuánto habría rendido y cuánto tardaría en multiplicarse.
+        Metes un monto y eliges cómo apostar: te dice cuánto le puedes sacar hoy con las apuestas del día
+        y, según el histórico real, en cuántos días se multiplicaría por lo que elijas.
       </p>
     </div>
 
@@ -68,17 +68,30 @@
         </label>
 
         <label class="text-sm">
-          <span class="block font-medium text-slate-700 mb-1">Objetivo</span>
-          <select
-            v-model.number="form.target"
-            class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option :value="1.5">x1.5 (+50%)</option>
-            <option :value="2">x2 (doblar)</option>
-            <option :value="3">x3</option>
-            <option :value="5">x5</option>
-            <option :value="10">x10</option>
-          </select>
+          <span class="block font-medium text-slate-700 mb-1">
+            Multiplicar por
+            <span class="text-slate-400 font-normal">(→ {{ money(form.initial * form.target) }})</span>
+          </span>
+          <div class="relative">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">x</span>
+            <input
+              v-model.number="form.target"
+              type="number"
+              min="1.1"
+              max="100"
+              step="0.1"
+              list="caja-target-presets"
+              class="w-full pl-7 pr-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              @keyup.enter="run"
+            />
+            <datalist id="caja-target-presets">
+              <option value="1.5"></option>
+              <option value="2"></option>
+              <option value="3"></option>
+              <option value="5"></option>
+              <option value="10"></option>
+            </datalist>
+          </div>
         </label>
 
         <label class="text-sm">
@@ -117,6 +130,22 @@
             step="5"
             class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
+        </label>
+
+        <label class="text-sm">
+          <span class="block font-medium text-slate-700 mb-1">
+            Edge mínimo
+            <span class="text-slate-400 font-normal">(hoy e histórico)</span>
+          </span>
+          <select
+            v-model="form.minEdge"
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">Sin filtro (todas)</option>
+            <option value="0">Solo edge positivo</option>
+            <option value="5">Edge &gt; 5%</option>
+            <option value="10">Edge &gt; 10%</option>
+          </select>
         </label>
 
         <label class="text-sm">
@@ -166,6 +195,153 @@
     </div>
 
     <template v-else-if="sim">
+      <!-- Hoy -->
+      <div v-if="today" class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mb-6">
+        <h2 class="text-lg font-semibold text-slate-900 mb-1">Con las apuestas de hoy</h2>
+        <p v-if="!today.bets" class="text-sm text-slate-500">
+          Hoy no hay apuestas con cuota para estos filtros<span v-if="today.withoutOdds">
+            ({{ today.withoutOdds }} predicciones sin cuota publicada todavía)</span>.
+        </p>
+        <template v-else>
+          <p class="text-xs text-slate-500 mb-3">
+            {{ today.bets }} apuestas ({{ today.notStartedBets }} sin empezar, {{ today.pendingBets - today.notStartedBets }} en juego), poniendo
+            {{ money(today.staked) }} en total ({{ today.stakedPct }}% de {{ money(sim.params.initial) }})<span v-if="today.exposureCapped">
+              — recortado al tope de 50% de la caja por día</span>.
+          </p>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+            <div class="rounded-lg bg-green-50 border border-green-200 p-3">
+              <div class="text-xs text-green-800">Si aciertas todas (máximo)</div>
+              <div class="text-2xl font-bold text-green-700">+{{ money(today.best.profit) }}</div>
+              <div class="text-xs text-green-800">quedas en {{ money(today.best.final) }} ({{ signedPct(today.best.pct) }})</div>
+            </div>
+            <div class="rounded-lg bg-slate-50 border border-slate-200 p-3">
+              <div class="text-xs text-slate-600">Lo esperable según el modelo</div>
+              <div class="text-2xl font-bold" :class="today.expected.profit >= 0 ? 'text-green-700' : 'text-red-700'">
+                {{ signedMoney(today.expected.profit) }}
+              </div>
+              <div class="text-xs text-slate-600">quedas en {{ money(today.expected.final) }} ({{ signedPct(today.expected.pct) }})</div>
+            </div>
+            <div class="rounded-lg bg-red-50 border border-red-200 p-3">
+              <div class="text-xs text-red-800">Si fallas todas (mínimo)</div>
+              <div class="text-2xl font-bold text-red-700">{{ signedMoney(today.worst.profit) }}</div>
+              <div class="text-xs text-red-800">quedas en {{ money(today.worst.final) }} ({{ signedPct(today.worst.pct) }})</div>
+            </div>
+          </div>
+          <p v-if="today.bets > today.pendingBets" class="text-sm text-slate-700 mb-3">
+            Ya resueltas hoy: <strong :class="today.realized.profit >= 0 ? 'text-green-700' : 'text-red-700'">{{ signedMoney(today.realized.profit) }}</strong>
+            · todavía en juego {{ money(today.pendingStaked) }}.
+          </p>
+          <details>
+            <summary class="text-sm text-blue-700 cursor-pointer">Ver cuánto poner en cada una</summary>
+            <div class="overflow-x-auto mt-2" tabindex="0">
+              <table class="min-w-full text-sm">
+                <thead>
+                  <tr class="text-left text-xs text-slate-500 uppercase tracking-wider">
+                    <th class="py-2 pr-4">Partido</th>
+                    <th class="py-2 px-3">Apuesta</th>
+                    <th class="py-2 px-3">Cuota</th>
+                    <th class="py-2 px-3">Prob.</th>
+                    <th class="py-2 px-3">Edge</th>
+                    <th class="py-2 px-3">Poner</th>
+                    <th class="py-2 px-3">Si gana</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in today.items" :key="item.predictionId" class="border-t border-slate-100">
+                    <td class="py-2 pr-4 whitespace-nowrap">
+                      <router-link :to="`/predictions/${item.predictionId}`" class="font-medium text-slate-900 hover:text-blue-700">
+                        {{ item.sport === 'tennis' ? '🎾' : '⚽' }} {{ item.match }}
+                      </router-link>
+                      <span class="block text-xs text-slate-500">{{ item.time }} · {{ item.league }}</span>
+                    </td>
+                    <td class="py-2 px-3 text-slate-700">
+                      {{ item.selection }}
+                      <span class="block text-xs text-slate-500">{{ item.market }}</span>
+                    </td>
+                    <td class="py-2 px-3 text-slate-600">{{ item.odds }}</td>
+                    <td class="py-2 px-3 text-slate-600">{{ item.probability }}%</td>
+                    <td class="py-2 px-3 font-medium" :class="item.edge >= 0 ? 'text-green-700' : 'text-red-700'">{{ signedPct(item.edge) }}</td>
+                    <td class="py-2 px-3 font-semibold text-slate-900">{{ money(item.stake) }}</td>
+                    <td class="py-2 px-3 whitespace-nowrap">
+                      <span v-if="item.won === true" class="text-green-700 font-medium">✅ +{{ money(item.winProfit) }}</span>
+                      <span v-else-if="item.won === false" class="text-red-700 font-medium">❌ -{{ money(item.stake) }}</span>
+                      <span v-else class="text-green-700">
+                        +{{ money(item.winProfit) }}
+                        <span v-if="item.started" class="text-xs text-amber-700">· en juego</span>
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </details>
+          <p class="text-xs text-slate-500 mt-3">
+            El máximo exige acertar todas a la vez, casi nunca pasa. "Lo esperable" usa la probabilidad calibrada del
+            modelo, y el histórico de abajo dice que ningún mercado tiene todavía una ventaja demostrada: tómalo como
+            orientación, no como ganancia asegurada.
+            <span v-if="today.withoutOdds">{{ today.withoutOdds }} predicciones de hoy quedan fuera por no tener cuota.</span>
+            <span v-if="today.skippedNoStake"> {{ today.skippedNoStake }} sin ventaja según Kelly no se apuestan.</span>
+          </p>
+        </template>
+      </div>
+
+      <!-- Agresivo: todo a una -->
+      <div v-if="aggressive" class="rounded-lg border border-amber-300 bg-amber-50 p-4 mb-6">
+        <h2 class="text-lg font-semibold text-amber-900 mb-1">ðŸ”¥ Modo agresivo: todo a una</h2>
+        <p v-if="!aggressive.pick" class="text-sm text-amber-900">
+          Hoy no queda ninguna apuesta con cuota en un partido que no haya empezado.
+        </p>
+        <template v-else>
+          <p class="text-sm text-amber-900">
+            <template v-if="aggressive.note === 'sin_edge_positivo'">
+              <strong>Hoy ninguna apuesta tiene edge positivo.</strong> La menos mala serÃ­a
+            </template>
+            <template v-else>La mejor apuesta de hoy ({{ aggressive.positiveEdgeBets }} con edge positivo) es</template>
+            <router-link :to="`/predictions/${aggressive.pick.predictionId}`" class="font-semibold underline">
+              {{ aggressive.pick.selection }} â€” {{ aggressive.pick.market }}
+            </router-link>
+            en {{ aggressive.pick.match }} ({{ aggressive.pick.time }}, {{ aggressive.pick.league }}):
+            cuota {{ aggressive.pick.odds }}, probabilidad {{ aggressive.pick.probability }}%,
+            edge <span :class="aggressive.pick.edge > 0 ? 'text-green-700' : 'text-red-700'" class="font-semibold">{{ signedPct(aggressive.pick.edge) }}</span>.
+          </p>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+            <div class="rounded-lg bg-white border border-amber-200 p-3">
+              <div class="text-xs text-slate-600">Metiendo los {{ money(aggressive.allIn.stake) }} completos hoy</div>
+              <div class="text-xl font-bold text-slate-900">
+                {{ money(aggressive.allIn.stake) }} â†’ {{ money(aggressive.allIn.finalIfWin) }}
+                <span class="text-sm font-medium text-slate-600">(x{{ aggressive.allIn.multipleIfWin }})</span>
+              </div>
+              <div class="text-sm mt-1">
+                <span class="text-green-700 font-semibold">{{ aggressive.allIn.probWin }}% de lograrlo</span> Â·
+                <span class="text-red-700 font-semibold">{{ aggressive.allIn.probLoseAll }}% de quedar en ceros</span>
+              </div>
+            </div>
+            <div class="rounded-lg bg-white border border-amber-200 p-3">
+              <div class="text-xs text-slate-600">
+                Para llegar a x{{ aggressive.targetMultiple }}
+                <template v-if="aggressive.chain.steps > 1">reinvirtiendo todo en apuestas como esta</template>
+              </div>
+              <div class="text-xl font-bold text-slate-900">
+                {{ aggressive.chain.steps }} {{ aggressive.chain.steps === 1 ? 'acierto' : 'aciertos seguidos' }}
+                <span class="text-sm font-medium text-slate-600">
+                  (~{{ aggressive.chain.days }} {{ aggressive.chain.days === 1 ? 'dÃ­a' : 'dÃ­as' }}, quedas en {{ money(aggressive.chain.finalIfAllWin) }})
+                </span>
+              </div>
+              <div class="text-sm mt-1">
+                <span class="text-green-700 font-semibold">{{ aggressive.chain.probAllWin }}% de lograrlo</span> Â·
+                <span class="text-red-700 font-semibold">{{ aggressive.chain.probLoseAll }}% de quedar en ceros</span>
+              </div>
+            </div>
+          </div>
+          <p class="text-xs text-amber-900 mt-3">
+            Ignora la estrategia y los topes de arriba: es todo o nada. Para esta misma apuesta Kelly recomendarÃ­a poner
+            {{ aggressive.pick.kellyPct }}% de la caja, no el 100%. Las probabilidades son las del modelo, que todavÃ­a no
+            tiene una ventaja demostrada en ningÃºn mercado; la cadena asume encontrar cada dÃ­a una apuesta con la misma
+            cuota y probabilidad.
+          </p>
+        </template>
+      </div>
+
       <!-- Veredicto -->
       <div class="rounded-lg border p-5 mb-6" :class="verdict.box">
         <div class="flex items-start gap-3">
@@ -230,16 +406,20 @@
                 </dd>
               </div>
               <div class="flex justify-between border-t border-slate-100 pt-2">
-                <dt class="text-slate-600">Rápido (p10)</dt>
+                <dt class="text-slate-600">1 de cada 10 escenarios llega en</dt>
                 <dd class="font-semibold text-slate-900">{{ days(sim.monteCarlo.daysP10) }}</dd>
               </div>
               <div class="flex justify-between">
-                <dt class="text-slate-600">Típico (mediana)</dt>
+                <dt class="text-slate-600">La mitad llega en</dt>
                 <dd class="font-semibold text-slate-900">{{ days(sim.monteCarlo.daysP50) }}</dd>
               </div>
               <div class="flex justify-between">
-                <dt class="text-slate-600">Lento (p90)</dt>
+                <dt class="text-slate-600">9 de cada 10 llegan en</dt>
                 <dd class="font-semibold text-slate-900">{{ days(sim.monteCarlo.daysP90) }}</dd>
+              </div>
+              <div v-if="sim.monteCarlo.daysP50 == null && sim.monteCarlo.daysP50IfReached != null" class="flex justify-between">
+                <dt class="text-slate-600">Mediana solo entre los que llegan</dt>
+                <dd class="font-semibold text-slate-900">{{ days(sim.monteCarlo.daysP50IfReached) }}</dd>
               </div>
               <div class="flex justify-between border-t border-slate-100 pt-2">
                 <dt class="text-slate-600">Caja mediana al final</dt>
@@ -389,6 +569,13 @@
           <strong>Muestra:</strong> {{ sim.sample.settledPredictions }} predicciones ya validadas en la ventana;
           solo {{ sim.sample.withOdds }} ({{ sim.sample.oddsCoverage ?? 0 }}%) tienen cuota guardada y entran a la simulación.
           Las {{ sim.sample.withoutOdds }} restantes se ignoran porque sin cuota no se sabe cuánto habrían pagado.
+          <span v-if="sim.sample.afterStart">
+            {{ sim.sample.afterStart }} predicciones se descartan porque se generaron con el partido ya empezado:
+            no eran apuestas que se pudieran hacer.
+          </span>
+          <span v-if="sim.sample.belowMinEdge">
+            Otras {{ sim.sample.belowMinEdge }} tenían cuota pero quedaron fuera por el filtro de edge mínimo.
+          </span>
         </p>
         <p v-if="smallSample">
           <strong>Ojo:</strong> con menos de 100 apuestas el resultado es ruido tanto como señal. Los días proyectados
@@ -443,10 +630,13 @@ const form = reactive({
   sport: '',
   market: '',
   minConfidence: 0,
+  minEdge: '0',
   days: 365
 })
 
 const sim = computed(() => store.simulation)
+const today = computed(() => sim.value?.today || null)
+const aggressive = computed(() => today.value?.aggressive || null)
 const smallSample = computed(() => (sim.value?.backtest?.bets || 0) < 100)
 // When the user filters to one specific market, surface whether THAT market's
 // yield is statistically distinguishable from noise (not just positive).
@@ -464,6 +654,10 @@ const stakeHint = computed(() =>
 function money(value) {
   if (value == null) return '–'
   return '$' + Number(value).toLocaleString('es-CO', { maximumFractionDigits: 2 })
+}
+function signedMoney(value) {
+  if (value == null) return '–'
+  return (value < 0 ? '-' : '+') + money(Math.abs(value))
 }
 function pct(value) {
   if (value == null) return '–'
@@ -497,6 +691,12 @@ const verdict = computed(() => {
     text: 'text-red-800',
     icon: '🛑'
   }
+  const warn = {
+    box: 'bg-amber-50 border-amber-200',
+    title: 'text-amber-900',
+    text: 'text-amber-800',
+    icon: '⚠️'
+  }
   const neutral = {
     box: 'bg-slate-50 border-slate-200',
     title: 'text-slate-900',
@@ -518,32 +718,44 @@ const verdict = computed(() => {
       detail: `En el histórico, ${money(s.params.initial)} habrían terminado en ${money(s.backtest.final)} (yield ${signedPct(s.backtest.yield)}). Filtra por los mercados que sí pagan en la tabla de abajo antes de meter dinero real.`
     }
   }
-  if (p.note === 'ya_alcanzado') {
+  const v = s.verdict || {}
+  const mc = s.monteCarlo || {}
+  const edge = v.edge || {}
+  const odds = mc.sims
+    ? ` En la simulación, ${mc.probReachTarget}% de los escenarios llega a ${target} en ${mc.horizonDays} días y ${mc.probRuin}% quiebra antes.`
+    : ''
+  const history =
+    p.note === 'ya_alcanzado'
+      ? `En el histórico, ${money(s.params.initial)} llegaron a ${money(s.backtest.final)} en ${s.backtest.daysSpan} días.`
+      : p.note === 'horizonte_excedido'
+        ? `El histórico crece ${p.dailyGrowthPct}% diario: a ese ritmo ${target} tomaría años.`
+        : `Al ritmo del histórico (${p.dailyGrowthPct}% diario) serían ~${Math.round(p.daysToTarget)} días.`
+
+  if (v.level === 'edge_real') {
+    const typical = mc.daysP50 != null ? `~${Math.round(mc.daysP50)} días` : `~${Math.round(p.daysToTarget)} días`
     return {
       ...good,
-      headline: `El histórico ya superó ${target}`,
-      detail: `${money(s.params.initial)} habrían llegado a ${money(s.backtest.final)} en ${s.backtest.daysSpan} días. La proyección no aplica porque el objetivo se cumplió dentro de la propia muestra.`
+      headline:
+        p.note === 'ya_alcanzado'
+          ? `El histórico ya superó ${target}`
+          : `${money(s.params.initial)} → ${amount} en ${typical}`,
+      detail: `${history}${odds} El yield (${signedPct(edge.yield)}, IC 95% ${signedPct(edge.yieldCiLow)} a ${signedPct(edge.yieldCiHigh)}) se distingue del azar con ${edge.bets} apuestas.`
     }
   }
-  if (p.note === 'horizonte_excedido') {
-    return {
-      ...neutral,
-      headline: `Llegar a ${target} tomaría años`,
-      detail: `El crecimiento histórico es de ${p.dailyGrowthPct}% diario: demasiado lento para este objetivo en un horizonte razonable.`
-    }
+
+  const why = []
+  const reasons = v.reasons || []
+  if (reasons.includes('muestra_chica')) why.push(`solo hay ${edge.bets} apuestas, muy pocas para concluir algo`)
+  if (reasons.includes('yield_no_significativo'))
+    why.push(`el yield (${signedPct(edge.yield)}, IC 95% ${signedPct(edge.yieldCiLow)} a ${signedPct(edge.yieldCiHigh)}) no se distingue del azar`)
+  if (reasons.includes('mayoria_no_llega')) why.push('la mayoría de los escenarios simulados no llega')
+  if (reasons.includes('riesgo_quiebra')) why.push('el riesgo de quebrar es alto')
+  if (reasons.includes('demasiado_lento')) why.push('el crecimiento es demasiado lento')
+  return {
+    ...warn,
+    headline: `No hay base para prometer ${target}`,
+    detail: `${history}${odds} No lo tomes como pronóstico: ${why.join('; ') || 'la evidencia es insuficiente'}.`
   }
-  if (p.reachable) {
-    const mc = s.monteCarlo
-    const band = mc?.daysP50
-      ? ` La simulación de escenarios lo sitúa entre ${Math.round(mc.daysP10)} y ${Math.round(mc.daysP90)} días (mediana ${Math.round(mc.daysP50)}), con ${mc.probReachTarget}% de probabilidad de lograrlo y ${mc.probRuin}% de quebrar antes.`
-      : ''
-    return {
-      ...good,
-      headline: `${money(s.params.initial)} → ${amount} en ~${Math.round(p.daysToTarget)} días`,
-      detail: `Al ritmo histórico (${p.dailyGrowthPct}% diario, ~${p.betsToTarget} apuestas), llegarías a ${target} alrededor del ${p.etaDate}.${band}`
-    }
-  }
-  return { ...neutral, headline: 'Sin proyección', detail: 'No hay suficiente información para proyectar.' }
 })
 
 const chart = computed(() => {
@@ -583,6 +795,7 @@ function run() {
   }
   if (form.sport) params.sport = form.sport
   if (form.market) params.market = form.market
+  if (form.minEdge !== '') params.minEdge = Number(form.minEdge)
   store.simulate(params)
 }
 
