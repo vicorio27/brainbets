@@ -14,9 +14,15 @@
     "p1_matches_last_30_days",
     "p2_matches_last_30_days"
   ],
-  "train_accuracy": 0.9884,
-  "test_accuracy": 0.9864,
-  "samples": 14759,
+  "symmetric": true,
+  "train_accuracy": 0.6681,
+  "test_accuracy": 0.6428,
+  "test_log_loss": 0.6227,
+  "baseline_higher_elo_accuracy": 0.6397,
+  "evaluation": "temporal split: oldest 80% train, newest 20% test, both sides of each match",
+  "player1_won_rate_in_source": 0.9822,
+  "samples": 14760,
+  "test_matches": 2952,
   "max_matches_used": 15000,
-  "trained_at": "2026-10-02T03:18:22.234498+00:00"
+  "trained_at": "2026-10-10T17:12:32.120970+00:00"
 }

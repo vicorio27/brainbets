@@ -466,21 +466,14 @@
               <div class="flex items-center gap-2 flex-shrink-0">
                 <span
                   v-if="pick.edge != null"
-                  :class="pick.edge > 0.05
-                    ? 'bg-green-100 text-green-700 border border-green-200'
-                    : pick.edge > 0
-                      ? 'bg-amber-100 text-amber-700 border border-amber-200'
-                      : 'bg-slate-100 text-slate-600 border border-slate-200'"
+                  :class="edgeLabel(pick.edge).cls"
                   class="text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
-                  :title="pick.kelly != null ? `Kelly: ${(pick.kelly * 100).toFixed(1)}% · stake sugerido = ¼ Kelly. Solo apostar si edge > 5%.` : ''"
+                  :title="`Edge frente a la cuota: ${formatEdge(pick.edge)}`
+                    + (pick.modelEdge != null ? ` · modelo solo: ${formatEdge(pick.modelEdge)}${isSuspicious(pick.modelEdge) ? ' (dudoso: más de 20%)' : ''}` : '')
+                    + (pick.kelly ? ` · ¼ Kelly: ${(pick.kelly * 25).toFixed(1)}% de la caja` : '')"
                 >
-                  edge {{ formatEdge(pick.edge) }}
+                  {{ edgeLabel(pick.edge).text }}
                 </span>
-                <span
-                  v-if="isSuspicious(pick.modelEdge)"
-                  class="text-[10px] text-amber-700 whitespace-nowrap"
-                  title="Un edge del modelo mayor a 20% suele ser el modelo equivocándose contra el mercado"
-                >⚠ modelo {{ formatEdge(pick.modelEdge, 0) }}</span>
                 <span v-else class="text-xs text-slate-500 whitespace-nowrap">sin cuota</span>
                 <span
                   class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold whitespace-nowrap"
@@ -499,7 +492,7 @@
         icon="🎯"
         :title="minEdge >= 0 ? 'Sin apuestas con valor hoy' : 'Sin recomendaciones'"
         :message="minEdge >= 0
-          ? 'Ningún pick de hoy supera ese edge. Baja el filtro o espera a que lleguen más cuotas (collect).'
+          ? 'Ningún pick de hoy tiene esa ventaja frente a la cuota de la casa. Es lo normal: hoy el histórico solo justifica darle al modelo un peso pequeño frente al mercado. Puedes bajar el filtro para ver los que más se acercan.'
           : `Ningún pick de hoy supera el ${minConfidence}% de confianza.`"
       />
 
@@ -722,7 +715,7 @@ import { usePredictionsStore } from '../stores/predictions.js'
 import { useAnalyticsStore } from '../stores/analytics.js'
 import MatchCard from '../components/MatchCard.vue'
 import EmptyState from '../components/EmptyState.vue'
-import { betEdge, betKelly, betProbability, modelEdge, isSuspicious, formatEdge } from '../utils/edge.js'
+import { betEdge, betKelly, betProbability, modelEdge, isSuspicious, formatEdge, edgeLabel } from '../utils/edge.js'
 
 const matchesStore = useMatchesStore()
 const predictionsStore = usePredictionsStore()

@@ -56,7 +56,8 @@ def _load_elo_index(
         elo = float(row.elo_before) if row.elo_before else None
         if elo is None:
             continue
-        index[row.competitor_id].append((row.calculated_at, row.surface, elo))
+        after = float(row.elo_after) if row.elo_after else elo
+        index[row.competitor_id].append((row.calculated_at, row.surface, elo, after))
     return index
 
 
@@ -71,20 +72,29 @@ def _get_elo_before(
     if not entries:
         return None
 
+    def _rating(candidates: List[Tuple[Any, ...]]) -> Optional[float]:
+        idx = bisect_right(candidates, before_date, key=lambda x: x[0])
+        if not idx:
+            return None
+        entry = candidates[idx - 1]
+        # The row stamped with this match's own date holds the rating going
+        # INTO it (elo_before). Any earlier row is a previous match, whose
+        # rating coming OUT (elo_after) is the current one -- taking its
+        # elo_before would be one match stale.
+        return entry[2] if entry[0] == before_date else entry[3]
+
     # Surface-specific lookup.
     if surface:
         surface_entries = [e for e in entries if e[1] == surface]
         if surface_entries:
-            idx = bisect_right(surface_entries, before_date, key=lambda x: x[0])
-            if idx:
-                return surface_entries[idx - 1][2]
+            rating = _rating(surface_entries)
+            if rating is not None:
+                return rating
 
     # General lookup (surface is None).
     general_entries = [e for e in entries if e[1] is None]
     if general_entries:
-        idx = bisect_right(general_entries, before_date, key=lambda x: x[0])
-        if idx:
-            return general_entries[idx - 1][2]
+        return _rating(general_entries)
     return None
 
 
@@ -277,8 +287,49 @@ FEATURE_NAMES = [
 ]
 
 
-def train_tennis_ml_model(db: Session) -> Dict[str, Any]:
-    """Build a dataset from finished tennis matches and train an XGBoost model."""
+def _mirror_names(names: List[str]) -> List[int]:
+    """For each feature, the index of its counterpart with the players swapped."""
+    index = {name: i for i, name in enumerate(names)}
+    out = []
+    for name in names:
+        if "p1_" in name:
+            other = name.replace("p1_", "p2_")
+        elif "p2_" in name:
+            other = name.replace("p2_", "p1_")
+        else:
+            other = name
+        out.append(index.get(other, index[name]))
+    return out
+
+
+def mirror_features(vector: List[float], names: List[str]) -> List[float]:
+    """The same match seen from the other side: `*_diff` features change
+    sign and every p1_/p2_ pair swaps."""
+    swap = _mirror_names(names)
+    return [
+        -vector[i] if name.endswith("_diff") else vector[swap[i]]
+        for i, name in enumerate(names)
+    ]
+
+
+def train_tennis_ml_model(
+    db: Session,
+    train_until: Optional[datetime] = None,
+    persist: bool = True,
+) -> Dict[str, Any]:
+    """Build a dataset from finished tennis matches and train an XGBoost model.
+
+    The historical ingestion stored the WINNER as player1 in ~99% of matches,
+    so a model trained on those rows as they come learns "player1 wins" and
+    nothing else (it reported 99.8% accuracy for exactly that reason). Every
+    match is therefore used twice, once from each side, which makes the
+    dataset exactly 50/50 and forces the model to learn from the features.
+    The reported accuracy comes from the most recent 20% of matches, which
+    the model never saw, next to the "higher Elo wins" baseline.
+
+    `train_until` / `persist=False` are for research: fit on the past only
+    and return the artifact without replacing the live model.
+    """
     sport = db.query(Sport).filter(Sport.code == "tennis").first()
     if not sport:
         return {"status": "error", "message": "Tennis sport not found"}
@@ -297,7 +348,7 @@ def train_tennis_ml_model(db: Session) -> Dict[str, Any]:
         .options(joinedload(Match.competitors), joinedload(Match.scores))
         .filter(Match.sport_id == sport.id)
         .filter(Match.status == "FINISHED")
-        .filter(Match.match_date <= max_elo_date)
+        .filter(Match.match_date <= (min(max_elo_date, train_until) if train_until else max_elo_date))
         .order_by(Match.match_date.desc())
         .limit(MAX_TRAINING_MATCHES)
         .all()
@@ -334,6 +385,7 @@ def train_tennis_ml_model(db: Session) -> Dict[str, Any]:
             p1, p2 = competitors[0], competitors[1]
         row = _build_feature_row(match, p1, p2, elo_index, all_history, surface_history)
         if row:
+            row["date"] = match.match_date
             rows.append(row)
         else:
             skipped += 1
@@ -345,63 +397,94 @@ def train_tennis_ml_model(db: Session) -> Dict[str, Any]:
             "skipped": skipped,
         }
 
-    from sklearn.model_selection import train_test_split
     from sklearn.preprocessing import StandardScaler
     import xgboost as xgb
     import numpy as np
 
-    X = np.array([_extract_features(r) for r in rows])
-    y = np.array([r["label"] for r in rows])
+    rows.sort(key=lambda r: r["date"])
+    raw_label_rate = sum(r["label"] for r in rows) / len(rows)
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
+    def _both_sides(items: List[Dict[str, Any]]):
+        X, y = [], []
+        for r in items:
+            vector = _extract_features(r)
+            X.append(vector)
+            y.append(r["label"])
+            X.append(mirror_features(vector, FEATURE_NAMES))
+            y.append(1 - r["label"])
+        return np.array(X), np.array(y)
 
+    def _new_model():
+        return xgb.XGBClassifier(
+            n_estimators=200,
+            max_depth=4,
+            learning_rate=0.05,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            eval_metric="logloss",
+            random_state=42,
+            n_jobs=2,
+        )
+
+    # Honest evaluation: fit on the oldest 80%, score on the newest 20%.
+    cut = int(len(rows) * 0.8)
+    X_train, y_train = _both_sides(rows[:cut])
+    X_test, y_test = _both_sides(rows[cut:])
+    eval_scaler = StandardScaler()
+    eval_model = _new_model()
+    eval_model.fit(eval_scaler.fit_transform(X_train), y_train)
+    X_test_scaled = eval_scaler.transform(X_test)
+    proba = np.clip(eval_model.predict_proba(X_test_scaled)[:, 1], 1e-6, 1 - 1e-6)
+    train_acc = float(eval_model.score(eval_scaler.transform(X_train), y_train))
+    test_acc = float(((proba > 0.5) == (y_test == 1)).mean())
+    test_log_loss = float(-np.mean(y_test * np.log(proba) + (1 - y_test) * np.log(1 - proba)))
+    elo_col = FEATURE_NAMES.index("elo_diff")
+    decided = X_test[:, elo_col] != 0
+    baseline_acc = float(((X_test[decided, elo_col] > 0) == (y_test[decided] == 1)).mean()) if decided.any() else None
+
+    # The served model then learns from everything, both sides of each match.
+    X_all, y_all = _both_sides(rows)
     scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
+    model = _new_model()
+    model.fit(scaler.fit_transform(X_all), y_all)
 
-    model = xgb.XGBClassifier(
-        n_estimators=200,
-        max_depth=4,
-        learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        eval_metric="logloss",
-        random_state=42,
-        n_jobs=2,
-    )
-    model.fit(X_train_scaled, y_train)
-
-    train_acc = float(model.score(X_train_scaled, y_train))
-    test_acc = float(model.score(X_test_scaled, y_test))
-
-    os.makedirs(MODEL_DIR, exist_ok=True)
-    with open(MODEL_PATH, "wb") as f:
-        pickle.dump({"model": model, "scaler": scaler, "feature_names": FEATURE_NAMES}, f)
-
+    artifact = {"model": model, "scaler": scaler, "feature_names": FEATURE_NAMES, "symmetric": True}
     metadata = {
         "sport": "tennis",
         "model_type": "xgboost",
         "feature_names": FEATURE_NAMES,
+        "symmetric": True,
         "train_accuracy": round(train_acc, 4),
         "test_accuracy": round(test_acc, 4),
+        "test_log_loss": round(test_log_loss, 4),
+        "baseline_higher_elo_accuracy": round(baseline_acc, 4) if baseline_acc is not None else None,
+        "evaluation": "temporal split: oldest 80% train, newest 20% test, both sides of each match",
+        "player1_won_rate_in_source": round(raw_label_rate, 4),
         "samples": len(rows),
+        "test_matches": len(rows) - cut,
         "max_matches_used": MAX_TRAINING_MATCHES,
         "trained_at": datetime.now(timezone.utc).isoformat(),
     }
-    with open(METADATA_PATH, "w") as f:
-        json.dump(metadata, f, indent=2)
-
-    return {
+    result = {
         "status": "success",
-        "model_path": MODEL_PATH,
-        "metadata_path": METADATA_PATH,
-        "train_accuracy": round(train_acc, 4),
-        "test_accuracy": round(test_acc, 4),
+        "train_accuracy": metadata["train_accuracy"],
+        "test_accuracy": metadata["test_accuracy"],
+        "test_log_loss": metadata["test_log_loss"],
+        "baseline_higher_elo_accuracy": metadata["baseline_higher_elo_accuracy"],
+        "player1_won_rate_in_source": metadata["player1_won_rate_in_source"],
         "samples": len(rows),
         "skipped": skipped,
     }
+    if not persist:
+        return {**result, "artifact": artifact}
+
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    with open(MODEL_PATH, "wb") as f:
+        pickle.dump(artifact, f)
+    with open(METADATA_PATH, "w") as f:
+        json.dump(metadata, f, indent=2)
+
+    return {**result, "model_path": MODEL_PATH, "metadata_path": METADATA_PATH}
 
 
 def load_tennis_ml_model() -> Optional[Dict[str, Any]]:
@@ -516,6 +599,25 @@ def _align_features(
     return [_safe_float(name_to_value.get(name), 0.0) for name in expected_names]
 
 
+def _predict_rows(artifact: Dict[str, Any], rows: List[List[float]]) -> List[Dict[str, float]]:
+    """Player1/player2 probabilities for aligned feature rows.
+
+    A symmetric model is asked about each match from both sides and the two
+    answers averaged, so the result cannot depend on which player happens to
+    be listed first. Older (pre-fix) artifacts are served as they were.
+    """
+    import numpy as np
+
+    model = artifact["model"]
+    scaler = artifact["scaler"]
+    names = artifact.get("feature_names", FEATURE_NAMES[:7])
+    p1 = model.predict_proba(scaler.transform(np.array(rows)))[:, 1]
+    if artifact.get("symmetric"):
+        mirrored = np.array([mirror_features(r, names) for r in rows])
+        p1 = (p1 + 1.0 - model.predict_proba(scaler.transform(mirrored))[:, 1]) / 2.0
+    return [{"player1": float(p), "player2": float(1.0 - p)} for p in p1]
+
+
 def predict_tennis_ml(features: Dict[str, Any]) -> Optional[Dict[str, float]]:
     """Return player1/player2 win probabilities from the trained XGBoost model.
 
@@ -534,11 +636,7 @@ def predict_tennis_ml(features: Dict[str, Any]) -> Optional[Dict[str, float]]:
     scaler = artifact["scaler"]
     expected_names = artifact.get("feature_names", FEATURE_NAMES[:7])
 
-    x = np.array([_align_features(features, expected_names)])
-
-    x_scaled = scaler.transform(x)
-    proba = model.predict_proba(x_scaled)[0]
-    return {"player1": float(proba[1]), "player2": float(proba[0])}
+    return _predict_rows(artifact, [_align_features(features, expected_names)])[0]
 
 
 def predict_tennis_ml_batch(matches: List[Dict[str, Any]]) -> Optional[List[Dict[str, float]]]:
@@ -556,8 +654,4 @@ def predict_tennis_ml_batch(matches: List[Dict[str, Any]]) -> Optional[List[Dict
     rows = [_align_features(m, expected_names) for m in matches]
     if not rows:
         return []
-
-    X = np.array(rows)
-    X_scaled = scaler.transform(X)
-    probas = model.predict_proba(X_scaled)
-    return [{"player1": float(p[1]), "player2": float(p[0])} for p in probas]
+    return _predict_rows(artifact, rows)

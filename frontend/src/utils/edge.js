@@ -52,6 +52,17 @@ export function edgeBadgeClass(edge) {
   return 'bg-red-100 text-red-800'
 }
 
+// Plain-language verdict for lists. The number stays in the tooltip and in
+// the prediction detail: a column of small negative percentages read as
+// "everything is broken" when it only meant "no advantage over the house".
+export function edgeLabel(edge) {
+  if (edge == null) return { text: 'sin cuota', cls: 'bg-slate-100 text-slate-600' }
+  if (isSuspicious(edge)) return { text: '⚠ dudoso', cls: 'bg-amber-100 text-amber-800' }
+  if (edge >= 0.05) return { text: 'valor', cls: 'bg-green-100 text-green-800' }
+  if (edge >= 0.02) return { text: 'valor leve', cls: 'bg-lime-100 text-lime-800' }
+  return { text: 'sin valor', cls: 'bg-slate-100 text-slate-600' }
+}
+
 export function formatEdge(edge, digits = 1) {
   if (edge == null) return '–'
   const pct = edge * 100

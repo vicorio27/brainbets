@@ -345,7 +345,7 @@
                     <th class="py-2 px-3">Apuesta</th>
                     <th class="py-2 px-3">Cuota</th>
                     <th class="py-2 px-3">Prob.</th>
-                    <th class="py-2 px-3">Edge</th>
+                    <th class="py-2 px-3">Valor</th>
                     <th class="py-2 px-3">Poner</th>
                     <th class="py-2 px-3">Si gana</th>
                   </tr>
@@ -364,13 +364,12 @@
                     </td>
                     <td class="py-2 px-3 text-slate-600">{{ item.odds }}</td>
                     <td class="py-2 px-3 text-slate-600">{{ item.probability }}%</td>
-                    <td class="py-2 px-3 font-medium whitespace-nowrap" :class="item.edge >= 0 ? 'text-green-700' : 'text-red-700'">
-                      {{ signedPct(item.edge) }}
+                    <td class="py-2 px-3 whitespace-nowrap">
                       <span
-                        v-if="item.suspicious"
-                        class="block text-[10px] font-normal text-amber-700"
-                        title="Un edge del modelo mayor a 20% suele ser el modelo equivocándose contra el mercado"
-                      >⚠ modelo {{ signedPct(item.modelEdge) }}</span>
+                        class="inline-block rounded-full px-2 py-0.5 text-xs font-medium"
+                        :class="edgeLabel(item.edge / 100).cls"
+                        :title="`Edge frente a la cuota: ${signedPct(item.edge)} · modelo solo: ${signedPct(item.modelEdge)}${item.suspicious ? ' (dudoso: más de 20%)' : ''}`"
+                      >{{ edgeLabel(item.edge / 100).text }}</span>
                     </td>
                     <td class="py-2 px-3 font-semibold text-slate-900">{{ money(item.stake) }}</td>
                     <td class="py-2 px-3 whitespace-nowrap">
@@ -387,8 +386,10 @@
             </div>
           </details>
           <p class="text-xs text-slate-500 mt-3">
-            El edge mezcla la probabilidad del modelo con la de la casa (sin su margen), con el peso que el histórico
-            justifica para el modelo. Por eso casi siempre queda cerca de cero o negativo.
+            "Valor" dice si la apuesta tiene ventaja frente a la cuota de la casa: valor (más de 5%), valor leve
+            (2 a 5%) o sin valor. Mezcla la probabilidad del modelo con la de la casa, con el peso que el histórico
+            justifica para el modelo; por eso casi todo sale "sin valor". El número exacto aparece al pasar el cursor
+            y en el detalle de cada predicción.
           </p>
           <p v-if="today.withoutOdds || today.skippedNoStake" class="text-xs text-slate-500 mt-1">
             <span v-if="today.withoutOdds">{{ today.withoutOdds }} predicciones de hoy quedan fuera por no tener cuota.</span>
@@ -781,6 +782,7 @@
 <script setup>
 import { computed, reactive, ref, onMounted } from 'vue'
 import { useBankrollStore } from '../stores/bankroll.js'
+import { edgeLabel } from '../utils/edge.js'
 
 const store = useBankrollStore()
 
