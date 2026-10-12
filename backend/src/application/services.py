@@ -41,6 +41,9 @@ from src.application.poisson_service import expected_goals_for_fixture
 from src.timezone import to_bogota, today_start_bogota, yesterday_start_bogota
 
 
+ACCURACY_BEST_MARKET_MIN_SAMPLE = 3
+
+
 class DataService:
     """Application service that orchestrates reads and writes from PostgreSQL."""
 
@@ -840,6 +843,7 @@ class DataService:
             self.db.query(
                 func.date(func.timezone("America/Bogota", Match.match_date)).label("day"),
                 Sport.code.label("sport"),
+                Prediction.market.label("market"),
                 PredictionResult.is_successful.label("ok"),
             )
             .select_from(PredictionResult)
@@ -852,7 +856,7 @@ class DataService:
         )
 
         by_day: Dict[str, Dict[str, Any]] = {}
-        for day, sport, ok in rows:
+        for day, sport, market, ok in rows:
             key = day.isoformat() if hasattr(day, "isoformat") else str(day)
             d = by_day.setdefault(
                 key,
@@ -864,10 +868,16 @@ class DataService:
                     "tennisSuccessful": 0,
                     "footballTotal": 0,
                     "footballSuccessful": 0,
+                    "markets": {},
                 },
             )
             d["total"] += 1
             d["successful"] += 1 if ok else 0
+            m = d["markets"].setdefault(
+                (sport, market), {"market": market, "sport": sport, "total": 0, "successful": 0}
+            )
+            m["total"] += 1
+            m["successful"] += 1 if ok else 0
             if sport == "tennis":
                 d["tennisTotal"] += 1
                 d["tennisSuccessful"] += 1 if ok else 0
@@ -880,6 +890,16 @@ class DataService:
 
         days_out = []
         for d in sorted(by_day.values(), key=lambda x: x["date"], reverse=True):
+            markets = sorted(
+                (
+                    {**m, "failed": m["total"] - m["successful"], "accuracy": _pct(m["successful"], m["total"])}
+                    for m in d["markets"].values()
+                ),
+                key=lambda m: (-m["accuracy"], -m["total"], m["market"] or ""),
+            )
+            # A market needs a few predictions that day to be called "the best":
+            # 1 of 1 is 100% and says nothing.
+            eligible = [m for m in markets if m["total"] >= ACCURACY_BEST_MARKET_MIN_SAMPLE]
             days_out.append(
                 {
                     "date": d["date"],
@@ -891,9 +911,11 @@ class DataService:
                     "accuracyFootball": _pct(d["footballSuccessful"], d["footballTotal"]),
                     "tennisTotal": d["tennisTotal"],
                     "footballTotal": d["footballTotal"],
+                    "markets": markets,
+                    "bestMarket": eligible[0] if eligible else None,
                 }
             )
-        return {"days": days_out}
+        return {"days": days_out, "bestMarketMinSample": ACCURACY_BEST_MARKET_MIN_SAMPLE}
 
     # ------------------------------------------------------------------
     # Dashboard

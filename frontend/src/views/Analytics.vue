@@ -44,7 +44,19 @@
               Predicciones validadas, agrupadas por el día del partido (hora Bogotá).
             </p>
           </div>
-          <label class="text-sm font-medium text-slate-700 flex items-center gap-2 flex-shrink-0">
+          <div class="flex flex-wrap items-center gap-3 flex-shrink-0">
+          <label class="text-sm font-medium text-slate-700 flex items-center gap-2">
+            Mercado:
+            <select
+              v-model="marketFilter"
+              aria-label="Mercado"
+              class="px-2 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Todos</option>
+              <option v-for="m in marketOptions" :key="m.key" :value="m.key">{{ marketLabel(m) }}</option>
+            </select>
+          </label>
+          <label class="text-sm font-medium text-slate-700 flex items-center gap-2">
             Rango:
             <select
               v-model.number="rangeDays"
@@ -57,7 +69,25 @@
               <option :value="120">120 días</option>
             </select>
           </label>
+          </div>
         </div>
+
+        <p v-if="!marketFilter && bestCounts.length" class="text-xs text-slate-600 mb-3">
+          <span class="font-medium text-slate-700">Días como el mercado más acertado:</span>
+          <button
+            v-for="b in bestCounts"
+            :key="b.key"
+            type="button"
+            class="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700"
+            :title="'Ver solo ' + b.market"
+            @click="marketFilter = b.key"
+          >
+            {{ marketLabel(b) }} <span class="font-semibold">{{ b.days }}</span>
+          </button>
+          <span class="block mt-1 text-slate-500">
+            Cuenta solo mercados con al menos {{ minSample }} predicciones validadas ese día. Toca una fila para ver todos los mercados del día.
+          </span>
+        </p>
 
         <div class="overflow-x-auto" tabindex="0">
           <table class="min-w-full text-sm">
@@ -67,12 +97,20 @@
                 <th class="py-2 px-3">Accuracy</th>
                 <th class="py-2 px-3">Validadas</th>
                 <th class="py-2 px-3">Aciertos</th>
-                <th class="py-2 px-3">🎾 Tenis</th>
-                <th class="py-2 px-3">⚽ Fútbol</th>
+                <template v-if="!marketFilter">
+                  <th class="py-2 px-3">Mercado más acertado</th>
+                  <th class="py-2 px-3">🎾 Tenis</th>
+                  <th class="py-2 px-3">⚽ Fútbol</th>
+                </template>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="d in days" :key="d.date" class="border-t border-slate-100">
+              <template v-for="d in rows" :key="d.date">
+              <tr
+                class="border-t border-slate-100"
+                :class="!marketFilter ? 'cursor-pointer hover:bg-slate-50' : ''"
+                @click="toggleDay(d.date)"
+              >
                 <td class="py-2 pr-4 font-medium text-slate-900 whitespace-nowrap">{{ formatDay(d.date) }}</td>
                 <td class="py-2 px-3 whitespace-nowrap">
                   <div class="flex items-center gap-2">
@@ -84,6 +122,15 @@
                 </td>
                 <td class="py-2 px-3 text-slate-600">{{ d.total }}</td>
                 <td class="py-2 px-3 text-slate-600">{{ d.successful }}</td>
+                <template v-if="!marketFilter">
+                <td class="py-2 px-3 whitespace-nowrap">
+                  <template v-if="d.bestMarket">
+                    <span class="font-medium text-slate-900">{{ marketLabel(d.bestMarket) }}</span>
+                    <span class="ml-1" :class="textColor(d.bestMarket.accuracy)">{{ d.bestMarket.accuracy }}%</span>
+                    <span class="text-xs text-slate-500"> ({{ d.bestMarket.successful }}/{{ d.bestMarket.total }})</span>
+                  </template>
+                  <span v-else class="text-xs text-slate-500">muestra insuficiente</span>
+                </td>
                 <td class="py-2 px-3 text-slate-600 whitespace-nowrap">
                   <template v-if="d.tennisTotal">{{ d.accuracyTennis }}% <span class="text-xs text-slate-500">({{ d.tennisTotal }})</span></template>
                   <span v-else class="text-xs text-slate-500">–</span>
@@ -92,22 +139,38 @@
                   <template v-if="d.footballTotal">{{ d.accuracyFootball }}% <span class="text-xs text-slate-500">({{ d.footballTotal }})</span></template>
                   <span v-else class="text-xs text-slate-500">–</span>
                 </td>
+                </template>
               </tr>
+              <tr v-if="!marketFilter && openDay === d.date" class="bg-slate-50">
+                <td colspan="7" class="py-2 px-3">
+                  <div class="flex flex-wrap gap-2">
+                    <span
+                      v-for="m in d.markets"
+                      :key="m.sport + '|' + m.market"
+                      class="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-200 bg-white text-xs text-slate-700"
+                    >
+                      {{ marketLabel(m) }}
+                      <span class="font-semibold" :class="textColor(m.accuracy)">{{ m.accuracy }}%</span>
+                      <span class="text-slate-500">({{ m.successful }}/{{ m.total }})</span>
+                    </span>
+                  </div>
+                </td>
+              </tr>
+              </template>
             </tbody>
-            <tfoot v-if="days.length">
+            <tfoot v-if="rows.length">
               <tr class="border-t-2 border-slate-200 font-semibold text-slate-900">
-                <td class="py-2 pr-4">Total ({{ days.length }} días)</td>
+                <td class="py-2 pr-4">Total ({{ rows.length }} días)</td>
                 <td class="py-2 px-3">{{ rangeAccuracy != null ? rangeAccuracy + '%' : '–' }}</td>
                 <td class="py-2 px-3">{{ rangeTotal }}</td>
                 <td class="py-2 px-3">{{ rangeSuccessful }}</td>
-                <td class="py-2 px-3"></td>
-                <td class="py-2 px-3"></td>
+                <td v-if="!marketFilter" colspan="3" class="py-2 px-3"></td>
               </tr>
             </tfoot>
           </table>
         </div>
 
-        <p v-if="!days.length" class="text-sm text-slate-500 text-center py-8">
+        <p v-if="!rows.length" class="text-sm text-slate-500 text-center py-8">
           No hay predicciones validadas en este rango.
         </p>
       </div>
@@ -123,9 +186,51 @@ import KpiCard from '../components/KpiCard.vue'
 const analyticsStore = useAnalyticsStore()
 const rangeDays = ref(60)
 
+const marketFilter = ref('')
+const openDay = ref(null)
+
 const days = computed(() => analyticsStore.accuracyByDay || [])
-const rangeTotal = computed(() => days.value.reduce((n, d) => n + d.total, 0))
-const rangeSuccessful = computed(() => days.value.reduce((n, d) => n + d.successful, 0))
+const minSample = computed(() => analyticsStore.bestMarketMinSample)
+const marketKey = (m) => m.sport + '|' + m.market
+
+const marketOptions = computed(() => {
+  const seen = new Map()
+  for (const d of days.value) {
+    for (const m of d.markets || []) {
+      const key = marketKey(m)
+      const o = seen.get(key) || { key, market: m.market, sport: m.sport, total: 0 }
+      o.total += m.total
+      seen.set(key, o)
+    }
+  }
+  return [...seen.values()].sort((a, b) => b.total - a.total)
+})
+
+// With a market selected, each day shows that market's own numbers.
+const rows = computed(() => {
+  if (!marketFilter.value) return days.value
+  return days.value
+    .map((d) => {
+      const m = (d.markets || []).find((x) => marketKey(x) === marketFilter.value)
+      return m ? { date: d.date, total: m.total, successful: m.successful, accuracy: m.accuracy } : null
+    })
+    .filter(Boolean)
+})
+
+const bestCounts = computed(() => {
+  const counts = new Map()
+  for (const d of days.value) {
+    if (!d.bestMarket) continue
+    const key = marketKey(d.bestMarket)
+    const o = counts.get(key) || { key, market: d.bestMarket.market, sport: d.bestMarket.sport, days: 0 }
+    o.days += 1
+    counts.set(key, o)
+  }
+  return [...counts.values()].sort((a, b) => b.days - a.days)
+})
+
+const rangeTotal = computed(() => rows.value.reduce((n, d) => n + d.total, 0))
+const rangeSuccessful = computed(() => rows.value.reduce((n, d) => n + d.successful, 0))
 const rangeAccuracy = computed(() =>
   rangeTotal.value ? Math.round((rangeSuccessful.value / rangeTotal.value) * 1000) / 10 : null
 )
@@ -147,6 +252,13 @@ function textColor(acc) {
   if (acc >= 60) return 'text-green-700'
   if (acc >= 45) return 'text-amber-700'
   return 'text-red-700'
+}
+function marketLabel(m) {
+  return (m.sport === 'football' ? '⚽ ' : '🎾 ') + m.market
+}
+function toggleDay(date) {
+  if (marketFilter.value) return
+  openDay.value = openDay.value === date ? null : date
 }
 function formatDay(iso) {
   const d = new Date(iso + 'T00:00:00')

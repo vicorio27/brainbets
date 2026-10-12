@@ -5,6 +5,7 @@ export const useAnalyticsStore = defineStore('analytics', {
   state: () => ({
     accuracy: null,
     accuracyByDay: null,
+    bestMarketMinSample: 3,
     dashboard: null,
     loading: false,
     error: null
@@ -26,6 +27,7 @@ export const useAnalyticsStore = defineStore('analytics', {
       try {
         const { data } = await api.get('/analytics/accuracy-by-day', { params: { days } })
         this.accuracyByDay = data.days || []
+        if (data.bestMarketMinSample) this.bestMarketMinSample = data.bestMarketMinSample
       } catch (err) {
         this.accuracyByDay = []
       }
