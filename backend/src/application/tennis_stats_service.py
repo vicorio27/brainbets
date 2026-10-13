@@ -64,17 +64,42 @@ def _name_tokens_and_initials(name: str) -> Tuple[Set[str], Set[str]]:
     return tokens, initials
 
 
+def _given_initials(name: str, surname_tokens: Set[str]) -> Set[str]:
+    """Initials of a name's given names: its explicit initials plus the first
+    letter of every word that is not part of the shared surname.
+
+    'Cerundolo F.' -> {'f'}; 'Jan-Lennard Struff' (surname {'struff'}) -> {'j', 'l'}
+    """
+    tokens, initials = _name_tokens_and_initials(name)
+    return initials | {t[0] for t in tokens - surname_tokens}
+
+
+def names_compatible(a: str, b: str) -> bool:
+    """False when both names say who the person is and they disagree.
+
+    'M. Ymer' and 'Ymer E.' share a surname and nothing else: two different
+    players (brothers). A bare surname on either side cannot contradict.
+    """
+    tokens_a, _ = _name_tokens_and_initials(a)
+    tokens_b, _ = _name_tokens_and_initials(b)
+    shared = tokens_a & tokens_b
+    given_a, given_b = _given_initials(a, shared), _given_initials(b, shared)
+    return not given_a or not given_b or bool(given_a & given_b)
+
+
 def resolve_competitor_fuzzy(
     db: Session, sport_id: Any, name: str
 ) -> Optional[Competitor]:
     """Resolve a tennis competitor handling abbreviated provider names.
 
     Matching ladder: exact -> ilike -> normalized equality -> token-subset
-    (all word tokens of one name contained in the other). When several
-    token-subset candidates exist, initials from the abbreviated name break
-    the tie ('F. Cerundolo' picks Francisco over Juan Manuel). A unique best
-    candidate wins even with zero initial overlap ('J-L. Struff' still
-    resolves to Jan-Lennard Struff). Returns None when ambiguous.
+    (all word tokens of one name contained in the other). A candidate whose
+    given-name initials contradict the query is never returned: until
+    2026-10-13 'J. M. Cerundolo' resolved to 'Cerundolo F.' and 'M. Ymer' to
+    'Ymer E.' (same surname, different player), merging two players' Elo,
+    form and head-to-head. Among several compatible candidates the one
+    sharing most initials wins ('F. Cerundolo' picks Francisco over Juan
+    Manuel); a tie returns None, and the caller creates a new competitor.
     """
     competitor = (
         db.query(Competitor)
@@ -93,40 +118,38 @@ def resolve_competitor_fuzzy(
         return competitor
 
     target = _normalize_name(name)
-    if not target:
+    target_tokens, target_initials = _name_tokens_and_initials(name)
+    if not target or not target_tokens:
         return None
 
     candidates = db.query(Competitor).filter(Competitor.sport_id == sport_id).all()
-    normalized_map: Dict[Any, str] = {}
-    for candidate in candidates:
-        normalized_map[candidate.id] = _normalize_name(candidate.name)
-        if normalized_map[candidate.id] == target:
-            return candidate
+    return pick_candidate(name, candidates)
 
-    # Token-subset matching for abbreviated names.
+
+def pick_candidate(name: str, candidates: List[Any]) -> Optional[Any]:
+    """The fuzzy part of `resolve_competitor_fuzzy`, on plain objects with a `.name`."""
+    target = _normalize_name(name)
     target_tokens, target_initials = _name_tokens_and_initials(name)
-    if not target_tokens:
-        return None
 
-    subset_matches: List[Tuple[Competitor, int]] = []
+    def best_of(pool: List[Any]) -> Optional[Any]:
+        pool = [c for c in pool if names_compatible(name, c.name)]
+        if len(pool) <= 1:
+            return pool[0] if pool else None
+        scored = [(len(target_initials & _given_initials(c.name, target_tokens)), c) for c in pool]
+        top = max(score for score, _ in scored)
+        best = [c for score, c in scored if score == top]
+        return best[0] if len(best) == 1 else None
+
+    same = [c for c in candidates if _normalize_name(c.name) == target]
+    if same:
+        return best_of(same)
+
+    subset = []
     for candidate in candidates:
-        cand_normalized = normalized_map.get(candidate.id) or ""
         cand_tokens, _ = _name_tokens_and_initials(candidate.name)
-        if not cand_tokens:
-            continue
-        if target_tokens <= cand_tokens or cand_tokens <= target_tokens:
-            cand_initials = {t[0] for t in cand_normalized.split() if t}
-            score = len(target_initials & cand_initials)
-            subset_matches.append((candidate, score))
-
-    if not subset_matches:
-        return None
-    if len(subset_matches) == 1:
-        return subset_matches[0][0]
-
-    best_score = max(score for _, score in subset_matches)
-    best = [c for c, score in subset_matches if score == best_score]
-    return best[0] if len(best) == 1 else None
+        if cand_tokens and (target_tokens <= cand_tokens or cand_tokens <= target_tokens):
+            subset.append(candidate)
+    return best_of(subset)
 
 
 def _find_competitor_by_name(
