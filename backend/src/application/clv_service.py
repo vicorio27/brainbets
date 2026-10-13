@@ -115,6 +115,29 @@ def extract_odds_markets(markets: Any) -> Optional[Dict[str, Any]]:
         if parsed:
             out[key] = parsed
 
+    books = {key: prices for key, name in BOOK_MARKETS.items() if (prices := _book_prices(markets.get(name)))}
+    if books:
+        out["books"] = books
+
+    return out or None
+
+
+# Two-way markets kept per bookmaker (every book that prices both sides), to
+# compare prices across books at the same instant. Collected, not acted on.
+BOOK_MARKETS = {"matchWinner": "Home/Away", "set1Winner": "Home/Away (1st Set)"}
+
+
+def _book_prices(market: Any) -> Optional[Dict[str, Dict[str, float]]]:
+    if not isinstance(market, dict):
+        return None
+    home, away = market.get("Home"), market.get("Away")
+    if not isinstance(home, dict) or not isinstance(away, dict):
+        return None
+    out = {}
+    for book, raw in home.items():
+        p1, p2 = _to_float(raw), _to_float(away.get(book))
+        if p1 and p2 and p1 > 1.0 and p2 > 1.0:
+            out[book] = {"p1": p1, "p2": p2}
     return out or None
 
 
@@ -142,8 +165,9 @@ def split_line_markets(markets: Optional[Dict[str, Any]]):
     sent to the prediction engine, which has a hard size limit."""
     if not isinstance(markets, dict):
         return None, None
-    core = {k: v for k, v in markets.items() if k not in LINE_MARKETS}
-    lines = {k: v for k, v in markets.items() if k in LINE_MARKETS}
+    apart = set(LINE_MARKETS) | {"books"}
+    core = {k: v for k, v in markets.items() if k not in apart}
+    lines = {k: v for k, v in markets.items() if k in apart}
     return core or None, lines or None
 
 

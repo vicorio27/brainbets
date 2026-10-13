@@ -211,7 +211,7 @@ def test_line_markets_are_absent_when_the_feed_has_none():
 
     out = clv.extract_odds_markets(markets)
 
-    assert set(out) == {"matchWinner"}
+    assert set(out) == {"matchWinner", "books"}
 
 
 def test_line_market_prefers_the_bookmaker_that_has_a_balanced_line():
@@ -234,3 +234,18 @@ def test_main_line_is_none_when_no_line_is_near_evens():
 
     assert clv.main_line(ladder) is None
     assert clv.main_line(None) is None
+
+
+def test_books_keep_every_bookmaker_that_prices_both_sides():
+    markets = {
+        "Home/Away": {
+            "Home": {"Pncl": "1.60", "bet365": "1.57", "1xBet": "1.66"},
+            "Away": {"Pncl": "2.45", "bet365": "2.37"},
+        }
+    }
+
+    out = clv.extract_odds_markets(markets)
+    core, apart = clv.split_line_markets(out)
+
+    assert out["books"] == {"matchWinner": {"Pncl": {"p1": 1.60, "p2": 2.45}, "bet365": {"p1": 1.57, "p2": 2.37}}}
+    assert set(core) == {"matchWinner"} and set(apart) == {"books"}
