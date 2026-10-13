@@ -38,7 +38,7 @@ from src.presentation.schemas import (
     TennisMatch,
 )
 from src.application.poisson_service import expected_goals_for_fixture
-from src.timezone import to_bogota, today_start_bogota, yesterday_start_bogota
+from src.timezone import BOGOTA_TZ, to_bogota, today_start_bogota, yesterday_start_bogota
 
 
 ACCURACY_BEST_MARKET_MIN_SAMPLE = 3
@@ -479,10 +479,11 @@ class DataService:
         limit: int,
         sort: str,
     ):
-        from datetime import datetime, time, timezone
+        from datetime import datetime, time
 
-        start_dt = datetime.combine(date_from, time.min, tzinfo=timezone.utc)
-        end_dt = datetime.combine(date_to, time.max, tzinfo=timezone.utc)
+        # The requested dates are Bogota calendar days, not UTC days.
+        start_dt = datetime.combine(date_from, time.min, tzinfo=BOGOTA_TZ)
+        end_dt = datetime.combine(date_to, time.max, tzinfo=BOGOTA_TZ)
 
         query = (
             self.db.query(Match)

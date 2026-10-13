@@ -9,6 +9,7 @@ from src.presentation.schemas import (
 )
 from src.application.services import DataService
 from src.presentation.dependencies import get_data_service
+from src.timezone import BOGOTA_TZ
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 
@@ -38,9 +39,9 @@ def get_router() -> APIRouter:
         dt_from = None
         dt_to = None
         if date_from:
-            dt_from = datetime.combine(date_from, time.min, tzinfo=timezone.utc)
+            dt_from = datetime.combine(date_from, time.min, tzinfo=BOGOTA_TZ)
         if date_to:
-            dt_to = datetime.combine(date_to, time.max, tzinfo=timezone.utc)
+            dt_to = datetime.combine(date_to, time.max, tzinfo=BOGOTA_TZ)
         return service.get_predictions_history(
             sport=sport, date_from=dt_from, date_to=dt_to, status=status, match_id=match_id, name_query=q, skip=skip, limit=limit
         )
