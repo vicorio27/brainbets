@@ -9,6 +9,7 @@ export const useMatchesStore = defineStore('matches', {
     playerPointsPerSet: null,
     playerRecentBySurface: null,
     playerSurfaceCareer: null,
+    bestBets: null,
     playerSurfaceCareerQuery: '',
     loading: false,
     error: null
@@ -86,6 +87,14 @@ export const useMatchesStore = defineStore('matches', {
         if (data.query === this.playerSurfaceCareerQuery) this.playerSurfaceCareer = data
       } catch (err) {
         this.playerSurfaceCareer = null
+      }
+    },
+    async fetchBestBets() {
+      try {
+        const { data } = await api.get('/matches/best-bets')
+        this.bestBets = data
+      } catch (err) {
+        this.bestBets = null
       }
     },
     async fetchPlayerRecentBySurface() {

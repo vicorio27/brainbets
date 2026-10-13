@@ -83,6 +83,15 @@ def get_router() -> APIRouter:
         player with per-set point data. Optional `player` substring filter."""
         return service.get_player_points_per_set(player=player)
 
+    # Plain `def`: the point model replays the season on a cold cache.
+    @r.get("/best-bets")
+    def get_best_bets(service: DataService = Depends(get_data_service)):
+        """Both sides of Match Winner and Set 1 Winner for every tennis match
+        still to play, ranked by edge at the best bookmaker price."""
+        from src.application.best_bets_service import list_best_bets
+
+        return list_best_bets(service.db)
+
     @r.get("/player-surface-career")
     def get_player_surface_career(
         player: str = Query(..., min_length=2, max_length=60),

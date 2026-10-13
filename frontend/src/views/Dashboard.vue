@@ -63,7 +63,7 @@
       </div>
       <div class="mt-3 flex flex-wrap items-center gap-2">
         <router-link
-          :to="`/predictions/${pickOfDay.id}`"
+          :to="pickOfDay.link"
           class="inline-flex items-center gap-1 text-sm font-medium rounded-lg px-3 py-1.5" :class="POD_STYLE[pickOfDay.level].btn"
         >Ver detalle →</router-link>
         <button
@@ -382,6 +382,69 @@
 
     <!-- Bets view: highest-confidence picks across today's tennis matches -->
     <div v-else-if="activeTab === 'bets'">
+      <!-- Best bets still to play: every match, both sides, by price value -->
+      <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mb-4">
+        <h2 class="text-lg font-semibold text-slate-900">💰 Mejores apuestas por jugar</h2>
+        <p class="text-sm text-slate-500 mb-3">
+          Los dos lados de cada partido, en ganador del partido y primer set, ordenados por edge a la mejor cuota
+          entre las casas. "Justa" es la probabilidad de la casa de referencia sin su margen; el motor y el modelo de
+          saque y resto van al lado como segundas opiniones.
+        </p>
+        <p v-if="!bestBets.length" class="text-sm text-slate-500">No hay partidos por jugar con cuota.</p>
+        <div v-else class="overflow-x-auto" tabindex="0" role="region" aria-label="Mejores apuestas por jugar">
+          <table class="min-w-full text-sm">
+            <thead>
+              <tr class="text-left text-xs text-slate-500 uppercase tracking-wider">
+                <th class="py-2 pr-3">Apuesta</th>
+                <th class="py-2 px-3">Cuándo</th>
+                <th class="py-2 px-3">Mejor cuota</th>
+                <th class="py-2 px-3">Justa</th>
+                <th class="py-2 px-3">Edge</th>
+                <th class="py-2 px-3">Motor</th>
+                <th class="py-2 px-3">Saque/resto</th>
+                <th class="py-2 px-3">¼ Kelly</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="b in bestBetsShown" :key="b.matchId + b.market + b.pick" class="border-t border-slate-100">
+                <td class="py-2 pr-3">
+                  <span class="font-medium text-slate-900">{{ MARKET_ES[b.market] || b.market }} — {{ b.pick }}</span>
+                  <span class="block text-xs text-slate-500">{{ b.home }} vs {{ b.away }}<template v-if="b.tournament"> · {{ b.tournament }}</template></span>
+                </td>
+                <td class="py-2 px-3 text-slate-600 whitespace-nowrap">{{ betWhen(b) }}</td>
+                <td class="py-2 px-3 whitespace-nowrap">
+                  <span class="font-semibold text-slate-900">{{ b.bestOdds.toFixed(2) }}</span>
+                  <span class="ml-1 text-xs text-slate-600">{{ b.bestBook || '' }}</span>
+                  <span v-if="b.bestOdds > b.referenceOdds" class="block text-xs text-slate-500">ref. {{ b.referenceOdds.toFixed(2) }}</span>
+                </td>
+                <td class="py-2 px-3 text-slate-600">{{ pct(b.fairProbability) }}%</td>
+                <td class="py-2 px-3 whitespace-nowrap">
+                  <span class="font-semibold" :class="b.edge >= 0 ? 'text-green-700' : 'text-red-700'">{{ formatEdge(b.edge) }}</span>
+                  <span class="block mt-0.5"><span class="inline-block rounded-full px-2 py-0.5 text-xs font-medium" :class="BEST_BET_BADGE[b.level].cls">{{ BEST_BET_BADGE[b.level].text }}</span></span>
+                </td>
+                <td class="py-2 px-3 text-slate-600">{{ b.engineProbability != null ? pct(b.engineProbability) + '%' : '–' }}</td>
+                <td class="py-2 px-3 text-slate-600 whitespace-nowrap">
+                  {{ b.pointProbability != null ? pct(b.pointProbability) + '%' : '–' }}
+                  <span v-if="b.pointProbability != null && b.pointTrust < 0.5" class="text-xs text-slate-500" title="Poca historia de saque y resto de alguno de los dos">*</span>
+                </td>
+                <td class="py-2 px-3 text-slate-600">{{ b.kelly > 0 ? (b.kelly * 25).toFixed(1) + '%' : '0%' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <button
+          v-if="bestBets.length > 8"
+          type="button"
+          class="mt-3 text-sm font-medium text-blue-600 hover:text-blue-700"
+          @click="showAllBestBets = !showAllBestBets"
+        >{{ showAllBestBets ? 'Ver menos' : `Ver las ${bestBets.length}` }}</button>
+        <p class="text-xs text-slate-500 mt-3">
+          Verde: edge de 2% o más. "Confirma la cuota": el precio supera en más de 6% al de referencia, y en el
+          histórico eso casi siempre fue una cuota vieja. Ninguno de los dos modelos ha demostrado ganarle a la casa:
+          son información, no garantía.
+        </p>
+      </div>
+
       <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mb-4">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
@@ -1092,6 +1155,7 @@ const pickCandidates = computed(() => {
       away: p.awayName || m.player2 || 'J2',
       tournament: m.tournament || null,
       time: m.eventTime || p.eventTime || null,
+      link: `/predictions/${p.predictionId || p.id}`,
       odd, prob, edge, kelly,
       why: parts.join(' ')
     })
@@ -1099,7 +1163,56 @@ const pickCandidates = computed(() => {
   // Believable prices first, then best edge; among equals, the likelier pick.
   return out.sort((a, b) => (a.stale - b.stale) || (b.edge - a.edge) || (b.prob - a.prob))
 })
-const pickOfDay = computed(() => pickCandidates.value[0] || null)
+// --- Best bets still to play: both sides of every match, ranked by the backend ---
+const showAllBestBets = ref(false)
+const bestBets = computed(() => matchesStore.bestBets?.bets || [])
+const bestBetsShown = computed(() => bestBets.value.slice(0, showAllBestBets.value ? 60 : 8))
+const BEST_BET_BADGE = {
+  good: { text: 'precio sobre el justo', cls: 'bg-green-100 text-green-800' },
+  fair: { text: 'ventaja leve', cls: 'bg-yellow-100 text-yellow-800' },
+  check: { text: '🔎 confirma la cuota', cls: 'bg-amber-100 text-amber-800' },
+  poor: { text: 'sin ventaja', cls: 'bg-red-100 text-red-800' }
+}
+function betWhen(b) {
+  const day = b.date === getUtcTodayStr() ? 'hoy' : b.date.slice(8, 10) + '/' + b.date.slice(5, 7)
+  return `${day} ${b.time}`
+}
+function betOpinions(b) {
+  const out = []
+  if (b.engineProbability != null) out.push(`motor ${pct(b.engineProbability)}%`)
+  if (b.pointProbability != null) out.push(`modelo de saque y resto ${pct(b.pointProbability)}%` + (b.pointTrust < 0.5 ? ' (poca historia)' : ''))
+  return out
+}
+// The card is the top of that list; without it, the best of the engine's own picks for today.
+const pickOfDay = computed(() => {
+  const b = bestBets.value[0]
+  if (!b) return pickCandidates.value[0] || null
+  const parts = [
+    b.bestBook
+      ? `Mejor cuota: ${b.bestOdds.toFixed(2)} en ${b.bestBook}` + (b.bestOdds > b.referenceOdds ? ` (la de referencia paga ${b.referenceOdds.toFixed(2)}).` : '.')
+      : `Cuota ${b.bestOdds.toFixed(2)}.`,
+    `Probabilidad justa según la casa de referencia, sin su margen: ${pct(b.fairProbability)}% → edge ${formatEdge(b.edge)}.`
+  ]
+  const opinions = betOpinions(b)
+  if (opinions.length) parts.push(`Segundas opiniones: ${opinions.join(' · ')}.`)
+  if (b.level === 'check') parts.push('Esa cuota está muy por encima de la referencia: en el histórico eso casi siempre fue un precio viejo. Confírmala en la casa.')
+  if (b.level === 'poor') parts.push('Es el mejor edge disponible, no una ventaja.')
+  return {
+    level: b.level,
+    market: MARKET_ES[b.market] || b.market,
+    prediction: b.pick,
+    home: b.home,
+    away: b.away,
+    tournament: b.tournament,
+    time: betWhen(b),
+    link: b.predictionId ? `/predictions/${b.predictionId}` : `/predictions?matchId=${b.matchId}&date=${b.date}`,
+    odd: b.bestOdds,
+    prob: b.fairProbability,
+    edge: b.edge,
+    kelly: b.kelly,
+    why: parts.join(' ')
+  }
+})
 
 // --- Prediction reliability by player + surface (tab "Fiabilidad") ---
 const reliabilitySearch = ref('')
@@ -1230,6 +1343,7 @@ function loadToday() {
     matchesStore.fetchPredictionReliability(),
     matchesStore.fetchPlayerPointsPerSet(),
     matchesStore.fetchPlayerRecentBySurface(),
+    matchesStore.fetchBestBets(),
     predictionsStore.fetchLatest()
   ])
 }
