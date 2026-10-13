@@ -1333,6 +1333,13 @@ def get_router() -> APIRouter:
 
         Returns a normalized match list compatible with the n8n workflow's football parser.
         """
+        # Football is frozen (FOOTBALL_ENABLED=false in docker-compose): answer
+        # "no fixtures" without calling any provider. Collection then finds no
+        # football, so nothing downstream (odds, enrichment, predictions, live
+        # scores) has anything to work on. Nothing stored is touched.
+        if os.environ.get("FOOTBALL_ENABLED", "true").strip().lower() in ("false", "0", "no"):
+            return {"source": "frozen", "matches": []}
+
         token = os.environ.get("FOOTBALL_DATA_ORG_TOKEN", "")
         rapidapi_key = os.environ.get("RAPIDAPI_KEY", "")
 

@@ -169,8 +169,15 @@ def _counts(side: Dict[str, Any], other: Dict[str, Any]) -> Optional[Tuple[float
     return won, total, opp_total - opp_won, opp_total
 
 
-def build_point_rows(db: Session) -> Dict[str, List[Dict[str, Any]]]:
-    """Rows for the three point-model labs, from one chronological pass."""
+def build_point_rows(db: Session, include_backfill: bool = False) -> Dict[str, List[Dict[str, Any]]]:
+    """Rows for the three point-model labs, from one chronological pass.
+
+    `include_backfill` also scores matches whose prices were fetched afterwards
+    from the provider's historical feed (`odds_markets_backfill`). The daily
+    labs leave it off: their verdict only counts prices we collected ourselves
+    before the match. It exists to test the frozen model on a large sample of
+    past matches at once.
+    """
     from src.application.set1_lab_service import _set_games, _total_sets_odds, no_margin_probability
 
     out: Dict[str, List[Dict[str, Any]]] = {"pointsSet1": [], "pointsMatch": [], "pointsTotalSets": []}
@@ -200,9 +207,11 @@ def build_point_rows(db: Session) -> Dict[str, List[Dict[str, Any]]]:
         tour_serve = won_t / played_t if played_t >= MIN_TOUR_POINTS else DEFAULT_SERVE_WON
 
         markets = extra.get("odds_markets") or {}
+        if not (markets and m.created_at is not None and m.created_at < m.match_date):
+            markets = (extra.get("odds_markets_backfill") or {}) if include_backfill else {}
         played = [g for g in (_set_games(s) for s in sets) if g and g[0] != g[1]]
         won1, won2 = sum(1 for g in played if g[0] > g[1]), sum(1 for g in played if g[1] > g[0])
-        if markets and played and m.created_at is not None and m.created_at < m.match_date:
+        if markets and played:
             a = logs[sides["p1"]].rates(m.match_date, surface, tour_serve)
             b = logs[sides["p2"]].rates(m.match_date, surface, tour_serve)
             pa, pb = serve_point_probs(a, b, tour_serve)
@@ -214,7 +223,7 @@ def build_point_rows(db: Session) -> Dict[str, List[Dict[str, Any]]]:
                 if not p_market:
                     return None
                 return {"date": day, "pMarket": p_market, "won": won, "odds1": float(o1), "odds2": float(o2),
-                        "x": [trust * (_logit(p_model) - _logit(p_market))]}
+                        "x": [trust * (_logit(p_model) - _logit(p_market))], "pModel": p_model, "trust": trust}
 
             s1 = markets.get("set1Winner") or {}
             r = row(s, no_margin_probability(s1.get("p1"), s1.get("p2")), 1 if played[0][0] > played[0][1] else 0,
@@ -232,7 +241,7 @@ def build_point_rows(db: Session) -> Dict[str, List[Dict[str, Any]]]:
                 ou = _total_sets_odds(markets.get("numberOfSets") or {}, best_of)
                 if ou:
                     r = row(deciding_sets_prob(s, best_of), no_margin_probability(ou[0], ou[1]),
-                            1 if min(won1, won2) >= (2 if best_of >= 5 else 1) else 0, ou[0], ou[1])
+                            1 if min(won1, won2) >= 1 else 0, ou[0], ou[1])
                     if r:
                         out["pointsTotalSets"].append(r)
 

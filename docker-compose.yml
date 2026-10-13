@@ -73,6 +73,8 @@ services:
       - INTERNAL_API_KEY=${INTERNAL_API_KEY}
       - RAPIDAPI_KEY=${RAPIDAPI_KEY:-}
       - FOOTBALL_DATA_ORG_TOKEN=${FOOTBALL_DATA_ORG_TOKEN:-}
+      # Football is frozen. Set FOOTBALL_ENABLED=true in .env to collect it again.
+      - FOOTBALL_ENABLED=${FOOTBALL_ENABLED:-false}
       - TENNIS_API_KEY=${TENNIS_API_KEY:-}
     volumes:
       - ./storage:/storage

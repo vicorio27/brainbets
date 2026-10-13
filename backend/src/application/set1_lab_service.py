@@ -267,7 +267,8 @@ def build_all_rows(db: Session) -> Dict[str, List[Dict[str, Any]]]:
             if ou:
                 all_rows["totalSets"].append({
                     "date": day, "pMarket": no_margin_probability(ou[0], ou[1]),
-                    "won": 1 if min(won1, won2) >= (2 if best_of >= 5 else 1) else 0,  # "over" came in
+                    # "Over" is the loser taking a set: 3 sets in best of 3, 4 or 5 in best of 5.
+                    "won": 1 if min(won1, won2) >= 1 else 0,
                     "odds1": ou[0], "odds2": ou[1],
                     "x": _total_features(f1, f2),
                 })
