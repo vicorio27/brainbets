@@ -634,7 +634,7 @@ function surfaceLabel(s) {
 }
 
 function surfaceBarColor(s) {
-  return { clay: 'bg-orange-500', hard: 'bg-blue-500', grass: 'bg-green-500' }[s] || 'bg-slate-500'
+  return { clay: 'bg-orange-500', hard: 'bg-sky-500', grass: 'bg-green-500' }[s] || 'bg-slate-500'
 }
 
 function surfaceAgg(player, surf) {

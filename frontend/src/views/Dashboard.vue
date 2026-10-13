@@ -28,7 +28,7 @@
         ? 'bg-gradient-to-br from-blue-600 to-indigo-600'
         : 'bg-gradient-to-br from-slate-700 to-slate-800'"
     >
-      <div class="flex items-center gap-2 text-xs font-semibold text-sky-100 uppercase tracking-wider">
+      <div class="flex items-center gap-2 text-xs font-semibold text-blue-100 uppercase tracking-wider">
         <span aria-hidden="true">🏆</span>
         {{ pickOfDay.strong ? 'Apuesta del día' : 'Lo mejor de hoy (valor moderado)' }}
       </div>
@@ -37,29 +37,29 @@
           <div class="text-2xl sm:text-3xl font-bold leading-tight">
             {{ pickOfDay.market }} — {{ pickOfDay.prediction }}
           </div>
-          <div class="text-sky-100 text-sm mt-1">
+          <div class="text-blue-100 text-sm mt-1">
             {{ pickOfDay.home }} <span class="text-white/70">vs</span> {{ pickOfDay.away }}
             <span v-if="pickOfDay.tournament"> · {{ pickOfDay.tournament }}</span>
             <span v-if="pickOfDay.time && pickOfDay.time !== '00:00'"> · {{ pickOfDay.time }}</span>
           </div>
-          <div class="text-sky-100 text-sm mt-1.5">{{ pickOfDay.why }}</div>
+          <div class="text-blue-100 text-sm mt-1.5">{{ pickOfDay.why }}</div>
         </div>
         <div class="flex gap-5 sm:gap-6 flex-shrink-0">
           <div>
             <div class="text-2xl sm:text-3xl font-bold">+{{ (pickOfDay.edge * 100).toFixed(0) }}%</div>
-            <div class="text-[11px] text-sky-100 uppercase tracking-wide">edge</div>
+            <div class="text-[11px] text-blue-100 uppercase tracking-wide">edge</div>
           </div>
           <div>
             <div class="text-2xl sm:text-3xl font-bold">{{ pickOfDay.odd.toFixed(2) }}</div>
-            <div class="text-[11px] text-sky-100 uppercase tracking-wide">cuota</div>
+            <div class="text-[11px] text-blue-100 uppercase tracking-wide">cuota</div>
           </div>
           <div>
             <div class="text-2xl sm:text-3xl font-bold">{{ Math.round(pickOfDay.prob * 100) }}%</div>
-            <div class="text-[11px] text-sky-100 uppercase tracking-wide">prob</div>
+            <div class="text-[11px] text-blue-100 uppercase tracking-wide">prob</div>
           </div>
           <div>
             <div class="text-2xl sm:text-3xl font-bold">{{ (pickOfDay.kelly * 25).toFixed(1) }}%</div>
-            <div class="text-[11px] text-sky-100 uppercase tracking-wide">¼ Kelly</div>
+            <div class="text-[11px] text-blue-100 uppercase tracking-wide">¼ Kelly</div>
           </div>
         </div>
       </div>
@@ -1075,7 +1075,7 @@ function surfaceLabel(s) {
 }
 // Career record + Elo per surface: searched server-side (the whole historical
 // base is too big to preload), debounced on the same search box.
-const SURFACE_BAR = { hard: 'bg-blue-500', clay: 'bg-orange-500', grass: 'bg-green-500' }
+const SURFACE_BAR = { hard: 'bg-sky-500', clay: 'bg-orange-500', grass: 'bg-green-500' }
 function profileMetrics(profile) {
   const pc = (v) => (v == null ? '–' : Math.round(v * 100) + '%')
   const rank = (key) => {
