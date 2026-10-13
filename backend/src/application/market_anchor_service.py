@@ -14,7 +14,8 @@ anything with odds is therefore a blend
 
 where p_market is the implied probability with the margin removed and `w`
 (how much the model is trusted against the market) is fitted per market on
-settled bets by log-loss. With w = 0 the edge of every bet is minus the
+settled bets by log-loss -- and stays at 0 until that fit beats the price
+alone with a 95% CI above zero. With w = 0 the edge of every bet is minus the
 bookmaker's margin, which is the honest answer when the model adds nothing.
 
 The artifact lives next to calibration.json (no DB migration).
@@ -41,8 +42,8 @@ ANCHOR_DIR = os.environ.get("CALIBRATION_MODEL_DIR", "/storage/models")
 ANCHOR_PATH = os.path.join(ANCHOR_DIR, "market_anchor.json")
 
 # Until a market has enough settled bets its weight falls back to the sport,
-# then the global fit, then this: trust the market almost entirely.
-DEFAULT_MODEL_WEIGHT = 0.1
+# then the global fit, then this: the price alone.
+DEFAULT_MODEL_WEIGHT = 0.0
 # Per-market fits on fewer bets than this were pure noise on 2026-10-10
 # (Exact Set Score, n=95: 0.45 in sample, 0.0 when fitted on the first 70%).
 MIN_SAMPLES = 150
@@ -136,8 +137,21 @@ def fit_weight(rows: Sequence[Tuple[float, float, int]]) -> Optional[Dict[str, A
         penalty = PRIOR_STRENGTH * w * w * (market_only / n) * 0.1
         if loss + penalty < best_score - 1e-9:
             best_w, best_score = w, loss + penalty
+    # The model only gets a say once the blend is DEMONSTRABLY better than the
+    # price alone: the per-bet improvement must have a 95% CI above zero. A
+    # best-fit weight of 0.1-0.2 that is within noise still manufactured edges
+    # of +5-9% on every underdog pick (2026-10-13: house said 41%, we said 57%,
+    # it happened 33% of the time), so "probably helps a little" is not enough.
+    gains = [_log_loss([r], 0.0) - _log_loss([r], best_w) for r in rows]
+    mean = sum(gains) / n
+    se = math.sqrt(sum((g - mean) ** 2 for g in gains) / (n - 1) / n) if n > 1 else 0.0
+    demonstrated = best_w > 0 and mean - 1.96 * se > 0
     return {
-        "weight": best_w,
+        "weight": best_w if demonstrated else 0.0,
+        "candidateWeight": best_w,
+        "demonstrated": demonstrated,
+        "improvement": round(mean, 4),
+        "improvementCi": [round(mean - 1.96 * se, 4), round(mean + 1.96 * se, 4)],
         "samples": n,
         "logLossMarket": round(market_only / n, 4),
         "logLossModel": round(_log_loss(rows, 1.0) / n, 4),

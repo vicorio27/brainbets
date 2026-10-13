@@ -79,3 +79,13 @@ def test_anchored_probability_sits_between_model_and_market(monkeypatch):
     assert out["marketProbability"] == pytest.approx(0.5)
     assert out["probability"] == pytest.approx(0.55)
     assert out["edge"] == pytest.approx(0.10)
+
+
+def test_fit_weight_stays_at_zero_when_the_gain_is_within_noise():
+    # The model is a touch closer to the truth than the market, on few bets:
+    # a positive weight fits best, but nothing is demonstrated.
+    fit = ma.fit_weight(_rows(200, 0.56, 0.50, 0.55))
+
+    assert fit["weight"] == 0.0
+    assert fit["demonstrated"] is False
+    assert fit["improvementCi"][0] <= 0
