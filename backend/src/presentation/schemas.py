@@ -125,6 +125,18 @@ class Prediction(BaseModel):
     marketProbability: Optional[float] = None
     modelProbability: Optional[float] = None
     modelWeight: Optional[float] = None
+    # Best price for this pick across the bookmakers collected (Match Winner
+    # and Set 1 Winner), and the edge at that price against the fair
+    # probability above. `bestPriceGap` is how far it sits above the reference
+    # bookmaker's price: a large gap has usually been a stale price.
+    bestOdds: Optional[float] = None
+    bestBook: Optional[str] = None
+    bestEdge: Optional[float] = None
+    bestPriceGap: Optional[float] = None
+    # Serve/return point model's probability for the pick (second opinion,
+    # matches still to play only) and how much history backs it (0..1).
+    pointProbability: Optional[float] = None
+    pointTrust: Optional[float] = None
 
 class PredictionsResponse(BaseModel):
     generatedAt: str

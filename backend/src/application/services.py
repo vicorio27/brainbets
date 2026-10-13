@@ -591,6 +591,7 @@ class DataService:
             _odds_for_outcome(prediction.reasoning_data, prediction.predicted_outcome, home_name, away_name),
             (prediction.match.extra_data or {}).get("odds_markets") if prediction.match else None,
         ) or {}
+        best = self._best_price(prediction, home_name, away_name, anchored)
         return PredictionSchema(
             predictionId=str(prediction.id),
             matchId=prediction.match.external_id if prediction.match else None,
@@ -617,7 +618,44 @@ class DataService:
             marketProbability=round(anchored["marketProbability"], 4) if anchored else None,
             modelProbability=round(anchored["modelProbability"], 4) if anchored else None,
             modelWeight=anchored.get("modelWeight"),
+            **best,
         )
+
+    def _best_price(self, prediction: Prediction, home_name, away_name, anchored: Dict[str, Any]) -> Dict[str, Any]:
+        """Best bookmaker price for a winner pick, its edge against the fair
+        probability, and the point model's second opinion."""
+        market_key = {"Match Winner": "matchWinner", "Set 1 Winner": "set1Winner"}.get(prediction.market)
+        match = prediction.match
+        if not market_key or not match or not anchored:
+            return {}
+        side = "p1" if prediction.predicted_outcome == home_name else "p2" if prediction.predicted_outcome == away_name else None
+        if not side:
+            return {}
+        extra = match.extra_data or {}
+        out: Dict[str, Any] = {}
+        books = ((extra.get("odds_lines") or {}).get("books") or {}).get(market_key) or {}
+        prices = {b: v.get(side) for b, v in books.items() if isinstance(v, dict) and v.get(side)}
+        reference = ((extra.get("odds_markets") or {}).get(market_key) or {}).get(side)
+        if prices:
+            book, odds = max(prices.items(), key=lambda kv: kv[1])
+            out.update(
+                bestOdds=float(odds),
+                bestBook=book,
+                bestEdge=round(anchored["probability"] * float(odds) - 1.0, 4),
+                bestPriceGap=round(float(odds) / float(reference) - 1.0, 4) if reference else None,
+            )
+        if match.status != "FINISHED":
+            from src.application.point_model_service import match_prob, upcoming_set_probabilities
+
+            view = upcoming_set_probabilities(self.db).get(match.external_id)
+            if view:
+                s = view["set"] if side == "p1" else 1.0 - view["set"]
+                if market_key == "matchWinner":
+                    league = (match.league.name if match.league else "").lower()
+                    slam = any(k in league for k in ("australian open", "roland garros", "french open", "wimbledon", "us open"))
+                    s = match_prob(s, 5 if slam else 3)
+                out.update(pointProbability=round(s, 4), pointTrust=round(view["trust"], 2))
+        return out
 
     def get_latest_predictions(self) -> Optional[PredictionsResponse]:
         predictions = prediction_repository.list(self.db, limit=500)

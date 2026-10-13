@@ -1014,26 +1014,37 @@ const MARKET_ES = {
   'Total Sets': 'Total de sets',
   'Exact Set Score': 'Marcador exacto'
 }
-// The card always shows today's best edge among matches still to start, even
-// when that edge is negative, and says so with its colour:
-//   good  (green)  edge >= 5%      -> a bet with a real advantage
-//   fair  (yellow) 0% <= edge < 5% -> a slight one
+// The card always shows today's best bet among matches still to start, even
+// when its edge is negative, and says so with its colour. The edge is taken
+// at the BEST price across the bookmakers collected, against the fair
+// probability (the reference bookmaker without its margin):
+//   good  (green)  edge >= 2%      -> a price clearly above the fair one
+//   fair  (yellow) 0% <= edge < 2% -> a slight one
 //   poor  (red)    edge < 0%       -> the least bad of the day, not a recommendation
-const POD_GOOD_EDGE = 0.05
+// A price more than 6% above the reference has historically been a stale or
+// wrong quote (those bets lost), so it is shown yellow with a warning and
+// ranked below the believable ones.
+const POD_GOOD_EDGE = 0.02
+const POD_STALE_GAP = 0.06
 const POD_STYLE = {
   good: {
     card: 'from-blue-600 to-blue-700 text-white', sub: 'text-white/90', btn: 'bg-white/15 hover:bg-white/25',
-    icon: '🏆', title: 'Apuesta del día · ventaja clara'
+    icon: '🏆', title: 'Apuesta del día · precio por encima del justo'
   },
   fair: {
     card: 'from-yellow-300 to-amber-400 text-slate-900', sub: 'text-slate-800', btn: 'bg-black/10 hover:bg-black/20',
     icon: '⚖️', title: 'Lo mejor de hoy · ventaja leve'
+  },
+  check: {
+    card: 'from-yellow-300 to-amber-400 text-slate-900', sub: 'text-slate-800', btn: 'bg-black/10 hover:bg-black/20',
+    icon: '🔎', title: 'Lo mejor de hoy · confirma la cuota antes de apostar'
   },
   poor: {
     card: 'from-red-700 to-red-800 text-white', sub: 'text-white/90', btn: 'bg-white/15 hover:bg-white/25',
     icon: '⚠️', title: 'La menos mala de hoy · sin ventaja'
   }
 }
+const pct = (x) => Math.round(x * 100)
 const pickCandidates = computed(() => {
   const today = getUtcTodayStr()
   const nowHm = new Date().toLocaleTimeString('en-GB', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit' })
@@ -1047,38 +1058,46 @@ const pickCandidates = computed(() => {
     // The status lags the hourly score update: also trust the clock.
     const startsAt = m.eventTime || p.eventTime
     if (startsAt && startsAt !== '00:00' && startsAt <= nowHm) continue
-    const odd = comboLegOdd(p)
+    const refOdd = comboLegOdd(p)
     const prob = comboLegProb(p)
-    const edge = betEdge(p)
-    if (odd == null || odd <= 1 || prob == null || edge == null) continue
+    if (refOdd == null || refOdd <= 1 || prob == null || betEdge(p) == null) continue
+    const odd = p.bestOdds ?? refOdd
+    const edge = p.bestEdge ?? betEdge(p)
+    const stale = (p.bestPriceGap ?? 0) > POD_STALE_GAP
     const b = odd - 1
     const kelly = b > 0 ? Math.max(0, (b * prob - (1 - prob)) / b) : 0
-    const level = edge >= POD_GOOD_EDGE && !isSuspicious(edge) ? 'good' : edge >= 0 ? 'fair' : 'poor'
-    const house = p.marketProbability != null ? Math.round(p.marketProbability * 100) : Math.round((1 / odd) * 100)
-    let why
-    if (level === 'poor' && p.betEdge != null && !p.modelWeight) {
-      why = `La casa le da ${house}% (cuota ${odd.toFixed(2)}, sin su margen). El modelo todavía no ha demostrado saber más que la cuota, así que no cuenta en el edge: lo que queda es el margen de la casa, ${formatEdge(edge)}. Es el mejor edge de hoy, no una recomendación de apostar.`
-    } else if (p.betEdge != null) {
-      why = `La casa le da ${house}% (cuota ${odd.toFixed(2)}, sin su margen) y el modelo ${Math.round(p.modelProbability * 100)}%; mezclados dan ${Math.round(prob * 100)}% → edge ${formatEdge(edge)}.`
-        + (level === 'poor' ? ' Es el mejor edge de hoy, no una recomendación de apostar.' : '')
-    } else {
-      why = `El modelo le da ${Math.round(prob * 100)}% y la casa ${house}% (cuota ${odd.toFixed(2)}) → edge ${formatEdge(edge)}.`
-        + (isSuspicious(edge) ? ' Un edge tan alto suele ser el modelo equivocándose, no valor.' : '')
+    const level = edge < 0 ? 'poor' : stale ? 'check' : edge >= POD_GOOD_EDGE ? 'good' : 'fair'
+    const house = p.marketProbability != null ? pct(p.marketProbability) : pct(1 / refOdd)
+
+    const parts = []
+    parts.push(p.bestBook
+      ? `Mejor cuota: ${odd.toFixed(2)} en ${p.bestBook}` + (odd > refOdd ? ` (la de referencia paga ${refOdd.toFixed(2)}).` : '.')
+      : `Cuota ${odd.toFixed(2)}.`)
+    parts.push(`Probabilidad justa según la casa de referencia, sin su margen: ${house}% → edge ${formatEdge(edge)}.`)
+    const opinions = [`motor ${pct(p.modelProbability ?? p.confidence / 100)}%`]
+    if (p.pointProbability != null) {
+      opinions.push(`modelo de saque y resto ${pct(p.pointProbability)}%` + (p.pointTrust < 0.5 ? ' (poca historia)' : ''))
     }
+    parts.push(`Segundas opiniones: ${opinions.join(' · ')}.`)
+    if (level === 'check') parts.push('Esa cuota está muy por encima de la referencia: en el histórico eso casi siempre fue un precio viejo. Confírmala en la casa.')
+    if (level === 'poor') parts.push('Es el mejor edge de hoy, no una ventaja.')
+
     out.push({
       id: p.predictionId || p.id,
       level,
+      stale,
       market: MARKET_ES[p.market] || p.market,
       prediction: p.prediction,
       home: p.homeName || m.player1 || 'J1',
       away: p.awayName || m.player2 || 'J2',
       tournament: m.tournament || null,
       time: m.eventTime || p.eventTime || null,
-      odd, prob, edge, kelly, why
+      odd, prob, edge, kelly,
+      why: parts.join(' ')
     })
   }
-  // Best edge first; among equals, the likelier pick.
-  return out.sort((a, b) => (b.edge - a.edge) || (b.prob - a.prob))
+  // Believable prices first, then best edge; among equals, the likelier pick.
+  return out.sort((a, b) => (a.stale - b.stale) || (b.edge - a.edge) || (b.prob - a.prob))
 })
 const pickOfDay = computed(() => pickCandidates.value[0] || null)
 

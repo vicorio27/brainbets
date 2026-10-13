@@ -21,6 +21,7 @@ model helps. Specification frozen 2026-10-13, written before looking at any
 score; do not tune it against the post-freeze numbers.
 """
 import math
+import time
 from collections import defaultdict
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
@@ -252,4 +253,59 @@ def build_point_rows(db: Session, include_backfill: bool = False) -> Dict[str, L
             logs[sides["p2"]].add(m.match_date, surface, *away)
             tour[surface][0] += home[0] + away[0]
             tour[surface][1] += home[1] + away[1]
+    return out
+
+
+# ---- matches still to be played ---------------------------------------------
+_upcoming_cache: Dict[str, Any] = {"at": 0.0, "data": {}}
+
+
+def upcoming_set_probabilities(db: Session, ttl_seconds: int = 600) -> Dict[str, Dict[str, float]]:
+    """Point-model view of every match not yet finished, keyed by external id:
+    `{"set": P(player1 wins a set), "trust": 0..1}`. Shown next to a pick as a
+    second opinion; it has NOT beaten the price in testing. Cached in process."""
+    if time.time() - _upcoming_cache["at"] < ttl_seconds:
+        return _upcoming_cache["data"]
+    tennis = db.query(Sport).filter(Sport.code == "tennis").first()
+    out: Dict[str, Dict[str, float]] = {}
+    if tennis:
+        logs: Dict[Any, PlayerLog] = defaultdict(PlayerLog)
+        tour = defaultdict(lambda: [0.0, 0.0])
+        finished = (
+            db.query(Match)
+            .options(joinedload(Match.competitors))
+            .filter(Match.sport_id == tennis.id, Match.status == "FINISHED", Match.match_date >= HISTORY_START)
+            .order_by(Match.match_date.asc())
+            .all()
+        )
+        for m in finished:
+            sides = {("p1" if mc.side in ("home", "player1") else "p2"): mc.competitor_id for mc in m.competitors}
+            serve = ((m.extra_data or {}).get("score_stats") or {}).get("serve") or {}
+            home = _counts(serve.get("home") or {}, serve.get("away") or {})
+            away = _counts(serve.get("away") or {}, serve.get("home") or {})
+            if len(sides) == 2 and home and away:
+                surface = _surface(m.extra_data or {})
+                logs[sides["p1"]].add(m.match_date, surface, *home)
+                logs[sides["p2"]].add(m.match_date, surface, *away)
+                tour[surface][0] += home[0] + away[0]
+                tour[surface][1] += home[1] + away[1]
+        pending = (
+            db.query(Match)
+            .options(joinedload(Match.competitors))
+            .filter(Match.sport_id == tennis.id, Match.status.in_(("SCHEDULED", "LIVE")))
+            .all()
+        )
+        for m in pending:
+            sides = {("p1" if mc.side in ("home", "player1") else "p2"): mc.competitor_id for mc in m.competitors}
+            if len(sides) != 2 or not m.match_date:
+                continue
+            surface = _surface(m.extra_data or {})
+            won, played = tour[surface]
+            tour_serve = won / played if played >= MIN_TOUR_POINTS else DEFAULT_SERVE_WON
+            a = logs[sides["p1"]].rates(m.match_date, surface, tour_serve)
+            b = logs[sides["p2"]].rates(m.match_date, surface, tour_serve)
+            pa, pb = serve_point_probs(a, b, tour_serve)
+            out[m.external_id] = {"set": set_prob(pa, pb), "trust": min(1.0, min(a[2], b[2]) / RELIABLE_POINTS)}
+    _upcoming_cache["at"] = time.time()
+    _upcoming_cache["data"] = out
     return out
