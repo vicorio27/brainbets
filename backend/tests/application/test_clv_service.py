@@ -143,3 +143,94 @@ def test_compute_clv_none_without_both_prices():
     assert clv.compute_clv(None, 1.80) is None
     assert clv.compute_clv(1.80, None) is None
     assert clv.compute_clv(1.80, 1.0) is None  # degenerate closing price
+
+
+# ----------------------------------------------------------------------
+# Games totals and games handicaps (collected, not bet yet)
+# ----------------------------------------------------------------------
+
+def test_total_games_keeps_every_line_one_bookmaker_prices_on_both_sides():
+    markets = {
+        "Over/Under by Games in Match": {
+            "Over/Under by Games in Match Over": {
+                "22.5": {"Pncl": "1.93", "Marathon": "1.80"},
+                "23.5": {"Pncl": "2.19"},
+                "19.5": {"Marathon": "1.25"},
+            },
+            "Over/Under by Games in Match Under": {
+                "22.5": {"Pncl": "1.90", "Marathon": "1.95"},
+                "23.5": {"Marathon": "1.70"},
+                "19.5": {"Marathon": "3.60"},
+            },
+        }
+    }
+
+    out = clv.extract_odds_markets(markets)["totalGames"]
+
+    # Pncl has both sides only at 22.5; lines it prices on one side are dropped.
+    assert out == {"book": "Pncl", "lines": {"22.5": {"over": 1.93, "under": 1.90}}}
+
+
+def test_games_handicap_pairs_player1_line_with_the_opposite_player2_line():
+    markets = {
+        "Asian Handicap (Games)": {
+            "Asian Handicap (Games) Home": {
+                "-3.5": {"Pncl": "1.92"},
+                "-2.5": {"Pncl": "1.35"},
+                "+1.5": {"Pncl": "1.10"},
+            },
+            "Asian Handicap (Games) Away": {
+                "+3.5": {"Pncl": "1.94"},
+                "+2.5": {"Pncl": "1.36"},  # mislabelled in the feed: both sides at 1.35 is no market
+                "-1.5": {"Pncl": "7.00"},
+            },
+        }
+    }
+
+    out = clv.extract_odds_markets(markets)["gamesHandicap"]
+
+    assert out["book"] == "Pncl"
+    assert out["lines"] == {"-3.5": {"p1": 1.92, "p2": 1.94}, "+1.5": {"p1": 1.10, "p2": 7.00}}
+
+
+def test_line_market_falls_back_to_the_next_bookmaker_with_a_full_pair():
+    markets = {
+        "Over/Under (1st Set)": {
+            "Over/Under (1st Set) Over": {"9.5": {"Pncl": "1.66", "Betano": "1.57"}},
+            "Over/Under (1st Set) Under": {"9.5": {"Betano": "2.25"}},
+        }
+    }
+
+    out = clv.extract_odds_markets(markets)["set1TotalGames"]
+
+    assert out == {"book": "Betano", "lines": {"9.5": {"over": 1.57, "under": 2.25}}}
+
+
+def test_line_markets_are_absent_when_the_feed_has_none():
+    markets = {"Home/Away": {"Home": {"Pncl": "1.50"}, "Away": {"Pncl": "2.60"}}}
+
+    out = clv.extract_odds_markets(markets)
+
+    assert set(out) == {"matchWinner"}
+
+
+def test_line_market_prefers_the_bookmaker_that_has_a_balanced_line():
+    # Pncl comes first by priority but only files a moneyline-like ladder here.
+    markets = {
+        "Asian Handicap (Games)": {
+            "Asian Handicap (Games) Home": {"-0.5": {"Pncl": "1.10", "Marathon": "1.20"}, "-4.5": {"Marathon": "1.90"}},
+            "Asian Handicap (Games) Away": {"+0.5": {"Pncl": "7.00", "Marathon": "4.60"}, "+4.5": {"Marathon": "1.92"}},
+        }
+    }
+
+    out = clv.extract_odds_markets(markets)["gamesHandicap"]
+
+    assert out["book"] == "Marathon"
+    assert clv.main_line(out) == {"line": -4.5, "p1": 1.90, "p2": 1.92}
+
+
+def test_main_line_is_none_when_no_line_is_near_evens():
+    ladder = {"book": "Betano", "lines": {"-0.5": {"p1": 4.0, "p2": 1.24}, "+0.5": {"p1": 3.65, "p2": 1.2}}}
+
+    assert clv.main_line(ladder) is None
+    assert clv.main_line(None) is None

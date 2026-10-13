@@ -110,7 +110,118 @@ def extract_odds_markets(markets: Any) -> Optional[Dict[str, Any]]:
     if sb_out:
         out["setBetting"] = sb_out
 
+    for key, (name, kind) in LINE_MARKETS.items():
+        parsed = _line_market(markets.get(name), kind)
+        if parsed:
+            out[key] = parsed
+
     return out or None
+
+
+# Markets quoted on a ladder of lines (games totals and games handicaps). Not
+# predicted or bet yet: collected so a signal can later be tested against them.
+LINE_MARKETS = {
+    "totalGames": ("Over/Under by Games in Match", "total"),
+    "set1TotalGames": ("Over/Under (1st Set)", "total"),
+    "gamesHandicap": ("Asian Handicap (Games)", "handicap"),
+    "set1GamesHandicap": ("Asian Handicap (1st Set)", "handicap"),
+}
+# Both sides of a line from one bookmaker must add up to a plausible margin.
+# The feed mislabels the sign of some handicap lines; those pairs fall outside.
+MIN_LINE_OVERROUND = 1.0
+MAX_LINE_OVERROUND = 1.15
+# A real main line is priced near evens on both sides. Several bookmakers file
+# other ladders (set handicaps, moneyline-like prices) under the games names,
+# so the bookmaker is chosen by having such a line, not by priority alone.
+BALANCED_PRICE = (1.65, 2.30)
+
+
+def split_line_markets(markets: Optional[Dict[str, Any]]):
+    """(markets the engine prices, ladder markets). The ladders are stored
+    apart (`extra_data["odds_lines"]`) so they never ride along in the payload
+    sent to the prediction engine, which has a hard size limit."""
+    if not isinstance(markets, dict):
+        return None, None
+    core = {k: v for k, v in markets.items() if k not in LINE_MARKETS}
+    lines = {k: v for k, v in markets.items() if k in LINE_MARKETS}
+    return core or None, lines or None
+
+
+def _to_float(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _line_market(market: Any, kind: str) -> Optional[Dict[str, Any]]:
+    """Every line where ONE bookmaker prices both sides, from the first
+    bookmaker (in priority order) that has a balanced line; failing that,
+    from the first that has any line at all.
+
+    `total`    -> {"book", "lines": {"22.5": {"over", "under"}}}
+    `handicap` -> {"book", "lines": {"-3.5": {"p1", "p2"}}}, the line being
+                  player1's handicap (player2 holds the opposite one).
+    """
+    if not isinstance(market, dict):
+        return None
+    first, second = ("Over", "Under") if kind == "total" else ("Home", "Away")
+    side_a = next((v for k, v in market.items() if k.endswith(first) and isinstance(v, dict)), None)
+    side_b = next((v for k, v in market.items() if k.endswith(second) and isinstance(v, dict)), None)
+    if not side_a or not side_b:
+        return None
+
+    b_by_line = {}
+    for line, prices in side_b.items():
+        value = _to_float(line)
+        if value is not None and isinstance(prices, dict):
+            b_by_line[value] = prices
+
+    seen = [book for prices in side_a.values() if isinstance(prices, dict) for book in prices]
+    books = BOOKIE_PRIORITY + sorted(set(seen) - set(BOOKIE_PRIORITY))
+    names = ("over", "under") if kind == "total" else ("p1", "p2")
+    fallback = None
+    for book in books:
+        lines = {}
+        for line, prices in side_a.items():
+            value = _to_float(line)
+            if value is None or not isinstance(prices, dict):
+                continue
+            other = b_by_line.get(value if kind == "total" else -value)
+            a, b = _to_float(prices.get(book)), _to_float((other or {}).get(book))
+            if not a or not b or a <= 1.0 or b <= 1.0:
+                continue
+            if MIN_LINE_OVERROUND <= 1.0 / a + 1.0 / b <= MAX_LINE_OVERROUND:
+                lines[_line_key(value, kind)] = {names[0]: a, names[1]: b}
+        if any(is_balanced(*prices.values()) for prices in lines.values()):
+            return {"book": book, "lines": lines}
+        if lines and fallback is None:
+            fallback = {"book": book, "lines": lines}
+    return fallback
+
+
+def is_balanced(a: float, b: float) -> bool:
+    low, high = BALANCED_PRICE
+    return low <= a <= high and low <= b <= high
+
+
+def main_line(market: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The line to analyse or bet: the most even one, and only if it is
+    genuinely balanced. None means the ladder stored is not a usable market."""
+    best = None
+    for line, prices in ((market or {}).get("lines") or {}).items():
+        a, b = prices.values()
+        if not is_balanced(a, b):
+            continue
+        gap = abs(1.0 / a - 1.0 / b)
+        if best is None or gap < best[0]:
+            best = (gap, line, prices)
+    return {"line": float(best[1]), **best[2]} if best else None
+
+
+def _line_key(value: float, kind: str) -> str:
+    text = f"{value:g}"
+    return f"+{text}" if kind == "handicap" and value > 0 else text
 
 
 def _combine_odds(*decimals: Optional[float]) -> Optional[float]:
@@ -256,11 +367,13 @@ def capture_closing_odds(db: Session, window_hours: int = 6) -> Dict[str, Any]:
         parsed = extract_odds_markets(raw)
         if not parsed:
             continue
+        core, lines = split_line_markets(parsed)
         existing = m.extra_data or {}
         # A later snapshot that lost a market keeps the earlier price for it.
         m.extra_data = {
             **existing,
-            "odds_markets_closing": {**(existing.get("odds_markets_closing") or {}), **parsed},
+            "odds_markets_closing": {**(existing.get("odds_markets_closing") or {}), **(core or {})},
+            "odds_lines_closing": {**(existing.get("odds_lines_closing") or {}), **(lines or {})},
             "odds_markets_closing_at": now.isoformat(),
         }
         updated += 1

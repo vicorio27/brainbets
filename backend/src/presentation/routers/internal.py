@@ -255,6 +255,10 @@ def _insert_match(
         if match_date:
             match_date = localize_bogota(match_date)
 
+        from src.application.clv_service import split_line_markets
+
+        odds_core, odds_lines = split_line_markets(raw.get("oddsMarkets"))
+
         # Upsert match
         match = (
             db.query(Match)
@@ -284,7 +288,9 @@ def _insert_match(
                     "stats_data_quality": raw.get("statsDataQuality"),
                     "tournament_tier": raw.get("tournamentTier"),
                     "ground_type": raw.get("groundType"),
-                    "odds_markets": raw.get("oddsMarkets"),
+                    "odds_markets": odds_core,
+                    "odds_lines": odds_lines,
+                    "odds_lines_source": "live" if odds_lines is not None else None,
                     "expert_consensus": raw.get("expertConsensus"),
                 },
                 created_at=generated_at,
@@ -311,9 +317,9 @@ def _insert_match(
                 "stats_data_quality": raw.get("statsDataQuality"),
                 "tournament_tier": raw.get("tournamentTier"),
                 "ground_type": raw.get("groundType"),
-                "odds_markets": raw.get("oddsMarkets")
-                if raw.get("oddsMarkets") is not None
-                else existing_extra.get("odds_markets"),
+                "odds_markets": odds_core if odds_core is not None else existing_extra.get("odds_markets"),
+                "odds_lines": odds_lines if odds_lines is not None else existing_extra.get("odds_lines"),
+                "odds_lines_source": "live" if odds_lines is not None else existing_extra.get("odds_lines_source"),
                 "expert_consensus": raw.get("expertConsensus")
                 if raw.get("expertConsensus") is not None
                 else existing_extra.get("expert_consensus"),
