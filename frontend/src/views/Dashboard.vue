@@ -20,57 +20,55 @@
       </div>
     </div>
 
-    <!-- Pick of the day -->
+    <!-- Pick of the day: always the best edge available, coloured by how good it is -->
     <div
       v-if="pickOfDay"
-      class="rounded-2xl text-white p-5 sm:p-6 mb-6 shadow-lg"
-      :class="pickOfDay.strong
-        ? 'bg-gradient-to-br from-blue-600 to-indigo-600'
-        : 'bg-gradient-to-br from-slate-700 to-slate-800'"
+      class="rounded-2xl p-5 sm:p-6 mb-6 shadow-lg bg-gradient-to-br"
+      :class="POD_STYLE[pickOfDay.level].card"
     >
-      <div class="flex items-center gap-2 text-xs font-semibold text-blue-100 uppercase tracking-wider">
-        <span aria-hidden="true">🏆</span>
-        {{ pickOfDay.strong ? 'Apuesta del día' : 'Lo mejor de hoy (valor moderado)' }}
+      <div class="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider" :class="POD_STYLE[pickOfDay.level].sub">
+        <span aria-hidden="true">{{ POD_STYLE[pickOfDay.level].icon }}</span>
+        {{ POD_STYLE[pickOfDay.level].title }}
       </div>
       <div class="mt-2 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
         <div class="min-w-0">
           <div class="text-2xl sm:text-3xl font-bold leading-tight">
             {{ pickOfDay.market }} — {{ pickOfDay.prediction }}
           </div>
-          <div class="text-blue-100 text-sm mt-1">
-            {{ pickOfDay.home }} <span class="text-white/70">vs</span> {{ pickOfDay.away }}
+          <div class="text-sm mt-1" :class="POD_STYLE[pickOfDay.level].sub">
+            {{ pickOfDay.home }} <span class="opacity-70">vs</span> {{ pickOfDay.away }}
             <span v-if="pickOfDay.tournament"> · {{ pickOfDay.tournament }}</span>
             <span v-if="pickOfDay.time && pickOfDay.time !== '00:00'"> · {{ pickOfDay.time }}</span>
           </div>
-          <div class="text-blue-100 text-sm mt-1.5">{{ pickOfDay.why }}</div>
+          <div class="text-sm mt-1.5 max-w-3xl" :class="POD_STYLE[pickOfDay.level].sub">{{ pickOfDay.why }}</div>
         </div>
         <div class="flex gap-5 sm:gap-6 flex-shrink-0">
           <div>
-            <div class="text-2xl sm:text-3xl font-bold">+{{ (pickOfDay.edge * 100).toFixed(0) }}%</div>
-            <div class="text-[11px] text-blue-100 uppercase tracking-wide">edge</div>
+            <div class="text-2xl sm:text-3xl font-bold">{{ formatEdge(pickOfDay.edge) }}</div>
+            <div class="text-[11px] uppercase tracking-wide" :class="POD_STYLE[pickOfDay.level].sub">edge</div>
           </div>
           <div>
             <div class="text-2xl sm:text-3xl font-bold">{{ pickOfDay.odd.toFixed(2) }}</div>
-            <div class="text-[11px] text-blue-100 uppercase tracking-wide">cuota</div>
+            <div class="text-[11px] uppercase tracking-wide" :class="POD_STYLE[pickOfDay.level].sub">cuota</div>
           </div>
           <div>
             <div class="text-2xl sm:text-3xl font-bold">{{ Math.round(pickOfDay.prob * 100) }}%</div>
-            <div class="text-[11px] text-blue-100 uppercase tracking-wide">prob</div>
+            <div class="text-[11px] uppercase tracking-wide" :class="POD_STYLE[pickOfDay.level].sub">prob</div>
           </div>
           <div>
-            <div class="text-2xl sm:text-3xl font-bold">{{ (pickOfDay.kelly * 25).toFixed(1) }}%</div>
-            <div class="text-[11px] text-blue-100 uppercase tracking-wide">¼ Kelly</div>
+            <div class="text-2xl sm:text-3xl font-bold">{{ pickOfDay.kelly > 0 ? (pickOfDay.kelly * 25).toFixed(1) + '%' : '0%' }}</div>
+            <div class="text-[11px] uppercase tracking-wide" :class="POD_STYLE[pickOfDay.level].sub">{{ pickOfDay.kelly > 0 ? '¼ Kelly' : 'stake sugerido' }}</div>
           </div>
         </div>
       </div>
       <div class="mt-3 flex flex-wrap items-center gap-2">
         <router-link
           :to="`/predictions/${pickOfDay.id}`"
-          class="inline-flex items-center gap-1 text-sm font-medium bg-white/15 hover:bg-white/25 rounded-lg px-3 py-1.5"
+          class="inline-flex items-center gap-1 text-sm font-medium rounded-lg px-3 py-1.5" :class="POD_STYLE[pickOfDay.level].btn"
         >Ver detalle →</router-link>
         <button
           @click="activeTab = 'bets'"
-          class="inline-flex items-center gap-1 text-sm font-medium bg-white/15 hover:bg-white/25 rounded-lg px-3 py-1.5"
+          class="inline-flex items-center gap-1 text-sm font-medium rounded-lg px-3 py-1.5" :class="POD_STYLE[pickOfDay.level].btn"
         >Más apuestas</button>
       </div>
     </div>
@@ -79,7 +77,7 @@
       class="rounded-2xl border border-slate-200 bg-white p-5 mb-6 text-sm text-slate-500"
     >
       <span class="font-semibold text-slate-700">🏆 Apuesta del día:</span>
-      hoy ningún pick supera el filtro de valor + acuerdo con el mercado. Revisa "Apuestas" para ver todo.
+      no queda ningún partido de hoy por empezar que tenga cuota.
     </div>
 
     <!-- Tabs -->
@@ -1019,42 +1017,71 @@ const MARKET_ES = {
   'Total Sets': 'Total de sets',
   'Exact Set Score': 'Marcador exacto'
 }
-// Candidate single bets for today, scored by attention (value, rewarded by
-// confidence). `strong` = passes the strict value + model↔market filter.
+// The card always shows today's best edge among matches still to start, even
+// when that edge is negative, and says so with its colour:
+//   good  (green)  edge >= 5%      -> a bet with a real advantage
+//   fair  (yellow) 0% <= edge < 5% -> a slight one
+//   poor  (red)    edge < 0%       -> the least bad of the day, not a recommendation
+const POD_GOOD_EDGE = 0.05
+const POD_STYLE = {
+  good: {
+    card: 'from-blue-600 to-blue-700 text-white', sub: 'text-white/90', btn: 'bg-white/15 hover:bg-white/25',
+    icon: '🏆', title: 'Apuesta del día · ventaja clara'
+  },
+  fair: {
+    card: 'from-yellow-300 to-amber-400 text-slate-900', sub: 'text-slate-800', btn: 'bg-black/10 hover:bg-black/20',
+    icon: '⚖️', title: 'Lo mejor de hoy · ventaja leve'
+  },
+  poor: {
+    card: 'from-red-700 to-red-800 text-white', sub: 'text-white/90', btn: 'bg-white/15 hover:bg-white/25',
+    icon: '⚠️', title: 'La menos mala de hoy · sin ventaja'
+  }
+}
 const pickCandidates = computed(() => {
   const today = getUtcTodayStr()
+  const nowHm = new Date().toLocaleTimeString('en-GB', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit' })
   const out = []
   for (const p of predictionsStore.latest?.predictions || []) {
     if (String(p.sport).toLowerCase() !== 'tennis') continue
     if (PAUSED_BETTING_MARKETS.has(p.market)) continue
     if (p.eventDate && p.eventDate !== today) continue
+    const m = tennisMatchById.value[p.matchId] || {}
+    if (m.status && m.status !== 'SCHEDULED') continue
+    // The status lags the hourly score update: also trust the clock.
+    const startsAt = m.eventTime || p.eventTime
+    if (startsAt && startsAt !== '00:00' && startsAt <= nowHm) continue
     const odd = comboLegOdd(p)
     const prob = comboLegProb(p)
     const edge = betEdge(p)
     if (odd == null || odd <= 1 || prob == null || edge == null) continue
-    if (edge <= 0 || prob < 0.42) continue
-    const div = Math.abs(prob - 1 / odd)
-    if (div > 0.20) continue
     const b = odd - 1
     const kelly = b > 0 ? Math.max(0, (b * prob - (1 - prob)) / b) : 0
-    const m = tennisMatchById.value[p.matchId] || {}
+    const level = edge >= POD_GOOD_EDGE && !isSuspicious(edge) ? 'good' : edge >= 0 ? 'fair' : 'poor'
+    const house = p.marketProbability != null ? Math.round(p.marketProbability * 100) : Math.round((1 / odd) * 100)
+    let why
+    if (level === 'poor' && p.betEdge != null && !p.modelWeight) {
+      why = `La casa le da ${house}% (cuota ${odd.toFixed(2)}, sin su margen). El modelo todavía no ha demostrado saber más que la cuota, así que no cuenta en el edge: lo que queda es el margen de la casa, ${formatEdge(edge)}. Es el mejor edge de hoy, no una recomendación de apostar.`
+    } else if (p.betEdge != null) {
+      why = `La casa le da ${house}% (cuota ${odd.toFixed(2)}, sin su margen) y el modelo ${Math.round(p.modelProbability * 100)}%; mezclados dan ${Math.round(prob * 100)}% → edge ${formatEdge(edge)}.`
+        + (level === 'poor' ? ' Es el mejor edge de hoy, no una recomendación de apostar.' : '')
+    } else {
+      why = `El modelo le da ${Math.round(prob * 100)}% y la casa ${house}% (cuota ${odd.toFixed(2)}) → edge ${formatEdge(edge)}.`
+        + (isSuspicious(edge) ? ' Un edge tan alto suele ser el modelo equivocándose, no valor.' : '')
+    }
     out.push({
       id: p.predictionId || p.id,
-      score: edge * (0.55 + 0.45 * prob),
-      strong: edge >= 0.04 && div <= 0.12,
+      level,
       market: MARKET_ES[p.market] || p.market,
       prediction: p.prediction,
       home: p.homeName || m.player1 || 'J1',
       away: p.awayName || m.player2 || 'J2',
       tournament: m.tournament || null,
       time: m.eventTime || p.eventTime || null,
-      odd, prob, edge, kelly,
-      why: p.betEdge != null
-        ? `La casa le da ${Math.round(p.marketProbability * 100)}% (cuota ${odd.toFixed(2)}, sin su margen) y el modelo ${Math.round(p.modelProbability * 100)}%; mezclados dan ${Math.round(prob * 100)}% → edge ${formatEdge(edge)}.`
-        : `El modelo le da ${Math.round(prob * 100)}% y la casa ${Math.round((1 / odd) * 100)}% (cuota ${odd.toFixed(2)}) → edge ${formatEdge(edge)}.`
+      odd, prob, edge, kelly, why
     })
   }
-  return out.sort((a, b) => (b.strong - a.strong) || (b.score - a.score))
+  // Best edge first; among equals, the likelier pick.
+  return out.sort((a, b) => (b.edge - a.edge) || (b.prob - a.prob))
 })
 const pickOfDay = computed(() => pickCandidates.value[0] || null)
 
