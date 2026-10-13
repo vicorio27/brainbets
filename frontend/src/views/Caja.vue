@@ -866,7 +866,18 @@ const LAB_OPTIONS = [
     title: '¿Se puede anticipar mejor que la casa si el partido se alarga?',
     note: 'Aquí no importa quién gana sino qué tan parejo es: las señales son la diferencia entre los dos jugadores y la suma de ambos.',
     weightsHelp: 'Positivo: más de eso hace que el partido llegue al set decisivo más veces de lo que la cuota dice.'
-  }
+  },
+  ...[
+    ['pointsSet1', 'Puntos · primer set', 'el primer set'],
+    ['pointsMatch', 'Puntos · partido', 'el partido'],
+    ['pointsTotalSets', 'Puntos · total de sets', 'si el partido se alarga']
+  ].map(([key, label, what]) => ({
+    key,
+    label,
+    title: `Modelo de puntos de saque y resto: ¿le gana a la casa en ${what}?`,
+    note: 'Este es otro modelo: estima cuántos puntos gana cada jugador al saque contra ese rival (por superficie y dando más peso a lo reciente) y de ahí calcula sets y partido con las reglas del tenis. La prueba mide si acercar la cuota hacia ese modelo acierta más que la cuota sola.',
+    weightsHelp: 'Positivo: cuando este modelo ve a un jugador mejor que la cuota, la cuota se queda corta. Cerca de cero o negativo: el modelo no aporta.'
+  }))
 ]
 const labKey = ref('set1')
 const labOption = computed(() => LAB_OPTIONS.find((o) => o.key === labKey.value))
