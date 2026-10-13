@@ -258,6 +258,7 @@ def _insert_match(
         from src.application.clv_service import split_line_markets
 
         odds_core, odds_lines = split_line_markets(raw.get("oddsMarkets"))
+        started = False
 
         # Upsert match
         match = (
@@ -305,6 +306,16 @@ def _insert_match(
             # h2h/head_to_head value (even if null) to avoid burning API calls on
             # already-collected events.
             existing_extra = match.extra_data or {}
+            # Prices are a PRE-match record. Once the match is under way a
+            # re-collect brings in-play (or settled) prices: keep what we had.
+            started = match.status != "SCHEDULED" or (
+                match.match_date is not None and match.match_date <= datetime.now(timezone.utc)
+            )
+            if started:
+                if existing_extra.get("odds_markets") is not None:
+                    odds_core = None
+                if existing_extra.get("odds_lines") is not None:
+                    odds_lines = None
             match.extra_data = {
                 **existing_extra,
                 "surface": raw.get("surface"),
@@ -397,7 +408,7 @@ def _insert_match(
                     link.pre_match_form = None
                 if odds_key:
                     parsed_odds = _parse_odds(raw.get(odds_key))
-                    if parsed_odds is not None:
+                    if parsed_odds is not None and not (started and link.pre_match_odds is not None):
                         link.pre_match_odds = parsed_odds
                 link.extra_data = {**(link.extra_data or {}), **metadata}
             db.commit()
@@ -828,8 +839,11 @@ def get_router() -> APIRouter:
         )
         return summary
 
+    # Plain `def` on purpose: a minute of training in an `async def` froze the
+    # event loop, and the hourly validation that fires at the same 03:00 timed
+    # out against a backend that could not answer (gotcha #47).
     @r.post("/train/models")
-    async def train_models(
+    def train_models(
         payload: Dict[str, Any],
         db: Session = Depends(get_db),
     ):
@@ -871,8 +885,6 @@ def get_router() -> APIRouter:
                 logging.exception("[train] calibration failed")
                 result["calibration"] = {"status": "error", "error": str(e)}
         if payload.get("run_market_anchor", True):
-            # After calibration on purpose: the anchor blends the calibrated
-            # probability with the market's.
             from src.application.market_anchor_service import train_market_anchor
 
             try:

@@ -689,11 +689,24 @@
 
       <!-- Laboratorio: modelos en prueba contra la casa -->
       <div v-show="tab === 'laboratorio'" class="bg-white rounded-xl border border-slate-200 p-4 mb-5">
-        <h2 class="text-lg font-semibold text-slate-900">¿El saque ayuda a ganarle a la casa en el primer set?</h2>
+        <div class="flex flex-wrap gap-2 mb-3" role="tablist" aria-label="Mercado en prueba">
+          <button
+            v-for="opt in LAB_OPTIONS"
+            :key="opt.key"
+            type="button"
+            role="tab"
+            :aria-selected="labKey === opt.key"
+            class="px-3 py-1.5 rounded-lg text-sm font-medium border"
+            :class="labKey === opt.key ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'"
+            @click="labKey = opt.key"
+          >{{ opt.label }}</button>
+        </div>
+        <h2 class="text-lg font-semibold text-slate-900">{{ labOption.title }}</h2>
         <p class="text-xs text-slate-500 mb-3">
           Un modelo de prueba que suma a la cuota de la casa lo que sabemos de cada jugador (saque, resto, tiebreaks,
           descanso y carga de partidos). No cambia ninguna predicción: solo mide, con cada partido nuevo, si esas
           señales aciertan más que la cuota sola. Cuando lo demuestre, se incorpora al motor.
+          {{ labOption.note }}
         </p>
         <p v-if="!lab" class="text-sm text-slate-500">Todavía no hay reporte; se genera con el entrenamiento diario.</p>
         <template v-else>
@@ -753,7 +766,7 @@
           <div v-if="lab.weights" class="mt-4">
             <h3 class="text-sm font-semibold text-slate-900 mb-1">Qué señales pesan más hoy</h3>
             <p class="text-xs text-slate-500 mb-2">
-              Positivo: tener más de eso que el rival hace ganar el primer set más veces de lo que la cuota dice.
+              {{ labOption.weightsHelp }}
             </p>
             <ul class="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-1 text-sm">
               <li v-for="w in lab.weights" :key="w.feature" class="flex justify-between">
@@ -835,7 +848,29 @@ const tabs = computed(() => [
 ])
 
 // Shadow model under test against the bookmaker (set1_lab_service).
-const lab = computed(() => store.lab?.set1 || null)
+const LAB_OPTIONS = [
+  {
+    key: 'set1', label: 'Primer set',
+    title: '¿El saque ayuda a ganarle a la casa en el primer set?',
+    note: '',
+    weightsHelp: 'Positivo: tener más de eso que el rival hace ganar el primer set más veces de lo que la cuota dice.'
+  },
+  {
+    key: 'matchWinner', label: 'Ganador del partido',
+    title: '¿Esas mismas señales le ganan a la casa en el ganador del partido?',
+    note: 'Un vistazo informal anterior salió en contra; queda en seguimiento para tener la respuesta con datos limpios.',
+    weightsHelp: 'Positivo: tener más de eso que el rival hace ganar el partido más veces de lo que la cuota dice.'
+  },
+  {
+    key: 'totalSets', label: 'Total de sets',
+    title: '¿Se puede anticipar mejor que la casa si el partido se alarga?',
+    note: 'Aquí no importa quién gana sino qué tan parejo es: las señales son la diferencia entre los dos jugadores y la suma de ambos.',
+    weightsHelp: 'Positivo: más de eso hace que el partido llegue al set decisivo más veces de lo que la cuota dice.'
+  }
+]
+const labKey = ref('set1')
+const labOption = computed(() => LAB_OPTIONS.find((o) => o.key === labKey.value))
+const lab = computed(() => store.lab?.[labKey.value] || null)
 const labRows = computed(() => {
   if (!lab.value) return []
   return [

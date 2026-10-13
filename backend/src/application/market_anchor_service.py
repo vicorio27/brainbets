@@ -29,11 +29,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session, joinedload
 
-from src.application.calibration_service import (
-    _NO_CALIBRATED_EV_MARKETS,
-    _odds_for_outcome,
-    calibrated_probability,
-)
+from src.application.calibration_service import _odds_for_outcome
 from src.domain.models import Match, MatchCompetitor, Prediction, PredictionResult, Sport
 
 logger = logging.getLogger(__name__)
@@ -101,15 +97,19 @@ def market_probability(
 
 
 def model_probability(sport: Optional[str], market: Optional[str], confidence: Optional[int]) -> Optional[float]:
-    """The model's own probability: calibrated, except for markets whose
-    confidence is not a binary pick (Exact Set Score keeps the raw value)."""
+    """The engine's own probability for its pick in THIS match (its
+    confidence is that probability, see `predictions.probabilities`).
+
+    Not the calibrated one: the calibration curve maps a confidence band to
+    that market's historical hit rate, which is nearly constant (Set 1 Winner
+    ~64-66% whatever the match) and knows nothing about the price. Blended
+    with the market it lifted every underdog pick. If the engine is ever to
+    earn weight against the price, it has to be with what it says about the
+    match, not with a base rate.
+    """
     if confidence is None:
         return None
-    raw = max(0.01, min(0.99, int(confidence) / 100.0))
-    if (market or "").strip().lower() in _NO_CALIBRATED_EV_MARKETS:
-        return raw
-    calibrated = calibrated_probability(sport, market, confidence)
-    return calibrated if calibrated is not None else raw
+    return max(0.01, min(0.99, int(confidence) / 100.0))
 
 
 def _log_loss(rows: Sequence[Tuple[float, float, int]], w: float) -> float:

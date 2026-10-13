@@ -610,13 +610,14 @@
       </div>
 
       <!-- Sport split -->
-      <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div v-else class="grid grid-cols-1 gap-8" :class="footballMatches.length ? 'lg:grid-cols-2' : ''">
         <div>
           <h2 class="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
             <span>🎾</span> Tenis
             <span class="text-sm font-normal text-slate-500">({{ tennisMatches.length }})</span>
           </h2>
-          <div class="space-y-4">
+          <!-- Without football the tennis cards use both columns -->
+          <div :class="footballMatches.length ? 'space-y-4' : 'grid grid-cols-1 lg:grid-cols-2 gap-4 items-start'">
             <MatchCard
               v-for="match in tennisMatches"
               :key="match.matchId"
@@ -635,7 +636,7 @@
           </div>
         </div>
 
-        <div>
+        <div v-if="footballMatches.length">
           <h2 class="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
             <span>⚽</span> Fútbol
             <span class="text-sm font-normal text-slate-500">({{ footballMatches.length }})</span>
@@ -648,12 +649,6 @@
               sport="football"
               :best-confidence="bestConfidenceByMatch[match.matchId] ?? null"
               :is-top="top3MatchIds.has(match.matchId)"
-            />
-            <EmptyState
-              v-if="!footballMatches.length"
-              icon="⚽"
-              title="No hay partidos de fútbol"
-              message="No hay partidos disponibles para hoy."
             />
           </div>
         </div>
@@ -859,6 +854,8 @@ const bettingRecs = computed(() => {
     if (String(p.sport).toLowerCase() !== 'tennis') continue
     if (PAUSED_BETTING_MARKETS.has(p.market)) continue
     if (p.eventDate && p.eventDate !== today) continue
+    // No price, no bet: markets without odds (Total Aces) stay in Predicciones.
+    if (betEdge(p) == null) continue
     const conf = p.calibratedConfidence ?? p.confidence
     const m = tennisMatchById.value[p.matchId] || {}
     if (!byMatch[p.matchId]) {

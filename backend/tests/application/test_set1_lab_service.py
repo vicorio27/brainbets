@@ -78,3 +78,30 @@ def test_verdict_waits_for_untouched_matches():
     assert lab.verdict_for(unclear)["level"] == "no_demostrado"
     worse = {"matches": lab.MIN_POST_FREEZE, "improvementCiLow": -0.05, "improvementCiHigh": -0.01}
     assert lab.verdict_for(worse)["level"] == "descartado"
+
+
+def test_total_sets_odds_follow_the_format():
+    board = {"2": 1.60, "3": 2.40, "4": 3.0, "5": 6.0}
+
+    assert lab._total_sets_odds({"2": 1.60, "3": 2.40}, 3) == (2.40, 1.60)
+    over, under = lab._total_sets_odds(board, 5)
+    assert under == 2.40 and over == pytest.approx(2.0)  # "4 or 5 sets" combined
+    assert lab._total_sets_odds({"3": 2.40}, 3) is None
+
+
+def test_total_sets_features_do_not_depend_on_who_is_listed_first():
+    a = {"hold": 0.85, "brk": 0.20, "fs": 0.75, "aces": 9.0, "load": 2.0, "rest": 1.0}
+    b = {"hold": 0.78, "brk": 0.26, "fs": 0.70, "aces": 4.0, "load": 4.0, "rest": 3.0}
+
+    assert lab._total_features(a, b) == lab._total_features(b, a)
+    assert len(lab._total_features(a, b)) == len(lab.TOTAL_FEATURES)
+
+
+def test_every_lab_has_labels_for_its_signals_and_its_own_file():
+    files = {spec["file"] for spec in lab.LABS.values()}
+
+    assert len(files) == len(lab.LABS)
+    for spec in lab.LABS.values():
+        assert set(spec["features"]) <= set(spec["labels"])
+    # The Set 1 freeze predates the others and must not move with them.
+    assert lab.LABS["set1"]["frozenAt"] == lab.FROZEN_AT

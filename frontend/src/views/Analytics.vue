@@ -100,7 +100,7 @@
                 <template v-if="!marketFilter">
                   <th class="py-2 px-3">Mercado más acertado</th>
                   <th class="py-2 px-3">🎾 Tenis</th>
-                  <th class="py-2 px-3">⚽ Fútbol</th>
+                  <th v-if="hasFootball" class="py-2 px-3">⚽ Fútbol</th>
                 </template>
               </tr>
             </thead>
@@ -135,7 +135,7 @@
                   <template v-if="d.tennisTotal">{{ d.accuracyTennis }}% <span class="text-xs text-slate-500">({{ d.tennisTotal }})</span></template>
                   <span v-else class="text-xs text-slate-500">–</span>
                 </td>
-                <td class="py-2 px-3 text-slate-600 whitespace-nowrap">
+                <td v-if="hasFootball" class="py-2 px-3 text-slate-600 whitespace-nowrap">
                   <template v-if="d.footballTotal">{{ d.accuracyFootball }}% <span class="text-xs text-slate-500">({{ d.footballTotal }})</span></template>
                   <span v-else class="text-xs text-slate-500">–</span>
                 </td>
@@ -191,6 +191,8 @@ const openDay = ref(null)
 
 const days = computed(() => analyticsStore.accuracyByDay || [])
 const minSample = computed(() => analyticsStore.bestMarketMinSample)
+// The football column only shows when the range has football in it.
+const hasFootball = computed(() => days.value.some((d) => d.footballTotal))
 const marketKey = (m) => m.sport + '|' + m.market
 
 const marketOptions = computed(() => {

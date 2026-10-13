@@ -73,6 +73,32 @@ BET_EDGE = 0.03
 MIN_POST_FREEZE = 300
 HISTORY_START = "2026-07-20"  # serve statistics exist from late July 2026
 
+# ---- other markets under the same test (added 2026-10-13) -----------------
+# Same method, same promotion bar, their own freeze date: these specs were
+# written WITHOUT looking at how they score, so everything after the freeze is
+# a clean test. (An earlier informal look at Match Winner with the Set 1
+# signals made things worse; it is tracked anyway so the answer is on record.)
+# Total Sets is not about who wins but about how even the match is, so its
+# signals are symmetric: gaps between the players and sums of both.
+TOTAL_FEATURES = ("gapHold", "gapBrk", "gapFs", "sumHold", "sumAces", "sumLoad", "minRest")
+TOTAL_FEATURE_LABELS = {
+    "gapHold": "Diferencia de juegos de saque ganados",
+    "gapBrk": "Diferencia de juegos de resto ganados",
+    "gapFs": "Diferencia de puntos con 1er saque",
+    "sumHold": "Saque de ambos (suma)",
+    "sumAces": "Aces de ambos (suma)",
+    "sumLoad": "Partidos recientes de ambos (suma)",
+    "minRest": "Descanso del que menos descansó",
+}
+LABS = {
+    "set1": {"market": "Set 1 Winner", "frozenAt": FROZEN_AT, "features": FEATURES, "labels": FEATURE_LABELS,
+             "file": "set1_lab.json"},
+    "matchWinner": {"market": "Match Winner", "frozenAt": "2026-10-13", "features": FEATURES, "labels": FEATURE_LABELS,
+                    "file": "match_winner_lab.json"},
+    "totalSets": {"market": "Total Sets", "frozenAt": "2026-10-13", "features": TOTAL_FEATURES,
+                  "labels": TOTAL_FEATURE_LABELS, "file": "total_sets_lab.json"},
+}
+
 
 class _Totals:
     """Running per-player totals from matches already played."""
@@ -128,11 +154,46 @@ def _set_games(row: Any) -> Optional[Tuple[int, int]]:
         return None
 
 
+def _total_features(f1: Dict[str, float], f2: Dict[str, float]) -> List[float]:
+    return [
+        abs(f1["hold"] - f2["hold"]),
+        abs(f1["brk"] - f2["brk"]),
+        abs(f1["fs"] - f2["fs"]),
+        f1["hold"] + f2["hold"],
+        f1["aces"] + f2["aces"],
+        f1["load"] + f2["load"],
+        min(f1["rest"], f2["rest"]),
+    ]
+
+
+def _total_sets_odds(number_of_sets: Dict[str, Any], best_of: int) -> Optional[Tuple[float, float]]:
+    """(over, under) decimal odds for the deciding-sets line: 2.5 in best of 3, 3.5 in best of 5."""
+    def price(key: str) -> Optional[float]:
+        try:
+            value = float(number_of_sets.get(key))
+        except (TypeError, ValueError):
+            return None
+        return value if value > 1.0 else None
+
+    if best_of >= 5:
+        four, five, under = price("4"), price("5"), price("3")
+        over = 1.0 / (1.0 / four + 1.0 / five) if four and five else None
+    else:
+        over, under = price("3"), price("2")
+    return (over, under) if over and under and over > 1.0 else None
+
+
 def build_rows(db: Session) -> List[Dict[str, Any]]:
     """One row per finished match with pre-match Set 1 odds and a first set."""
+    return build_all_rows(db)["set1"]
+
+
+def build_all_rows(db: Session) -> Dict[str, List[Dict[str, Any]]]:
+    """Rows for every lab in `LABS`, from one pass over the finished matches."""
+    all_rows: Dict[str, List[Dict[str, Any]]] = {key: [] for key in LABS}
     tennis = db.query(Sport).filter(Sport.code == "tennis").first()
     if not tennis:
-        return []
+        return all_rows
     matches = (
         db.query(Match)
         .options(joinedload(Match.competitors))
@@ -143,7 +204,7 @@ def build_rows(db: Session) -> List[Dict[str, Any]]:
     )
 
     totals: Dict[Any, _Totals] = defaultdict(_Totals)
-    rows: List[Dict[str, Any]] = []
+    rows = all_rows["set1"]
     for m in matches:
         sides = {
             ("p1" if mc.side in ("home", "player1") else "p2"): mc.competitor_id
@@ -173,6 +234,33 @@ def build_rows(db: Session) -> List[Dict[str, Any]]:
                     "x": [f1[k] - f2[k] for k in FEATURES],
                 }
             )
+
+        # Match-level labs need a completed match: a winner with 2 (or 3) sets.
+        played = [g for g in (_set_games(s) for s in sets) if g and g[0] != g[1]]
+        won1, won2 = sum(1 for g in played if g[0] > g[1]), sum(1 for g in played if g[1] > g[0])
+        if collected_before_start and won1 != won2 and max(won1, won2) >= 2:
+            day = m.match_date.astimezone(BOGOTA_TZ).date().isoformat()
+            markets = extra.get("odds_markets") or {}
+            f1, f2 = player_features(t1, m.match_date), player_features(t2, m.match_date)
+
+            mw = markets.get("matchWinner") or {}
+            p_match = no_margin_probability(mw.get("p1"), mw.get("p2"))
+            if p_match:
+                all_rows["matchWinner"].append({
+                    "date": day, "pMarket": p_match, "won": 1 if won1 > won2 else 0,
+                    "odds1": float(mw["p1"]), "odds2": float(mw["p2"]),
+                    "x": [f1[k] - f2[k] for k in FEATURES],
+                })
+
+            best_of = 5 if max(won1, won2) >= 3 else 3
+            ou = _total_sets_odds(markets.get("numberOfSets") or {}, best_of)
+            if ou:
+                all_rows["totalSets"].append({
+                    "date": day, "pMarket": no_margin_probability(ou[0], ou[1]),
+                    "won": 1 if min(won1, won2) >= (2 if best_of >= 5 else 1) else 0,  # "over" came in
+                    "odds1": ou[0], "odds2": ou[1],
+                    "x": _total_features(f1, f2),
+                })
 
         serve = stats.get("serve") or {}
         for side, t, key in (("p1", t1, "home"), ("p2", t2, "away")):
@@ -207,7 +295,7 @@ def build_rows(db: Session) -> List[Dict[str, Any]]:
                     t.tb_w += 1 if mine == 7 else 0
             t.last = m.match_date
             t.recent.append(m.match_date)
-    return rows
+    return all_rows
 
 
 def _logit(p: float) -> float:
@@ -312,15 +400,23 @@ def verdict_for(post_freeze: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def run_lab(db: Session) -> Dict[str, Any]:
-    """Recompute the whole report and store it (called by the daily training)."""
-    rows = build_rows(db)
+    """Recompute every lab's report and store it (called by the daily
+    training). Returns the Set 1 report; the others are read back with
+    `get_lab_report(key)`."""
+    all_rows = build_all_rows(db)
+    reports = {key: _report(key, all_rows[key]) for key in LABS}
+    return reports["set1"]
+
+
+def _report(key: str, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    spec = LABS[key]
     preds = walk_forward(rows)
-    post = [(r, p) for r, p in zip(rows, preds) if r["date"] > FROZEN_AT]
+    post = [(r, p) for r, p in zip(rows, preds) if r["date"] > spec["frozenAt"]]
     report = {
         "version": 1,
         "trained_at": datetime.now(timezone.utc).isoformat(),
-        "market": "Set 1 Winner",
-        "frozenAt": FROZEN_AT,
+        "market": spec["market"],
+        "frozenAt": spec["frozenAt"],
         "rows": len(rows),
         "allWalkForward": score(rows, preds),
         "postFreeze": score([r for r, _ in post], [p for _, p in post]),
@@ -334,18 +430,22 @@ def run_lab(db: Session) -> Dict[str, Any]:
         w = fit_offset_logistic((x - x.mean(0)) / (x.std(0) + 1e-9), y, off)
         # Per standard deviation of the player1-minus-player2 difference.
         report["weights"] = [
-            {"feature": f, "label": FEATURE_LABELS[f], "weight": round(float(v), 3)}
-            for f, v in sorted(zip(FEATURES, w), key=lambda kv: -abs(kv[1]))
+            {"feature": f, "label": spec["labels"][f], "weight": round(float(v), 3)}
+            for f, v in sorted(zip(spec["features"], w), key=lambda kv: -abs(kv[1]))
         ]
     os.makedirs(LAB_DIR, exist_ok=True)
-    with open(LAB_PATH, "w") as f:
+    with open(os.path.join(LAB_DIR, spec["file"]), "w") as f:
         json.dump(report, f, indent=2)
     return report
 
 
-def get_lab_report() -> Optional[Dict[str, Any]]:
+def get_lab_report(key: str = "set1") -> Optional[Dict[str, Any]]:
     try:
-        with open(LAB_PATH) as f:
+        with open(os.path.join(LAB_DIR, LABS[key]["file"])) as f:
             return json.load(f)
     except Exception:
         return None
+
+
+def get_all_lab_reports() -> Dict[str, Optional[Dict[str, Any]]]:
+    return {key: get_lab_report(key) for key in LABS}
