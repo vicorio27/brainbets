@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from src.domain.models import Match, MatchScore, Prediction, PredictionResult, Sport
@@ -193,12 +194,62 @@ def _validate_tennis(prediction: Prediction, match: Match, score: MatchScore) ->
     }
 
 
+# A prediction must not sit in PENDING forever. After this long without a
+# usable result it is closed as CANCELLED, with the reason kept in its result.
+STALE_AFTER = timedelta(days=3)
+OPEN_STATUSES = ("PENDING", "LOW_CONFIDENCE")
+
+
+def stale_reason(match_status: Optional[str], match_date: Optional[datetime], created_at: Optional[datetime],
+                 now: datetime) -> Optional[str]:
+    """Why an open prediction can never be settled, or None while it still can."""
+    if match_status == "CANCELLED":
+        return "Partido anulado (retiro, walkover o cancelación): la apuesta no cuenta."
+    if not match_date:
+        return None
+    old = match_date < now - STALE_AFTER
+    if created_at and created_at >= match_date and old:
+        return "Predicción creada cuando el partido ya había empezado: no se podía apostar."
+    if match_status != "FINISHED" and old:
+        return "El resultado del partido nunca llegó."
+    return None
+
+
+def _close(db: Session, pred: Prediction, reason: str, now: datetime) -> None:
+    pred.status = "CANCELLED"
+    result = db.query(PredictionResult).filter(PredictionResult.prediction_id == pred.id).first()
+    if not result:
+        result = PredictionResult(id=uuid4(), prediction_id=pred.id)
+        db.add(result)
+    result.is_successful = None
+    result.validation_notes = reason
+    result.validated_at = now
+
+
+def close_stale_predictions(db: Session, sport: Optional[str] = None) -> Dict[str, int]:
+    """Give a final state to open predictions that can never be validated."""
+    now = datetime.now(timezone.utc)
+    query = db.query(Prediction).join(Prediction.match).filter(Prediction.status.in_(OPEN_STATUSES))
+    if sport:
+        query = query.join(Match.sport).filter(Sport.code == sport.lower())
+    closed: Dict[str, int] = {}
+    for pred in query.all():
+        match = pred.match
+        reason = stale_reason(match.status, match.match_date, pred.created_at, now) if match else None
+        if reason:
+            _close(db, pred, reason, now)
+            closed[reason] = closed.get(reason, 0) + 1
+    db.commit()
+    return closed
+
+
 def validate_pending_predictions(db: Session, sport: Optional[str] = None) -> Dict[str, Any]:
     """Validate pending predictions against DB match results.
 
-    Only predictions whose match is scheduled for today are validated by default.
-    Additionally, pending predictions from the previous day are included so they
-    can be closed out. Older pending predictions are skipped.
+    Validated: every open prediction whose match is today or yesterday, plus
+    any whose match is already FINISHED whatever its date (a result that
+    arrives late must still settle its predictions). Before that, predictions
+    that can never be settled are closed as CANCELLED (`close_stale_predictions`).
 
     Args:
         db: SQLAlchemy session.
@@ -206,6 +257,7 @@ def validate_pending_predictions(db: Session, sport: Optional[str] = None) -> Di
 
     Returns a dict with results list and summary counts.
     """
+    closed = close_stale_predictions(db, sport)
     now = now_bogota()
     today_start = today_start_bogota()
     yesterday_start = yesterday_start_bogota()
@@ -222,10 +274,12 @@ def validate_pending_predictions(db: Session, sport: Optional[str] = None) -> Di
 
     total_pending = base_query.count()
 
-    # Restrict to today's matches plus yesterday's pending/low-confidence matches
+    # Today's and yesterday's matches, plus anything already finished.
     query = base_query.filter(
-        Match.match_date >= yesterday_start,
-        Match.match_date < tomorrow_start,
+        or_(
+            and_(Match.match_date >= yesterday_start, Match.match_date < tomorrow_start),
+            Match.status == "FINISHED",
+        )
     )
     predictions = query.all()
 
@@ -238,6 +292,8 @@ def validate_pending_predictions(db: Session, sport: Optional[str] = None) -> Di
         "failed": 0,
         "pending": 0,
         "skipped": total_pending - len(predictions),
+        "closed": sum(closed.values()),
+        "closedByReason": closed,
         "dateWindow": {
             "from": yesterday_start.isoformat(),
             "to": tomorrow_start.isoformat(),
@@ -369,6 +425,10 @@ def validate_pending_predictions(db: Session, sport: Optional[str] = None) -> Di
             market_bucket["failed"] += 1
             market_bucket["validated"] += 1
             match_bucket["failed"] += 1
+        elif match.match_date and match.match_date < now - STALE_AFTER:
+            # Finished long ago and still not decidable: the data needed never came.
+            _close(db, pred, "El partido terminó pero faltan los datos para validar este mercado.", now)
+            summary["closed"] += 1
         else:
             summary["pending"] += 1
             sport_bucket["pending"] += 1

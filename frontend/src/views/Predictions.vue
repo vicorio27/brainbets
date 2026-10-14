@@ -93,6 +93,8 @@
             <option value="PENDING">⏳ Pendiente</option>
             <option value="VALIDATED">✅ Acertada</option>
             <option value="FAILED">❌ Fallida</option>
+            <option value="LOW_CONFIDENCE">🔸 Baja confianza</option>
+            <option value="CANCELLED">🚫 Anulada</option>
           </select>
           <label class="text-sm font-medium text-slate-700">Por página:</label>
           <select
@@ -217,7 +219,9 @@ const totalItems = computed(() => {
 const statusLabels = {
   PENDING: 'pendientes',
   VALIDATED: 'acertadas',
-  FAILED: 'fallidas'
+  FAILED: 'fallidas',
+  LOW_CONFIDENCE: 'de baja confianza',
+  CANCELLED: 'anuladas'
 }
 
 const emptyMessage = computed(() => {

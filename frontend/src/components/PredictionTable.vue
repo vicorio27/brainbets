@@ -80,7 +80,7 @@
               <td class="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-600 whitespace-nowrap">
                 <span class="inline-flex items-center px-2 py-0.5 sm:px-2.5 sm:py-0.5 rounded-full text-xs font-medium"
                   :class="getStatusClass(pred.status)">
-                  {{ pred.status }}
+                  {{ statusLabel(pred.status) }}
                 </span>
               </td>
               <td class="px-3 sm:px-6 py-3 sm:py-4 text-sm text-blue-600 whitespace-nowrap">
@@ -191,12 +191,15 @@ function getMatchDate(matchId) {
   return 'N/A'
 }
 
+import { statusLabel } from '../utils/status.js'
+
 function getStatusClass(status) {
   switch (status) {
     case 'PENDING': return 'bg-yellow-100 text-yellow-800'
     case 'LOW_CONFIDENCE': return 'bg-orange-100 text-orange-800'
     case 'VALIDATED': return 'bg-green-100 text-green-800'
     case 'FAILED': return 'bg-red-100 text-red-800'
+    case 'CANCELLED': return 'bg-slate-100 text-slate-600'
     default: return 'bg-slate-100 text-slate-800'
   }
 }

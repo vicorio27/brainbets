@@ -41,7 +41,7 @@
             <h3 class="text-sm font-medium text-slate-500 mb-1">Estado</h3>
             <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium"
               :class="getStatusClass(predictionsStore.detail.prediction.status)">
-              {{ predictionsStore.detail.prediction.status }}
+              {{ statusLabel(predictionsStore.detail.prediction.status) }}
             </span>
           </div>
         </div>
@@ -746,12 +746,15 @@ function fulfillmentClass(value) {
   return 'bg-red-500'
 }
 
+import { statusLabel } from '../utils/status.js'
+
 function getStatusClass(status) {
   switch (status) {
     case 'PENDING': return 'bg-yellow-100 text-yellow-800'
     case 'LOW_CONFIDENCE': return 'bg-orange-100 text-orange-800'
     case 'VALIDATED': return 'bg-green-100 text-green-800'
     case 'FAILED': return 'bg-red-100 text-red-800'
+    case 'CANCELLED': return 'bg-slate-100 text-slate-600'
     default: return 'bg-slate-100 text-slate-800'
   }
 }
