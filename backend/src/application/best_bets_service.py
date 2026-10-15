@@ -14,19 +14,122 @@ A best price far above the reference one is flagged: on finished matches,
 bets whose promised edge exceeded 5% lost money, which points to stale or
 wrong quotes rather than value.
 """
+import math
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from src.application import point_model_service as point_model
-from src.domain.models import Match, MatchCompetitor, Prediction, Sport
+from src.domain.models import Match, MatchCompetitor, MatchScore, Prediction, Sport
 from src.timezone import to_bogota
 
 GOOD_EDGE = 0.02      # green from here
 STALE_GAP = 0.06      # best price this far above the reference: confirm before betting
 MARKETS = (("matchWinner", "Match Winner"), ("set1Winner", "Set 1 Winner"))
 SLAMS = ("australian open", "roland garros", "french open", "wimbledon", "us open")
+# Fair-probability bands for "how did bets like this one do", favourites only.
+BANDS = ((0.50, 0.60), (0.60, 0.70), (0.70, 0.80), (0.80, 0.90), (0.90, 1.01))
+HISTORY_TTL = 3600
+_history_cache: Dict[str, Any] = {"at": None, "data": None}
+
+
+def band_of(fair: float) -> Optional[str]:
+    for lo, hi in BANDS:
+        if lo <= fair < hi:
+            return f"{int(lo * 100)}-{int(min(hi, 1.0) * 100)}"
+    return None
+
+
+def band_summary(outcomes: List[Any]) -> Dict[str, Any]:
+    """outcomes: (won, price, fair). Hit rate vs the fair one, and flat-stake yield with its 95% CI."""
+    n = len(outcomes)
+    profits = [(price - 1.0) if won else -1.0 for won, price, _ in outcomes]
+    mean = sum(profits) / n
+    sd = math.sqrt(sum((p - mean) ** 2 for p in profits) / max(1, n - 1))
+    half = 1.96 * sd / math.sqrt(n)
+    return {
+        "n": n,
+        "winRate": round(sum(1 for o in outcomes if o[0]) / n, 4),
+        "expected": round(sum(o[2] for o in outcomes) / n, 4),
+        "yield": round(mean, 4),
+        "yieldLow": round(mean - half, 4),
+        "yieldHigh": round(mean + half, 4),
+    }
+
+
+def _first_set_p1(sets: List[Any]) -> Optional[bool]:
+    if not sets:
+        return None
+    s0 = sets[0]
+    try:
+        a, b = (s0.get("p1"), s0.get("p2")) if isinstance(s0, dict) else (s0[0], s0[1])
+        a, b = float(a), float(b)
+    except (TypeError, ValueError, KeyError, IndexError, AttributeError):
+        return None
+    return None if a == b else a > b
+
+
+def band_history(db: Session) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """How favourites did at the reference price, by market and fair-probability band.
+
+    Finished matches with a price taken before the start: the live collect's
+    odds_markets when it was collected pre-start, otherwise the provider's
+    historical snapshot (odds_markets_backfill). One price per match.
+    """
+    at = _history_cache["at"]
+    if at and (datetime.now(timezone.utc) - at).total_seconds() < HISTORY_TTL:
+        return _history_cache["data"]
+    tennis = db.query(Sport).filter(Sport.code == "tennis").first()
+    if not tennis:
+        return {}
+    rows = (
+        db.query(Match.id, Match.extra_data, Match.created_at, Match.match_date)
+        .filter(
+            Match.sport_id == tennis.id,
+            Match.status == "FINISHED",
+            or_(Match.extra_data.op("?")("odds_markets"), Match.extra_data.op("?")("odds_markets_backfill")),
+        )
+        .all()
+    )
+    scores = {
+        s.match_id: s
+        for s in db.query(MatchScore).filter(
+            MatchScore.match_id.in_([r.id for r in rows]), MatchScore.period == "FULL_TIME"
+        )
+    } if rows else {}
+    buckets: Dict[str, Dict[str, List[Any]]] = {}
+    for r in rows:
+        sc = scores.get(r.id)
+        if not sc or sc.home_score is None or sc.away_score is None or sc.home_score == sc.away_score:
+            continue
+        extra = r.extra_data or {}
+        prices = extra.get("odds_markets") if r.created_at and r.created_at < r.match_date else None
+        prices = prices or extra.get("odds_markets_backfill") or {}
+        p1_match = sc.home_score > sc.away_score
+        p1_set1 = _first_set_p1((extra.get("score_stats") or {}).get("sets") or [])
+        if p1_set1 is None and min(sc.home_score, sc.away_score) == 0:
+            p1_set1 = p1_match
+        for key, market in MARKETS:
+            p1_won = p1_match if key == "matchWinner" else p1_set1
+            ref = prices.get(key)
+            if p1_won is None or not isinstance(ref, dict):
+                continue
+            try:
+                r1, r2 = float(ref["p1"]), float(ref["p2"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if r1 <= 1.0 or r2 <= 1.0:
+                continue
+            for price, won in ((r1, p1_won), (r2, not p1_won)):
+                fair = (1.0 / price) / (1.0 / r1 + 1.0 / r2)
+                band = band_of(fair)
+                if band:
+                    buckets.setdefault(market, {}).setdefault(band, []).append((won, price, fair))
+    data = {market: {band: band_summary(xs) for band, xs in bands.items()} for market, bands in buckets.items()}
+    _history_cache.update(at=datetime.now(timezone.utc), data=data)
+    return data
 
 
 def level_for(edge: float, price_gap: float) -> str:
@@ -84,6 +187,7 @@ def list_best_bets(db: Session) -> Dict[str, Any]:
     if not matches:
         return {"bets": [], "matches": 0}
     points = point_model.upcoming_set_probabilities(db)
+    history = band_history(db)
     predictions: Dict[Any, Dict[str, Prediction]] = {}
     for p in db.query(Prediction).filter(Prediction.match_id.in_([m.id for m in matches])).all():
         predictions.setdefault(p.match_id, {})[p.market] = p
@@ -134,8 +238,10 @@ def list_best_bets(db: Session) -> Dict[str, Any]:
                     "engineProbability": round(float(engine), 4) if engine is not None else None,
                     "pointProbability": round(point, 4) if point is not None else None,
                     "pointTrust": round(trust, 2) if trust is not None else None,
+                    "band": band_of(price["fairProbability"]),
+                    "bandHistory": (history.get(market) or {}).get(band_of(price["fairProbability"]) or ""),
                     **price,
                 })
     # Believable prices first, then best edge.
     bets.sort(key=lambda b: (b["level"] == "check", -b["edge"], -b["fairProbability"]))
-    return {"bets": bets, "matches": len(with_odds), "goodEdge": GOOD_EDGE, "staleGap": STALE_GAP}
+    return {"bets": bets, "matches": len(with_odds), "goodEdge": GOOD_EDGE, "staleGap": STALE_GAP, "bandHistory": history}

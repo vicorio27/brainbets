@@ -384,13 +384,84 @@
     <div v-else-if="activeTab === 'bets'">
       <!-- Best bets still to play: every match, both sides, by price value -->
       <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mb-4">
-        <h2 class="text-lg font-semibold text-slate-900">💰 Mejores apuestas por jugar</h2>
-        <p class="text-sm text-slate-500 mb-3">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <h2 class="text-lg font-semibold text-slate-900">💰 Mejores apuestas por jugar</h2>
+          <div class="inline-flex rounded-md border border-slate-300 overflow-hidden text-sm" role="group" aria-label="Orden de la lista">
+            <button
+              type="button"
+              class="px-3 py-1.5"
+              :class="bestBetsMode === 'value' ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 hover:bg-slate-50'"
+              :aria-pressed="bestBetsMode === 'value'"
+              @click="bestBetsMode = 'value'"
+            >Por valor</button>
+            <button
+              type="button"
+              class="px-3 py-1.5 border-l border-slate-300"
+              :class="bestBetsMode === 'safe' ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 hover:bg-slate-50'"
+              :aria-pressed="bestBetsMode === 'safe'"
+              @click="bestBetsMode = 'safe'"
+            >Más seguras</button>
+          </div>
+        </div>
+        <p v-if="bestBetsMode === 'value'" class="text-sm text-slate-500 mb-3">
           Los dos lados de cada partido, en ganador del partido y primer set, ordenados por edge a la mejor cuota
           entre las casas. "Justa" es la probabilidad de la casa de referencia sin su margen; el motor y el modelo de
           saque y resto van al lado como segundas opiniones.
         </p>
-        <p v-if="!bestBets.length" class="text-sm text-slate-500">No hay partidos por jugar con cuota.</p>
+        <p v-else class="text-sm text-slate-500 mb-3">
+          Los favoritos, de más a menos probable: las apuestas donde se puede poner más dinero porque es menos
+          probable perderlo. "Histórico" es cómo les fue a favoritos del mismo tramo de probabilidad en el último año
+          a la cuota de referencia (cuántos ganaron contra lo que se esperaba, y lo que dejó apostar plano).
+        </p>
+        <p v-if="!bestBetsList.length" class="text-sm text-slate-500">No hay partidos por jugar con cuota.</p>
+        <div v-else-if="bestBetsMode === 'safe'" class="overflow-x-auto" tabindex="0" role="region" aria-label="Apuestas más seguras por jugar">
+          <table class="min-w-full text-sm">
+            <thead>
+              <tr class="text-left text-xs text-slate-500 uppercase tracking-wider">
+                <th class="py-2 pr-3">Apuesta</th>
+                <th class="py-2 px-3">Cuándo</th>
+                <th class="py-2 px-3">Mejor cuota</th>
+                <th class="py-2 px-3">Gana</th>
+                <th class="py-2 px-3">Con $100</th>
+                <th class="py-2 px-3">Histórico del tramo</th>
+                <th class="py-2 px-3">Motor</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="b in bestBetsShown" :key="'s' + b.matchId + b.market + b.pick" class="border-t border-slate-100">
+                <td class="py-2 pr-3">
+                  <span class="font-medium text-slate-900">{{ MARKET_ES[b.market] || b.market }} — {{ b.pick }}</span>
+                  <span class="block text-xs text-slate-500">{{ b.home }} vs {{ b.away }}<template v-if="b.tournament"> · {{ b.tournament }}</template></span>
+                </td>
+                <td class="py-2 px-3 text-slate-600 whitespace-nowrap">{{ betWhen(b) }}</td>
+                <td class="py-2 px-3 whitespace-nowrap">
+                  <span class="font-semibold text-slate-900">{{ b.bestOdds.toFixed(2) }}</span>
+                  <span class="ml-1 text-xs text-slate-600">{{ b.bestBook || '' }}</span>
+                  <span v-if="b.level === 'check'" class="block text-xs text-amber-800">🔎 confirma la cuota</span>
+                </td>
+                <td class="py-2 px-3 whitespace-nowrap">
+                  <span class="font-semibold text-slate-900">{{ pct(b.fairProbability) }}%</span>
+                  <span class="block text-xs text-slate-500">pierde {{ 100 - pct(b.fairProbability) }}%</span>
+                </td>
+                <td class="py-2 px-3 whitespace-nowrap">
+                  <span class="text-green-700 font-semibold">+${{ Math.round((b.bestOdds - 1) * 100) }}</span>
+                  <span class="block text-xs text-slate-500">o −$100</span>
+                </td>
+                <td class="py-2 px-3 whitespace-nowrap">
+                  <template v-if="b.bandHistory">
+                    <span class="text-slate-700">ganó {{ pct(b.bandHistory.winRate) }}% <span class="text-xs text-slate-500">(se esperaba {{ pct(b.bandHistory.expected) }}%)</span></span>
+                    <span class="block text-xs">
+                      <span :class="yieldClass(b.bandHistory.yield)" class="font-medium">{{ formatEdge(b.bandHistory.yield) }}</span>
+                      <span class="text-slate-500"> por apuesta · {{ b.bandHistory.n }} apuestas</span>
+                    </span>
+                  </template>
+                  <span v-else class="text-slate-500">–</span>
+                </td>
+                <td class="py-2 px-3 text-slate-600">{{ b.engineProbability != null ? pct(b.engineProbability) + '%' : '–' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <div v-else class="overflow-x-auto" tabindex="0" role="region" aria-label="Mejores apuestas por jugar">
           <table class="min-w-full text-sm">
             <thead>
@@ -433,12 +504,45 @@
           </table>
         </div>
         <button
-          v-if="bestBets.length > 8"
+          v-if="bestBetsList.length > 8"
           type="button"
           class="mt-3 text-sm font-medium text-blue-600 hover:text-blue-700"
           @click="showAllBestBets = !showAllBestBets"
-        >{{ showAllBestBets ? 'Ver menos' : `Ver las ${bestBets.length}` }}</button>
-        <p class="text-xs text-slate-500 mt-3">
+        >{{ showAllBestBets ? 'Ver menos' : `Ver las ${bestBetsList.length}` }}</button>
+        <details v-if="bestBetsMode === 'safe' && bandHistoryRows.length" class="mt-3 text-sm">
+          <summary class="cursor-pointer text-slate-700 font-medium">Cómo les fue a los favoritos, por tramo (último año)</summary>
+          <div class="overflow-x-auto mt-2" tabindex="0" role="region" aria-label="Histórico de favoritos por tramo">
+            <table class="min-w-full text-sm">
+              <thead>
+                <tr class="text-left text-xs text-slate-500 uppercase tracking-wider">
+                  <th class="py-1 pr-3">Mercado</th>
+                  <th class="py-1 px-3">Prob. justa</th>
+                  <th class="py-1 px-3">Apuestas</th>
+                  <th class="py-1 px-3">Ganaron</th>
+                  <th class="py-1 px-3">Esperado</th>
+                  <th class="py-1 px-3">Por apuesta</th>
+                  <th class="py-1 px-3">Rango 95%</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="r in bandHistoryRows" :key="r.market + r.band" class="border-t border-slate-100">
+                  <td class="py-1 pr-3 text-slate-700">{{ MARKET_ES[r.market] || r.market }}</td>
+                  <td class="py-1 px-3 text-slate-700">{{ r.band }}%</td>
+                  <td class="py-1 px-3 text-slate-600">{{ r.n }}</td>
+                  <td class="py-1 px-3 text-slate-700">{{ pct(r.winRate) }}%</td>
+                  <td class="py-1 px-3 text-slate-600">{{ pct(r.expected) }}%</td>
+                  <td class="py-1 px-3 font-medium" :class="yieldClass(r.yield)">{{ formatEdge(r.yield) }}</td>
+                  <td class="py-1 px-3 text-slate-600 whitespace-nowrap">{{ formatEdge(r.yieldLow) }} a {{ formatEdge(r.yieldHigh) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+        <p v-if="bestBetsMode === 'safe'" class="text-xs text-slate-500 mt-3">
+          Más segura no es lo mismo que rentable: un favorito a 1.10 gana casi siempre, pero una sola derrota se come
+          diez victorias. Si el rango del histórico cruza el cero, ese tramo no ha demostrado dejar ganancia.
+        </p>
+        <p v-else class="text-xs text-slate-500 mt-3">
           Verde: edge de 2% o más. "Confirma la cuota": el precio supera en más de 6% al de referencia, y en el
           histórico eso casi siempre fue una cuota vieja. Ninguno de los dos modelos ha demostrado ganarle a la casa:
           son información, no garantía.
@@ -1168,7 +1272,22 @@ const pickCandidates = computed(() => {
 // --- Best bets still to play: both sides of every match, ranked by the backend ---
 const showAllBestBets = ref(false)
 const bestBets = computed(() => matchesStore.bestBets?.bets || [])
-const bestBetsShown = computed(() => bestBets.value.slice(0, showAllBestBets.value ? 60 : 8))
+// 'value': by edge at the best price. 'safe': favourites by how likely they are to win.
+const bestBetsMode = ref('value')
+const bestBetsList = computed(() => bestBetsMode.value === 'safe'
+  ? bestBets.value.filter(b => b.fairProbability >= 0.5).slice().sort((a, b) => b.fairProbability - a.fairProbability)
+  : bestBets.value)
+const bestBetsShown = computed(() => bestBetsList.value.slice(0, showAllBestBets.value ? 60 : 8))
+const BAND_ORDER = ['50-60', '60-70', '70-80', '80-90', '90-100']
+const bandHistoryRows = computed(() => {
+  const h = matchesStore.bestBets?.bandHistory || {}
+  return ['Match Winner', 'Set 1 Winner'].flatMap(market => BAND_ORDER
+    .filter(band => h[market]?.[band])
+    .map(band => ({ market, band, ...h[market][band] })))
+})
+function yieldClass(y) {
+  return y >= 0 ? 'text-green-700' : 'text-red-700'
+}
 const BEST_BET_BADGE = {
   good: { text: 'precio sobre el justo', cls: 'bg-green-100 text-green-800' },
   fair: { text: 'ventaja leve', cls: 'bg-yellow-100 text-yellow-800' },

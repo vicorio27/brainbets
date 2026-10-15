@@ -37,3 +37,26 @@ def test_levels():
 
 def test_no_reference_price_no_view():
     assert bb.price_view({"p1": 1.9}, {}, "p1") is None
+
+
+def test_band_of_puts_favourites_in_ten_point_bands():
+    assert bb.band_of(0.55) == "50-60"
+    assert bb.band_of(0.70) == "70-80"
+    assert bb.band_of(0.97) == "90-100"
+    assert bb.band_of(0.45) is None
+
+
+def test_band_summary_reports_hit_rate_against_fair_and_flat_yield():
+    # 4 bets at 1.25 (fair 0.75): 3 wins -> +0.25*3 - 1 = -0.25 over 4 = -6.25%
+    s = bb.band_summary([(True, 1.25, 0.75)] * 3 + [(False, 1.25, 0.75)])
+    assert s["n"] == 4
+    assert s["winRate"] == 0.75
+    assert s["expected"] == 0.75
+    assert s["yield"] == pytest.approx(-0.0625)
+    assert s["yieldLow"] < s["yield"] < s["yieldHigh"]
+
+
+def test_first_set_winner_from_stored_sets():
+    assert bb._first_set_p1([{"p1": 6, "p2": 4}]) is True
+    assert bb._first_set_p1([[3, 6], [6, 1]]) is False
+    assert bb._first_set_p1([]) is None
