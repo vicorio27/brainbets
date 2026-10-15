@@ -14,14 +14,14 @@ def get_router() -> APIRouter:
     r = APIRouter(prefix="/matches", tags=["matches"])
 
     @r.get("/latest", response_model=MatchesResponse)
-    async def get_latest_matches(service: DataService = Depends(get_data_service)):
+    def get_latest_matches(service: DataService = Depends(get_data_service)):
         data = service.get_latest_matches()
         if not data:
             raise HTTPException(status_code=404, detail="No matches data available")
         return data
 
     @r.get("/{match_id}/surface-stats")
-    async def get_match_surface_stats(match_id: str, service: DataService = Depends(get_data_service)):
+    def get_match_surface_stats(match_id: str, service: DataService = Depends(get_data_service)):
         """Career per-surface stats (hard/clay/grass W-L, win rate, Elo) for both
         competitors of a tennis match, by external match id (e.g. TENNIS-123)."""
         data = service.get_match_surface_stats(match_id)
@@ -30,7 +30,7 @@ def get_router() -> APIRouter:
         return data
 
     @r.get("/{match_id}/tournament-load")
-    async def get_match_tournament_load(match_id: str, service: DataService = Depends(get_data_service)):
+    def get_match_tournament_load(match_id: str, service: DataService = Depends(get_data_service)):
         """Tournament-to-date physical load (matches played, sets W-L, games W-L)
         for both players of a tennis match, by external match id (e.g. TENNIS-123)."""
         data = service.get_match_tournament_load(match_id)
@@ -39,7 +39,7 @@ def get_router() -> APIRouter:
         return data
 
     @r.get("/{match_id}/surface-load")
-    async def get_match_surface_load(match_id: str, service: DataService = Depends(get_data_service)):
+    def get_match_surface_load(match_id: str, service: DataService = Depends(get_data_service)):
         """Recent effort per surface (matches and games played, last 30 days) and
         rest days since the last match, for both players of a tennis match,
         by external match id (e.g. TENNIS-123)."""
@@ -49,7 +49,7 @@ def get_router() -> APIRouter:
         return data
 
     @r.get("/player-set-stats")
-    async def get_player_set_stats(
+    def get_player_set_stats(
         date_str: Optional[str] = Query(None, alias="date"),
         service: DataService = Depends(get_data_service),
     ):
@@ -59,7 +59,7 @@ def get_router() -> APIRouter:
         return service.get_player_set_stats(target)
 
     @r.get("/prediction-reliability")
-    async def get_prediction_reliability(
+    def get_prediction_reliability(
         player: Optional[str] = Query(None),
         surface: Optional[str] = Query(None),
         min_sample: int = Query(4, ge=1, le=50, alias="minSample"),
@@ -75,7 +75,7 @@ def get_router() -> APIRouter:
         return service.get_prediction_reliability(player=player, surface=surf, min_sample=min_sample)
 
     @r.get("/player-points-per-set")
-    async def get_player_points_per_set(
+    def get_player_points_per_set(
         player: Optional[str] = Query(None),
         service: DataService = Depends(get_data_service),
     ):
@@ -104,7 +104,7 @@ def get_router() -> APIRouter:
         return service.search_player_surface_career(player=player, limit=limit)
 
     @r.get("/player-recent-by-surface")
-    async def get_player_recent_by_surface(
+    def get_player_recent_by_surface(
         player: Optional[str] = Query(None),
         limit: int = Query(3, ge=1, le=10),
         service: DataService = Depends(get_data_service),
@@ -115,7 +115,7 @@ def get_router() -> APIRouter:
         return service.get_player_recent_by_surface(player=player, limit=limit)
 
     @r.get("/{match_id}/serve-stats")
-    async def get_match_serve_stats(match_id: str, service: DataService = Depends(get_data_service)):
+    def get_match_serve_stats(match_id: str, service: DataService = Depends(get_data_service)):
         """Serve/return profile (hold/break %, first-serve %, tiebreak record)
         for both players of a tennis match, by external match id (e.g. TENNIS-123)."""
         data = service.get_match_serve_stats(match_id)
@@ -135,7 +135,7 @@ def get_router() -> APIRouter:
                 return None
 
     @r.get("/by-date", response_model=MatchesResponse)
-    async def get_matches_by_date(
+    def get_matches_by_date(
         from_str: Optional[str] = Query(None, alias="from"),
         to_str: Optional[str] = Query(None, alias="to"),
         sport: Optional[str] = Query(None, description="Filter by sport code (football, tennis)"),

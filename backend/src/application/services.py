@@ -832,41 +832,40 @@ class DataService:
         )
 
     def get_accuracy(self, since: Optional[datetime] = None) -> AccuracyMetrics:
-        query = self.db.query(PredictionResult)
+        """Hit rate over settled predictions (cancelled ones, with no outcome,
+        do not count). One aggregate query: loading every result and walking
+        prediction -> match -> sport per row took ~1 s and ran twice per
+        dashboard load."""
+        from sqlalchemy import func
+
+        query = (
+            self.db.query(
+                Sport.code,
+                func.count(PredictionResult.id).filter(PredictionResult.is_successful.is_(True)),
+                func.count(PredictionResult.id).filter(PredictionResult.is_successful.is_(False)),
+            )
+            .select_from(PredictionResult)
+            .join(Prediction, Prediction.id == PredictionResult.prediction_id)
+            .join(Match, Match.id == Prediction.match_id)
+            .join(Sport, Sport.id == Match.sport_id)
+            .filter(PredictionResult.is_successful.isnot(None))
+        )
         if since is not None:
             query = query.filter(PredictionResult.validated_at >= since)
-        results = query.all()
-        if not results:
-            return AccuracyMetrics(
-                totalPredictions=0,
-                successful=0,
-                failed=0,
-                accuracy=0.0,
-                accuracyTennis=0.0,
-                accuracyFootball=0.0,
-            )
+        by_sport = {code: (int(won), int(lost)) for code, won, lost in query.group_by(Sport.code).all()}
 
-        total = len(results)
-        successful = sum(1 for r in results if r.is_successful is True)
-        failed = sum(1 for r in results if r.is_successful is False)
+        def _accuracy(won: int, lost: int) -> float:
+            return round(won / (won + lost) * 100, 2) if won + lost else 0.0
 
-        tennis_results = [r for r in results if r.prediction.match.sport.code == "tennis"]
-        football_results = [r for r in results if r.prediction.match.sport.code == "football"]
-
-        def _accuracy(items: List[PredictionResult]) -> float:
-            if not items:
-                return 0.0
-            wins = sum(1 for r in items if r.is_successful is True)
-            valid = sum(1 for r in items if r.is_successful is not None)
-            return round(wins / valid * 100, 2) if valid > 0 else 0.0
-
+        successful = sum(w for w, _ in by_sport.values())
+        failed = sum(l for _, l in by_sport.values())
         return AccuracyMetrics(
-            totalPredictions=total,
+            totalPredictions=successful + failed,
             successful=successful,
             failed=failed,
-            accuracy=round(successful / total * 100, 2) if total > 0 else 0.0,
-            accuracyTennis=_accuracy(tennis_results),
-            accuracyFootball=_accuracy(football_results),
+            accuracy=_accuracy(successful, failed),
+            accuracyTennis=_accuracy(*by_sport.get("tennis", (0, 0))),
+            accuracyFootball=_accuracy(*by_sport.get("football", (0, 0))),
         )
 
     def get_accuracy_by_day(self, days: int = 30) -> Dict[str, Any]:

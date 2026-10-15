@@ -18,14 +18,14 @@ def get_router() -> APIRouter:
     r = APIRouter(prefix="/predictions", tags=["predictions"])
 
     @r.get("/latest", response_model=PredictionsResponse)
-    async def get_latest_predictions(service: DataService = Depends(get_data_service)):
+    def get_latest_predictions(service: DataService = Depends(get_data_service)):
         data = service.get_latest_predictions()
         if not data:
             raise HTTPException(status_code=404, detail="No predictions data available")
         return data
 
     @r.get("/history", response_model=PredictionsResponse)
-    async def get_predictions_history(
+    def get_predictions_history(
         sport: Optional[str] = None,
         date_from: Optional[date] = Query(None, alias="from"),
         date_to: Optional[date] = Query(None, alias="to"),
@@ -47,7 +47,7 @@ def get_router() -> APIRouter:
         )
 
     @r.get("/{prediction_id}/result", response_model=PredictionWithResult)
-    async def get_prediction_result(
+    def get_prediction_result(
         prediction_id: str,
         service: DataService = Depends(get_data_service),
     ):
@@ -57,7 +57,7 @@ def get_router() -> APIRouter:
         return data
 
     @r.get("/{prediction_id}/progress", response_model=PredictionProgressResponse)
-    async def get_prediction_progress(
+    def get_prediction_progress(
         prediction_id: str,
         service: DataService = Depends(get_data_service),
     ):

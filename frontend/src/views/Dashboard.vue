@@ -772,6 +772,7 @@ import { useAnalyticsStore } from '../stores/analytics.js'
 import MatchCard from '../components/MatchCard.vue'
 import EmptyState from '../components/EmptyState.vue'
 import { betEdge, betKelly, betProbability, modelEdge, isSuspicious, formatEdge, edgeLabel } from '../utils/edge.js'
+import { clearApiCache } from '../stores/api.js'
 
 const matchesStore = useMatchesStore()
 const predictionsStore = usePredictionsStore()
@@ -796,6 +797,7 @@ function ago(iso) {
 async function refresh() {
   if (refreshing.value) return
   refreshing.value = true
+  clearApiCache()
   try {
     await Promise.all([loadToday(), analyticsStore.fetchDashboard()])
     lastLoadedAt.value = new Date()
