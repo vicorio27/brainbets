@@ -43,6 +43,20 @@
           </div>
         </div>
 
+        <!-- Tournament streaks (information, already in the price) -->
+        <div v-if="streakRows.length" class="mt-2 space-y-1">
+          <div v-for="row in streakRows" :key="row.name" class="flex flex-wrap items-center gap-1 text-xs">
+            <span class="font-medium text-slate-600">{{ row.name }}</span>
+            <span
+              v-for="t in row.tags"
+              :key="t.key"
+              class="inline-flex items-center px-2 py-0.5 rounded-full font-medium"
+              :class="t.cls"
+              :title="t.title"
+            >{{ t.text }}</span>
+          </div>
+        </div>
+
         <!-- Live / result score -->
         <div v-if="scoreLine" class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
           <span
@@ -85,6 +99,7 @@
 <script setup>
 import { computed } from 'vue'
 import { formatDateTime, formatDate, formatTime } from '../utils/format.js'
+import { streakTags } from '../utils/streak.js'
 
 const props = defineProps({
   match: {
@@ -108,6 +123,13 @@ const props = defineProps({
     type: Object,
     default: null
   }
+})
+
+const streakRows = computed(() => {
+  if (props.sport !== 'tennis' || props.match.status === 'FINISHED') return []
+  return [[props.match.player1, props.match.streakPlayer1], [props.match.player2, props.match.streakPlayer2]]
+    .map(([name, s]) => ({ name, tags: streakTags(s) }))
+    .filter(r => r.tags.length)
 })
 
 // Live / final score line, from our DB (no api-tennis call).

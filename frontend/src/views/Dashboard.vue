@@ -432,6 +432,15 @@
                 <td class="py-2 pr-3">
                   <span class="font-medium text-slate-900">{{ MARKET_ES[b.market] || b.market }} — {{ b.pick }}</span>
                   <span class="block text-xs text-slate-500">{{ b.home }} vs {{ b.away }}<template v-if="b.tournament"> · {{ b.tournament }}</template></span>
+                  <span v-if="betStreakTags(b).length" class="flex flex-wrap gap-1 mt-1">
+                    <span
+                      v-for="t in betStreakTags(b)"
+                      :key="t.key"
+                      class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                      :class="t.cls"
+                      :title="t.title"
+                    >{{ t.text }}</span>
+                  </span>
                 </td>
                 <td class="py-2 px-3 text-slate-600 whitespace-nowrap">{{ betWhen(b) }}</td>
                 <td class="py-2 px-3 whitespace-nowrap">
@@ -481,6 +490,15 @@
                 <td class="py-2 pr-3">
                   <span class="font-medium text-slate-900">{{ MARKET_ES[b.market] || b.market }} — {{ b.pick }}</span>
                   <span class="block text-xs text-slate-500">{{ b.home }} vs {{ b.away }}<template v-if="b.tournament"> · {{ b.tournament }}</template></span>
+                  <span v-if="betStreakTags(b).length" class="flex flex-wrap gap-1 mt-1">
+                    <span
+                      v-for="t in betStreakTags(b)"
+                      :key="t.key"
+                      class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                      :class="t.cls"
+                      :title="t.title"
+                    >{{ t.text }}</span>
+                  </span>
                 </td>
                 <td class="py-2 px-3 text-slate-600 whitespace-nowrap">{{ betWhen(b) }}</td>
                 <td class="py-2 px-3 whitespace-nowrap">
@@ -875,6 +893,7 @@ import { usePredictionsStore } from '../stores/predictions.js'
 import { useAnalyticsStore } from '../stores/analytics.js'
 import MatchCard from '../components/MatchCard.vue'
 import EmptyState from '../components/EmptyState.vue'
+import { streakTags } from '../utils/streak.js'
 import { betEdge, betKelly, betProbability, modelEdge, isSuspicious, formatEdge, edgeLabel } from '../utils/edge.js'
 import { clearApiCache } from '../stores/api.js'
 
@@ -1285,6 +1304,13 @@ const bandHistoryRows = computed(() => {
     .filter(band => h[market]?.[band])
     .map(band => ({ market, band, ...h[market][band] })))
 })
+// Streak tags of the pick, then the rival's (prefixed so it is clear whose they are).
+function betStreakTags(b) {
+  return [
+    ...streakTags(b.pickStreak),
+    ...streakTags(b.opponentStreak).map(t => ({ ...t, key: 'o' + t.key, text: 'rival: ' + t.text }))
+  ]
+}
 function yieldClass(y) {
   return y >= 0 ? 'text-green-700' : 'text-red-700'
 }

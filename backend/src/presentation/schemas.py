@@ -41,6 +41,8 @@ class TennisMatch(BaseModel):
     liveGames: Optional[str] = None               # "4-3" current game (LIVE)
     livePeriod: Optional[str] = None              # "Set 3"
     liveUpdatedAt: Optional[str] = None
+    streakPlayer1: Optional[Dict[str, Any]] = None  # wins / upsets in this tournament so far
+    streakPlayer2: Optional[Dict[str, Any]] = None
     tournamentTier: Optional[int] = None
     groundType: Optional[str] = None
     countryPlayer1: Optional[str] = None

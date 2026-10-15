@@ -343,7 +343,13 @@ class DataService:
             )
             .all()
         }
-        return {mid: {"final": finals.get(mid), "prog": progs.get(mid)} for mid in match_ids}
+        from src.application.streak_service import streaks_for_matches
+
+        streaks = streaks_for_matches(self.db, self.db.query(Match).filter(Match.id.in_(match_ids)).all())
+        return {
+            mid: {"final": finals.get(mid), "prog": progs.get(mid), "streaks": streaks.get(mid) or {}}
+            for mid in match_ids
+        }
 
     @staticmethod
     def _tennis_set_scores(match: Match) -> Optional[List[List[int]]]:
@@ -434,6 +440,8 @@ class DataService:
             liveGames=live_games,
             livePeriod=live_period,
             liveUpdatedAt=live_updated,
+            streakPlayer1=(live.get("streaks") or {}).get("p1"),
+            streakPlayer2=(live.get("streaks") or {}).get("p2"),
             tournamentTier=meta.get("tournament_tier"),
             groundType=meta.get("ground_type"),
             countryPlayer1=p1.competitor.country,

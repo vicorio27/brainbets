@@ -22,6 +22,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from src.application import point_model_service as point_model
+from src.application.streak_service import streaks_for_matches
 from src.domain.models import Match, MatchCompetitor, MatchScore, Prediction, Sport
 from src.timezone import to_bogota
 
@@ -188,6 +189,7 @@ def list_best_bets(db: Session) -> Dict[str, Any]:
         return {"bets": [], "matches": 0}
     points = point_model.upcoming_set_probabilities(db)
     history = band_history(db)
+    streaks = streaks_for_matches(db, matches)
     predictions: Dict[Any, Dict[str, Prediction]] = {}
     for p in db.query(Prediction).filter(Prediction.match_id.in_([m.id for m in matches])).all():
         predictions.setdefault(p.match_id, {})[p.market] = p
@@ -238,6 +240,8 @@ def list_best_bets(db: Session) -> Dict[str, Any]:
                     "engineProbability": round(float(engine), 4) if engine is not None else None,
                     "pointProbability": round(point, 4) if point is not None else None,
                     "pointTrust": round(trust, 2) if trust is not None else None,
+                    "pickStreak": (streaks.get(m.id) or {}).get(side),
+                    "opponentStreak": (streaks.get(m.id) or {}).get("p2" if side == "p1" else "p1"),
                     "band": band_of(price["fairProbability"]),
                     "bandHistory": (history.get(market) or {}).get(band_of(price["fairProbability"]) or ""),
                     **price,
