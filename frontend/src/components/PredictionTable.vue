@@ -7,6 +7,7 @@
             <th class="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Mercado</th>
             <th class="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Predicción</th>
             <th class="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Confianza</th>
+            <th class="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider" title="Probabilidad del modelo de puntos (saque y resto, punto a punto) para esta misma predicción. Solo partidos por jugar. Segunda opinión: no ha demostrado ganarle a la casa.">Puntos</th>
             <th class="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider" title="Si la apuesta tiene ventaja frente a la cuota de la casa. El número está en el detalle.">Valor</th>
             <th class="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider hidden sm:table-cell">Modelos</th>
             <th class="px-3 sm:px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider hidden md:table-cell">Fecha Partido</th>
@@ -18,7 +19,7 @@
           <template v-for="group in groupedByMatch" :key="group.matchId">
             <!-- Match header row -->
             <tr class="bg-slate-100">
-              <td colspan="8" class="px-3 sm:px-6 py-3">
+              <td colspan="9" class="px-3 sm:px-6 py-3">
                 <div class="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 min-w-0">
                   <span class="inline-flex self-start items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
                     :class="group.sport === 'tennis' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'">
@@ -49,6 +50,13 @@
                   <span class="text-sm font-medium">{{ pred.calibratedConfidence ?? pred.confidence }}%</span>
                   <span v-if="pred.calibratedConfidence != null && pred.calibratedConfidence !== pred.confidence" class="ml-1 text-[10px] text-slate-500">cal</span>
                 </div>
+              </td>
+              <td class="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-700 whitespace-nowrap" :title="pointTitle(pred)">
+                <template v-if="pred.pointProbability != null">
+                  <span class="font-medium">{{ Math.round(pred.pointProbability * 100) }}%</span>
+                  <span v-if="pred.pointTrust < 0.5" class="text-xs text-slate-500">*</span>
+                </template>
+                <span v-else class="text-xs text-slate-500">-</span>
               </td>
               <td class="px-3 sm:px-6 py-3 sm:py-4 text-sm whitespace-nowrap">
                 <span
@@ -219,6 +227,14 @@ function edgeTitle(pred) {
     parts.push('Edge < 5%: no apostar')
   }
   return parts.filter(Boolean).join(' | ')
+}
+
+function pointTitle(pred) {
+  if (pred.pointProbability == null) return 'Sin modelo de puntos (partido ya jugado, fútbol o mercado que no calcula)'
+  const parts = [`Modelo de puntos: ${Math.round(pred.pointProbability * 100)}% para "${pred.prediction}"`]
+  if (pred.pointTrust < 0.5) parts.push('poca historia de saque y resto de alguno de los dos')
+  parts.push('segunda opinión, no ha demostrado ganarle a la casa')
+  return parts.join(' · ')
 }
 
 function formatKey(key) {

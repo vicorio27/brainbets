@@ -44,6 +44,36 @@ from src.timezone import BOGOTA_TZ, to_bogota, today_start_bogota, yesterday_sta
 ACCURACY_BEST_MARKET_MIN_SAMPLE = 3
 
 
+def point_probability(market: str, outcome: str, home_name: Optional[str], away_name: Optional[str],
+                      pm: Dict[str, Any]) -> Optional[float]:
+    """Point-model probability of a tennis pick, from `point_markets` (player1's side)."""
+    def side_of(name: str) -> Optional[str]:
+        return "p1" if name == home_name else "p2" if name == away_name else None
+
+    if market in ("Match Winner", "Set 1 Winner"):
+        side = side_of(outcome)
+        if not side:
+            return None
+        p1 = pm["matchP1"] if market == "Match Winner" else pm["set1P1"]
+        return p1 if side == "p1" else 1.0 - p1
+    if market == "Total Sets":
+        low = outcome.lower()
+        if low.startswith("over"):
+            return pm["decider"]
+        if low.startswith("under"):
+            return 1.0 - pm["decider"]
+        return None
+    if market == "Exact Set Score":
+        name, _, score = outcome.rpartition(" ")
+        side = side_of(name)
+        if not side or "-" not in score:
+            return None
+        won, lost = score.split("-", 1)
+        key = f"{won}-{lost}" if side == "p1" else f"{lost}-{won}"
+        return pm["setScores"].get(key)
+    return None
+
+
 class DataService:
     """Application service that orchestrates reads and writes from PostgreSQL."""
 
@@ -605,6 +635,7 @@ class DataService:
             (prediction.match.extra_data or {}).get("odds_markets") if prediction.match else None,
         ) or {}
         best = self._best_price(prediction, home_name, away_name, anchored)
+        best.update(self._point_opinion(prediction, home_name, away_name))
         return PredictionSchema(
             predictionId=str(prediction.id),
             matchId=prediction.match.external_id if prediction.match else None,
@@ -657,18 +688,28 @@ class DataService:
                 bestEdge=round(anchored["probability"] * float(odds) - 1.0, 4),
                 bestPriceGap=round(float(odds) / float(reference) - 1.0, 4) if reference else None,
             )
-        if match.status != "FINISHED":
-            from src.application.point_model_service import match_prob, upcoming_set_probabilities
-
-            view = upcoming_set_probabilities(self.db).get(match.external_id)
-            if view:
-                s = view["set"] if side == "p1" else 1.0 - view["set"]
-                if market_key == "matchWinner":
-                    league = (match.league.name if match.league else "").lower()
-                    slam = any(k in league for k in ("australian open", "roland garros", "french open", "wimbledon", "us open"))
-                    s = match_prob(s, 5 if slam else 3)
-                out.update(pointProbability=round(s, 4), pointTrust=round(view["trust"], 2))
         return out
+
+    def _point_opinion(self, prediction: Prediction, home_name, away_name) -> Dict[str, Any]:
+        """The serve/return point model's probability for this pick (tennis
+        matches still to play, every market it can price). Second opinion
+        only: it has not beaten the price (AGENTS.md, 2026-10-13/16)."""
+        match = prediction.match
+        if not match or match.status not in ("SCHEDULED", "LIVE") or not match.sport or match.sport.code != "tennis":
+            return {}
+        from src.application.games_model_service import SLAMS, point_markets
+        from src.application.point_model_service import upcoming_set_probabilities
+
+        view = upcoming_set_probabilities(self.db).get(match.external_id)
+        if not view or "pa" not in view:
+            return {}
+        league = ((match.league.name if match.league else "") or "").lower()
+        best_of = 5 if any(k in league for k in SLAMS) else 3
+        p = point_probability(prediction.market, prediction.predicted_outcome or "", home_name, away_name,
+                              point_markets(view["pa"], view["pb"], best_of))
+        if p is None:
+            return {}
+        return {"pointProbability": round(p, 4), "pointTrust": round(view["trust"], 2)}
 
     def get_latest_predictions(self) -> Optional[PredictionsResponse]:
         predictions = prediction_repository.list(self.db, limit=500)

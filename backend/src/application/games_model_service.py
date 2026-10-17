@@ -22,7 +22,7 @@ from collections import defaultdict
 from functools import lru_cache
 from typing import Any, Dict, Optional, Tuple
 
-from src.application.point_model_service import game_prob, tiebreak_prob
+from src.application.point_model_service import game_prob, match_prob, set_prob, tiebreak_prob
 
 FROZEN_AT = "2026-10-16"
 # Fitted on the 2,671 complete matches of 2025-01-01 .. 2026-10-15 (2,092 best
@@ -113,6 +113,53 @@ def games_view(pa: float, pb: float, best_of: int) -> Dict[str, Any]:
         "decider": _r(_shift_logit(raw["decider"], DECIDER_SHIFT[bo])),
         "dist": raw["dist"],
         "shift": shift,
+    }
+
+
+def set_scores(s: float, best_of: int, decider: float) -> Dict[str, float]:
+    """Final set score ("2-0", "1-2", ... from player1's side) given P(player1
+    wins a set) and the corrected P(deciding set).
+
+    Independent sets fix who wins (`match_prob`, what the pointsMatch lab
+    measures) and the split inside each cell; the 2x2 table winner x
+    straight-sets is then fitted (iterative proportional fitting) to keep
+    P(player1 wins) and make P(not straight sets) = `decider`."""
+    need = 3 if best_of >= 5 else 2
+    iid: Dict[Tuple[int, int], float] = {}
+    for lost in range(need):
+        ways = math.comb(need - 1 + lost, lost)
+        iid[(need, lost)] = ways * s ** need * (1 - s) ** lost
+        iid[(lost, need)] = ways * (1 - s) ** need * s ** lost
+    cell = lambda k: (k[0] > k[1], min(k) == 0)
+    sums: Dict[Tuple[bool, bool], float] = defaultdict(float)
+    for k, p in iid.items():
+        sums[cell(k)] += p
+    target_win, target_straight = match_prob(s, need * 2 - 1), 1.0 - decider
+    table = dict(sums)
+    for _ in range(50):
+        for w, tgt in ((True, target_win), (False, 1 - target_win)):
+            tot = table[(w, True)] + table[(w, False)]
+            for st in (True, False):
+                table[(w, st)] *= tgt / tot if tot else 0.0
+        for st, tgt in ((True, target_straight), (False, 1 - target_straight)):
+            tot = table[(True, st)] + table[(False, st)]
+            for w in (True, False):
+                table[(w, st)] *= tgt / tot if tot else 0.0
+    return {f"{a}-{b}": _r(p * table[cell((a, b))] / sums[cell((a, b))]) for (a, b), p in iid.items()}
+
+
+@lru_cache(maxsize=4096)
+def point_markets(pa: float, pb: float, best_of: int) -> Dict[str, Any]:
+    """The point model's probability for each predicted tennis market, player1's side.
+    Cached: callers must not mutate the result."""
+    bo = 5 if best_of >= 5 else 3
+    view = games_view(pa, pb, bo)
+    s = set_prob(pa, pb)
+    return {
+        "set1P1": _r(s),
+        "matchP1": _r(match_prob(s, bo)),
+        "decider": view["decider"],
+        "setScores": set_scores(s, bo, view["decider"]),
     }
 
 
@@ -241,6 +288,7 @@ def upcoming_games(db: Any, matches: Any) -> Dict[Any, Dict[str, Any]]:
         best_of = 5 if any(s in league.lower() for s in SLAMS) else 3
         line = main_line(((m.extra_data or {}).get("odds_lines") or {}).get("totalGames"))
         out[m.id] = public_view(games_view(view["pa"], view["pb"], best_of), line, view["trust"])
+        out[m.id]["markets"] = point_markets(view["pa"], view["pb"], best_of)
     return out
 
 

@@ -17,6 +17,28 @@
           Ver todas las predicciones
         </router-link>
       </div>
+
+      <!-- Point model for this match (still to play) -->
+      <div v-if="pointBox" class="mt-3 rounded border border-slate-200 bg-white p-3 text-sm text-slate-700"
+        title="Modelo de puntos (saque y resto, punto a punto) con la corrección de games congelada el 16-oct-2026. Segunda opinión: no ha demostrado ganarle a la casa.">
+        <p class="font-semibold text-slate-900 mb-1">
+          Modelo de puntos
+          <span v-if="pointBox.close" class="ml-1 text-sky-800">· ⚖ Partido reñido</span>
+        </p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
+          <div>Ganador: {{ pointBox.p1 }} <strong>{{ pointBox.match1 }}%</strong> · {{ pointBox.p2 }} <strong>{{ pointBox.match2 }}%</strong></div>
+          <div>1er set: {{ pointBox.p1 }} <strong>{{ pointBox.set1 }}%</strong> · {{ pointBox.p2 }} <strong>{{ pointBox.set2 }}%</strong></div>
+          <div>~<strong>{{ pointBox.g.expectedGames }}</strong> games · tiebreak <strong>{{ pointBox.tiebreak }}%</strong> · {{ pointBox.deciderLabel }} <strong>{{ pointBox.decider }}%</strong></div>
+          <div v-if="pointBox.g.line">
+            Línea {{ pointBox.g.line.line }} games: Más modelo <strong>{{ pct(pointBox.g.line.modelOver) }}%</strong> · casa {{ pct(pointBox.g.line.marketOver) }}%
+          </div>
+          <div class="sm:col-span-2 flex flex-wrap gap-x-2">
+            <span>Marcador:</span>
+            <span v-for="sc in pointBox.scores" :key="sc.key" class="whitespace-nowrap">{{ sc.label }} <strong>{{ sc.pct }}%</strong></span>
+          </div>
+        </div>
+        <p v-if="pointBox.g.trust < 0.5" class="text-xs text-slate-500 mt-1">Poca historia de saque y resto de alguno de los dos.</p>
+      </div>
     </div>
 
     <!-- Tabs -->
@@ -184,6 +206,42 @@ const matchDisplayName = computed(() => {
   return matchId.value
 })
 
+const pct = (x) => Math.round(x * 100)
+
+const pointBox = computed(() => {
+  if (!matchId.value || !matchesStore.latest) return null
+  const m = matchesStore.latest.tennis?.find(x => x.matchId === matchId.value)
+  const g = m?.gamesModel
+  if (!g?.markets || m.status === 'FINISHED') return null
+  const mk = g.markets
+  const mw = m.oddsMarkets?.matchWinner
+  let close = false
+  if (mw?.p1 > 1 && mw?.p2 > 1) {
+    const fair = (1 / mw.p1) / (1 / mw.p1 + 1 / mw.p2)
+    close = fair >= 0.4 && fair <= 0.6
+  }
+  const scores = Object.entries(mk.setScores || {})
+    .map(([key, p]) => {
+      const [a, b] = key.split('-').map(Number)
+      return { key, p, label: a > b ? `${m.player1} ${a}-${b}` : `${m.player2} ${b}-${a}`, pct: pct(p) }
+    })
+    .sort((x, y) => y.p - x.p)
+  return {
+    g,
+    close,
+    p1: m.player1,
+    p2: m.player2,
+    match1: pct(mk.matchP1),
+    match2: 100 - pct(mk.matchP1),
+    set1: pct(mk.set1P1),
+    set2: 100 - pct(mk.set1P1),
+    tiebreak: pct(g.tiebreak),
+    decider: pct(g.decider),
+    deciderLabel: g.bestOf === 5 ? '4 o 5 sets' : '3er set',
+    scores
+  }
+})
+
 const todayPredictions = computed(() => {
   const preds = predictionsStore.latest?.predictions || []
   let filtered = preds.filter(pred => pred.eventDate === todayStr)
@@ -264,10 +322,16 @@ function loadToday() {
 
 function loadHistory() {
   const from = historyDateFrom.value || '2010-01-01'
-  const to = historyDateTo.value || todayStr
+  // A match from a later day (tomorrow's slate) must still be in range.
+  const to = historyDateTo.value || (matchDate.value && matchDate.value > todayStr ? matchDate.value : todayStr)
   const status = historyStatus.value !== 'all' ? historyStatus.value : null
   predictionsStore.fetchHistory(historySport.value, from, to, status, currentPage.value, pageSize.value, matchId.value, historyName.value)
-  matchesStore.fetchHistory(from, to, historySport.value, currentPage.value, pageSize.value)
+  if (matchId.value && matchDate.value) {
+    // Name, point-model box and dates come from that day's matches.
+    matchesStore.fetchByDate(matchDate.value)
+  } else {
+    matchesStore.fetchHistory(from, to, historySport.value, currentPage.value, pageSize.value)
+  }
 }
 
 function initializeFromRoute() {

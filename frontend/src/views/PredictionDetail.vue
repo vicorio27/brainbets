@@ -118,6 +118,18 @@
                   Calibrada con resultados reales · modelo: {{ predictionsStore.detail.prediction.confidence }}%
                 </p>
               </div>
+              <div v-if="predictionsStore.detail.prediction.pointProbability != null" class="bg-slate-50 rounded-lg p-4 md:col-span-2">
+                <h4 class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Modelo de puntos (saque y resto)</h4>
+                <p class="text-lg font-semibold text-slate-900">
+                  {{ Math.round(predictionsStore.detail.prediction.pointProbability * 100) }}%
+                  <span class="text-sm font-normal text-slate-600">para "{{ predictionsStore.detail.prediction.prediction }}"</span>
+                </p>
+                <p class="text-xs text-slate-500 mt-1">
+                  Calculado punto a punto con lo que cada uno gana al saque y al resto.
+                  <span v-if="predictionsStore.detail.prediction.pointTrust < 0.5">Poca historia de saque y resto de alguno de los dos. </span>
+                  Es una segunda opinión: en las pruebas no le ha ganado a la cuota de la casa.
+                </p>
+              </div>
               <div v-if="isPausedMarket" class="bg-amber-50 border border-amber-200 rounded-lg p-4 md:col-span-2">
                 <h4 class="text-xs font-semibold text-amber-800 uppercase tracking-wider mb-1">⏸️ Mercado en pausa</h4>
                 <p class="text-sm text-amber-800">

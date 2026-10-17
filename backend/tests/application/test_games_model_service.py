@@ -35,3 +35,26 @@ def test_complete_sets_rejects_retirements():
     assert gm.complete_sets([{"p1": 6, "p2": 4}, {"p1": 3, "p2": 2}]) is None
     assert gm.complete_sets([{"p1": 6, "p2": 4}]) is None
     assert gm.complete_sets([{"p1": 4, "p2": 6}, {"p1": 6, "p2": 3}, {"p1": 7, "p2": 5}]) == (31, 2, 1, False)
+
+
+@pytest.mark.parametrize("bo", (3, 5))
+def test_set_scores_keep_the_match_winner_and_the_corrected_decider(bo):
+    s, decider = 0.62, 0.30
+    scores = gm.set_scores(s, bo, decider)
+    need = 3 if bo == 5 else 2
+    assert sum(scores.values()) == pytest.approx(1.0, abs=1e-3)
+    p1 = sum(p for k, p in scores.items() if int(k.split("-")[0]) == need)
+    assert p1 == pytest.approx(gm.match_prob(s, bo), abs=1e-3)
+    straight = sum(p for k, p in scores.items() if "0" in k.split("-"))
+    assert straight == pytest.approx(1 - decider, abs=1e-3)
+
+
+def test_point_probability_reads_every_tennis_market():
+    from src.application.services import point_probability
+
+    pm = gm.point_markets(0.68, 0.62, 3)
+    assert point_probability("Match Winner", "B", "A", "B", pm) == pytest.approx(1 - pm["matchP1"])
+    assert point_probability("Set 1 Winner", "A", "A", "B", pm) == pm["set1P1"]
+    assert point_probability("Total Sets", "Over 2.5", "A", "B", pm) == pm["decider"]
+    assert point_probability("Exact Set Score", "Zverev A. 2-1", "x", "Zverev A.", pm) == pm["setScores"]["1-2"]
+    assert point_probability("Total Aces", "Over 15.5", "A", "B", pm) is None
