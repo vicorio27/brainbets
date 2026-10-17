@@ -107,6 +107,11 @@ LABS = {
                     "labels": POINT_FEATURE_LABELS, "file": "points_match_lab.json"},
     "pointsTotalSets": {"market": "Total Sets", "frozenAt": "2026-10-13", "features": POINT_FEATURES,
                         "labels": POINT_FEATURE_LABELS, "file": "points_total_sets_lab.json"},
+    # Games model on top of the point model (games_model_service), against the
+    # main total-games line. Target: over the line.
+    "pointsTotalGames": {"market": "Total Games", "frozenAt": "2026-10-16", "features": POINT_FEATURES,
+                         "labels": {"model": "Distancia del modelo de games a la línea"},
+                         "file": "points_total_games_lab.json"},
 }
 
 
@@ -414,9 +419,12 @@ def run_lab(db: Session) -> Dict[str, Any]:
     """Recompute every lab's report and store it (called by the daily
     training). Returns the Set 1 report; the others are read back with
     `get_lab_report(key)`."""
+    from src.application.games_model_service import build_games_rows
     from src.application.point_model_service import build_point_rows
 
-    all_rows = {**build_all_rows(db), **build_point_rows(db)}
+    # Total games uses the provider's pre-match line snapshots too, so the walk-forward
+    # has history to fit from; after the freeze only lines we collect exist.
+    all_rows = {**build_all_rows(db), **build_point_rows(db), **build_games_rows(db, include_backfill=True)}
     reports = {key: _report(key, all_rows[key]) for key in LABS}
     return reports["set1"]
 

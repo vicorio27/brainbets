@@ -343,11 +343,15 @@ class DataService:
             )
             .all()
         }
+        from src.application.games_model_service import upcoming_games
         from src.application.streak_service import streaks_for_matches
 
-        streaks = streaks_for_matches(self.db, self.db.query(Match).filter(Match.id.in_(match_ids)).all())
+        rows = self.db.query(Match).filter(Match.id.in_(match_ids)).all()
+        streaks = streaks_for_matches(self.db, rows)
+        games = upcoming_games(self.db, rows)
         return {
-            mid: {"final": finals.get(mid), "prog": progs.get(mid), "streaks": streaks.get(mid) or {}}
+            mid: {"final": finals.get(mid), "prog": progs.get(mid), "streaks": streaks.get(mid) or {},
+                  "games": games.get(mid)}
             for mid in match_ids
         }
 
@@ -442,6 +446,7 @@ class DataService:
             liveUpdatedAt=live_updated,
             streakPlayer1=(live.get("streaks") or {}).get("p1"),
             streakPlayer2=(live.get("streaks") or {}).get("p2"),
+            gamesModel=live.get("games"),
             tournamentTier=meta.get("tournament_tier"),
             groundType=meta.get("ground_type"),
             countryPlayer1=p1.competitor.country,

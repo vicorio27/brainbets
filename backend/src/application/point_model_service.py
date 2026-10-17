@@ -305,7 +305,8 @@ def upcoming_set_probabilities(db: Session, ttl_seconds: int = 600) -> Dict[str,
             a = logs[sides["p1"]].rates(m.match_date, surface, tour_serve)
             b = logs[sides["p2"]].rates(m.match_date, surface, tour_serve)
             pa, pb = serve_point_probs(a, b, tour_serve)
-            out[m.external_id] = {"set": set_prob(pa, pb), "trust": min(1.0, min(a[2], b[2]) / RELIABLE_POINTS)}
+            out[m.external_id] = {"set": set_prob(pa, pb), "trust": min(1.0, min(a[2], b[2]) / RELIABLE_POINTS),
+                                  "pa": pa, "pb": pb}
     _upcoming_cache["at"] = time.time()
     _upcoming_cache["data"] = out
     return out

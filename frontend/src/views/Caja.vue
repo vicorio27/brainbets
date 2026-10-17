@@ -877,7 +877,13 @@ const LAB_OPTIONS = [
     title: `Modelo de puntos de saque y resto: ¿le gana a la casa en ${what}?`,
     note: 'Este es otro modelo: estima cuántos puntos gana cada jugador al saque contra ese rival (por superficie y dando más peso a lo reciente) y de ahí calcula sets y partido con las reglas del tenis. La prueba mide si acercar la cuota hacia ese modelo acierta más que la cuota sola.',
     weightsHelp: 'Positivo: cuando este modelo ve a un jugador mejor que la cuota, la cuota se queda corta. Cerca de cero o negativo: el modelo no aporta.'
-  }))
+  })),
+  {
+    key: 'pointsTotalGames', label: 'Puntos · total de games',
+    title: 'Modelo de games: ¿le gana a la línea de total de games de la casa?',
+    note: 'Con los mismos puntos de saque y resto calcula, juego a juego, cuántos games tendrá el partido, con una corrección fija (el cálculo daba unos 2 games de más) ajustada solo con partidos anteriores al 16 de octubre. Mide si acercar la línea de la casa hacia ese modelo acierta más el Más/Menos que la casa sola.',
+    weightsHelp: 'Positivo: cuando el modelo espera más games que la línea, sale Más más veces de lo que la cuota dice.'
+  }
 ]
 const labKey = ref('set1')
 const labOption = computed(() => LAB_OPTIONS.find((o) => o.key === labKey.value))

@@ -57,6 +57,25 @@
           </div>
         </div>
 
+        <!-- Frozen games model (information; its lab is still collecting sample) -->
+        <div
+          v-if="gamesInfo"
+          class="mt-2 rounded border px-2 py-1.5 text-xs"
+          :class="gamesInfo.close ? 'border-sky-200 bg-sky-50 text-slate-700' : 'border-slate-200 bg-slate-50 text-slate-600'"
+          title="Modelo de games (saque y resto, juego a juego), congelado el 16-oct-2026. No ha demostrado ganarle a la casa: se está midiendo en Caja → Laboratorio."
+        >
+          <span v-if="gamesInfo.close" class="font-semibold text-sky-800">⚖ Partido reñido · </span>
+          <span class="font-medium">Modelo de games:</span>
+          ~{{ gamesInfo.g.expectedGames }} games · tiebreak {{ gamesInfo.tiebreak }}% · {{ gamesInfo.deciderLabel }} {{ gamesInfo.decider }}%
+          <template v-if="gamesInfo.g.line">
+            <span class="block">
+              Línea {{ gamesInfo.g.line.line }}: Más según el modelo {{ gamesInfo.modelOver }}% · según la casa {{ gamesInfo.marketOver }}%
+              (Más {{ gamesInfo.g.line.over.toFixed(2) }} / Menos {{ gamesInfo.g.line.under.toFixed(2) }})
+            </span>
+          </template>
+          <span v-if="gamesInfo.g.trust < 0.5" class="block text-slate-500">Poca historia de saque y resto de alguno de los dos.</span>
+        </div>
+
         <!-- Live / result score -->
         <div v-if="scoreLine" class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
           <span
@@ -125,6 +144,26 @@ const props = defineProps({
   }
 })
 
+const gamesInfo = computed(() => {
+  const g = props.match.gamesModel
+  if (props.sport !== 'tennis' || !g || props.match.status === 'FINISHED') return null
+  const mw = props.match.oddsMarkets?.matchWinner
+  let close = false
+  if (mw?.p1 > 1 && mw?.p2 > 1) {
+    const fair = (1 / mw.p1) / (1 / mw.p1 + 1 / mw.p2)
+    close = fair >= 0.4 && fair <= 0.6
+  }
+  const pct = (x) => Math.round(x * 100)
+  return {
+    g,
+    close,
+    tiebreak: pct(g.tiebreak),
+    decider: pct(g.decider),
+    deciderLabel: g.bestOf === 5 ? '4 o 5 sets' : '3er set',
+    modelOver: g.line ? pct(g.line.modelOver) : null,
+    marketOver: g.line ? pct(g.line.marketOver) : null
+  }
+})
 const streakRows = computed(() => {
   if (props.sport !== 'tennis' || props.match.status === 'FINISHED') return []
   return [[props.match.player1, props.match.streakPlayer1], [props.match.player2, props.match.streakPlayer2]]
