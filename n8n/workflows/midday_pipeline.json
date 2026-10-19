@@ -1,0 +1,75 @@
+{
+  "id": "midday_pipeline",
+  "name": "BrainBets - Midday Pipeline (refresh odds before matches start)",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 12 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n:5678/webhook/data-collection-db",
+        "sendBody": false,
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "collect",
+      "name": "Collect",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [500, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://n8n:5678/webhook/predictions-db?from=' + new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) + '&to=' + new Date(Date.now() + 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) }}",
+        "sendBody": false,
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "predict-today-tomorrow",
+      "name": "Predict Today and Tomorrow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [750, 300]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{ "node": "Collect", "type": "main", "index": 0 }]]
+    },
+    "Collect": {
+      "main": [[{ "node": "Predict Today and Tomorrow", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "error_notifier"
+  },
+  "staticData": null,
+  "tags": []
+}
