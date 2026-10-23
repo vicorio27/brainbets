@@ -76,6 +76,8 @@ services:
       # Football is frozen. Set FOOTBALL_ENABLED=true in .env to collect it again.
       - FOOTBALL_ENABLED=${FOOTBALL_ENABLED:-false}
       - TENNIS_API_KEY=${TENNIS_API_KEY:-}
+      # Player news summaries (player_news_service)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     volumes:
       - ./storage:/storage
       - ./storage/historical_raw:/tmp/historical_raw

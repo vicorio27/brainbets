@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, status
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -1113,6 +1113,37 @@ def get_router() -> APIRouter:
         from src.application.clv_service import capture_closing_odds
 
         return capture_closing_odds(db, window_hours=window_hours)
+
+    @r.post("/matches/tennis/news/refresh")
+    def refresh_tennis_player_news(
+        background_tasks: BackgroundTasks,
+        match_id: Optional[str] = None,
+        force: bool = False,
+        wait: bool = False,
+        db: Session = Depends(get_db),
+    ):
+        """Fetch recent player news for upcoming tennis matches (missing or stale only).
+
+        Called hourly from `validation_db`. Runs in the background by default so the
+        validation chain does not wait on Google News / OpenAI; `wait=true` runs it
+        inline and returns the counts (manual use).
+        """
+        from src.application.player_news_service import refresh_news
+
+        if wait:
+            return refresh_news(db, match_id=match_id, force=force)
+
+        def _run():
+            from src.infrastructure.database import SessionLocal
+
+            session = SessionLocal()
+            try:
+                logging.warning("[NEWS] %s", refresh_news(session, match_id=match_id, force=force))
+            finally:
+                session.close()
+
+        background_tasks.add_task(_run)
+        return {"started": True}
 
     @r.get("/cache")
     async def get_cached_response(

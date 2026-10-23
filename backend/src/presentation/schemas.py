@@ -19,6 +19,8 @@ class TennisMatch(BaseModel):
     h2h: Optional[str] = None
     # {p1Wins, p2Wins, total, meetings: [{date, tournament, surface, winner 'p1'|'p2', sets, games}]}
     h2hDetail: Optional[Dict[str, Any]] = None
+    # Recent news read for off-court factors: {fetchedAt, player1: [...], player2: [...], summary}
+    playerNews: Optional[Dict[str, Any]] = None
     acesAvgPlayer1: Optional[float] = None
     acesAvgPlayer2: Optional[float] = None
     eloPlayer1: Optional[float] = None

@@ -240,6 +240,28 @@
         1250,
         300
       ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/matches/tennis/news/refresh",
+        "sendQuery": false,
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "refresh-player-news",
+      "name": "Refresh Player News",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "onError": "continueRegularOutput",
+      "position": [
+        750,
+        700
+      ]
     }
   ],
   "connections": {
@@ -291,7 +313,7 @@
       "main": [
         [
           {
-            "node": "Validate Predictions via Backend",
+            "node": "Refresh Player News",
             "type": "main",
             "index": 0
           }
@@ -354,6 +376,17 @@
         [
           {
             "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Refresh Player News": {
+      "main": [
+        [
+          {
+            "node": "Validate Predictions via Backend",
             "type": "main",
             "index": 0
           }

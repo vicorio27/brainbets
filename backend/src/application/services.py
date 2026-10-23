@@ -457,6 +457,7 @@ class DataService:
             formPlayer2=form_p2,
             h2h=(f"{live['h2h']['p1Wins']}-{live['h2h']['p2Wins']}" if live.get("h2h") else meta.get("h2h")),
             h2hDetail=live.get("h2h"),
+            playerNews=meta.get("player_news"),
             acesAvgPlayer1=p1.extra_data.get("aces_avg") if p1.extra_data else None,
             acesAvgPlayer2=p2.extra_data.get("aces_avg") if p2.extra_data else None,
             eloPlayer1=float(overall_p1.current_elo) if overall_p1 and overall_p1.current_elo else None,

@@ -56,6 +56,28 @@
           <li v-if="h2hBox.h.total > h2hBox.h.meetings.length" class="text-slate-500">… y {{ h2hBox.h.total - h2hBox.h.meetings.length }} más</li>
         </ul>
       </div>
+
+      <!-- Player news: off-court factors read from this week's headlines -->
+      <div v-if="newsBox" class="mt-3 rounded border border-slate-200 bg-white p-3 text-sm text-slate-700">
+        <p class="font-semibold text-slate-900">Noticias de los jugadores</p>
+        <p class="text-xs text-slate-500 mb-2">
+          Titulares de los últimos 5 días, filtrados por IA: solo lo que podría influir fuera de la cancha. Revisado {{ newsBox.ago }}.
+          Es información, no una señal probada: casi todo lo que sale en la prensa ya está en la cuota.
+        </p>
+        <p v-if="newsBox.n.summary" class="mb-2">{{ newsBox.n.summary }}</p>
+        <div v-for="side in newsBox.sides" :key="side.key" class="mb-2 last:mb-0">
+          <p class="font-medium text-slate-800">{{ side.name }}</p>
+          <p v-if="!side.items.length" class="text-slate-500">Nada relevante (leídos {{ side.read }} titulares).</p>
+          <ul v-else class="space-y-1">
+            <li v-for="it in side.items" :key="it.link">
+              <span class="inline-flex items-center px-1.5 rounded text-xs font-medium mr-1" :class="impactClass[it.impact]">{{ factorEs[it.factor] || it.factor }}</span>
+              {{ it.note }}
+              <a :href="it.link" target="_blank" rel="noopener noreferrer" class="text-blue-700 underline break-words">{{ it.source }} · {{ it.date }}</a>
+            </li>
+          </ul>
+        </div>
+      </div>
+      <p v-else-if="h2hBox && newsPending" class="mt-3 text-xs text-slate-500">Noticias de los jugadores: se revisan cada hora para los partidos que empiezan en las próximas 18 horas.</p>
     </div>
 
     <!-- Tabs -->
@@ -265,6 +287,38 @@ const h2hBox = computed(() => {
   const m = matchesStore.latest.tennis?.find(x => x.matchId === matchId.value)
   if (!m) return null
   return { p1: m.player1, p2: m.player2, h: m.h2hDetail?.meetings?.length ? m.h2hDetail : null }
+})
+
+const factorEs = {
+  lesion: 'lesión', fisico: 'físico', personal: 'personal', local: 'en casa', entrenador: 'entrenador',
+  motivacion: 'motivación', calendario: 'calendario', otro: 'otro'
+}
+const impactClass = {
+  negativo: 'bg-red-100 text-red-800',
+  positivo: 'bg-green-100 text-green-800',
+  incierto: 'bg-slate-100 text-slate-700'
+}
+const currentTennisMatch = computed(() =>
+  matchId.value ? matchesStore.latest?.tennis?.find(x => x.matchId === matchId.value) : null
+)
+const newsPending = computed(() => {
+  const m = currentTennisMatch.value
+  return !!m && m.status === 'SCHEDULED' && !m.playerNews
+})
+const newsBox = computed(() => {
+  const m = currentTennisMatch.value
+  const n = m?.playerNews
+  if (!n) return null
+  const mins = Math.max(0, Math.round((Date.now() - new Date(n.fetchedAt).getTime()) / 60000))
+  const ago = mins < 60 ? `hace ${mins} min` : `hace ${Math.round(mins / 60)} h`
+  return {
+    n,
+    ago,
+    sides: [
+      { key: 'p1', name: m.player1, items: n.player1 || [], read: n.headlinesRead?.player1 ?? 0 },
+      { key: 'p2', name: m.player2, items: n.player2 || [], read: n.headlinesRead?.player2 ?? 0 }
+    ]
+  }
 })
 
 const todayPredictions = computed(() => {

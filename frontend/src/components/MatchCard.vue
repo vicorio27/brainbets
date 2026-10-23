@@ -67,6 +67,9 @@
           </template>
           <span v-else class="text-slate-500">H2H: nunca se han enfrentado (en los partidos guardados desde 2010)</span>
         </div>
+        <div v-if="newsCount" class="mt-1 text-xs text-slate-700" title="Noticias fuera de la cancha de esta semana: ábrelo para leerlas">
+          📰 {{ newsCount }} {{ newsCount === 1 ? 'noticia' : 'noticias' }} a tener en cuenta<template v-if="newsNegative">&nbsp;· <span class="text-red-700 font-medium">{{ newsNegative }} {{ newsNegative === 1 ? 'negativa' : 'negativas' }} para un jugador</span></template>
+        </div>
 
         <!-- Frozen games model (information; its lab is still collecting sample) -->
         <div
@@ -155,6 +158,13 @@ const props = defineProps({
   }
 })
 
+const newsItems = computed(() => {
+  const n = props.match.playerNews
+  if (props.sport !== 'tennis' || !n || props.match.status === 'FINISHED') return []
+  return [...(n.player1 || []), ...(n.player2 || [])]
+})
+const newsCount = computed(() => newsItems.value.length)
+const newsNegative = computed(() => newsItems.value.filter(i => i.impact === 'negativo').length)
 const h2hInfo = computed(() => {
   const h = props.match.h2hDetail
   if (!h || !h.meetings?.length) return null
