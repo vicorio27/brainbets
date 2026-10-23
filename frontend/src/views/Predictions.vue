@@ -39,6 +39,23 @@
         </div>
         <p v-if="pointBox.g.trust < 0.5" class="text-xs text-slate-500 mt-1">Poca historia de saque y resto de alguno de los dos.</p>
       </div>
+
+      <!-- Head-to-head: every stored meeting between the two players -->
+      <div v-if="h2hBox" class="mt-3 rounded border border-slate-200 bg-white p-3 text-sm text-slate-700">
+        <p class="font-semibold text-slate-900 mb-1">
+          H2H: {{ h2hBox.p1 }} {{ h2hBox.h ? h2hBox.h.p1Wins : 0 }}-{{ h2hBox.h ? h2hBox.h.p2Wins : 0 }} {{ h2hBox.p2 }}
+        </p>
+        <p v-if="!h2hBox.h" class="text-slate-500">Nunca se han enfrentado en los partidos ATP guardados (desde 2010).</p>
+        <ul v-else class="space-y-0.5">
+          <li v-for="mt in h2hBox.h.meetings" :key="mt.date" class="flex flex-wrap gap-x-2">
+            <span class="text-slate-500">{{ mt.date }}</span>
+            <span>{{ mt.tournament || '?' }}<template v-if="mt.surface"> ({{ surfaceEs[mt.surface] || mt.surface }})</template></span>
+            <span>ganó <strong>{{ mt.winner === 'p1' ? h2hBox.p1 : h2hBox.p2 }}</strong><template v-if="mt.sets">&nbsp;{{ mt.sets }}</template></span>
+            <span v-if="mt.games" class="text-slate-500">{{ mt.games.join(' ') }}</span>
+          </li>
+          <li v-if="h2hBox.h.total > h2hBox.h.meetings.length" class="text-slate-500">… y {{ h2hBox.h.total - h2hBox.h.meetings.length }} más</li>
+        </ul>
+      </div>
     </div>
 
     <!-- Tabs -->
@@ -240,6 +257,14 @@ const pointBox = computed(() => {
     deciderLabel: g.bestOf === 5 ? '4 o 5 sets' : '3er set',
     scores
   }
+})
+
+const surfaceEs = { hard: 'cemento', clay: 'arcilla', grass: 'césped' }
+const h2hBox = computed(() => {
+  if (!matchId.value || !matchesStore.latest) return null
+  const m = matchesStore.latest.tennis?.find(x => x.matchId === matchId.value)
+  if (!m) return null
+  return { p1: m.player1, p2: m.player2, h: m.h2hDetail?.meetings?.length ? m.h2hDetail : null }
 })
 
 const todayPredictions = computed(() => {

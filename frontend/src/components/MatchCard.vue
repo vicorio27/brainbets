@@ -57,6 +57,17 @@
           </div>
         </div>
 
+        <!-- Head-to-head from our DB (every stored meeting between these two players) -->
+        <div v-if="sport === 'tennis'" class="mt-2 text-xs text-slate-600" :title="h2hTitle">
+          <template v-if="h2hInfo">
+            <span class="font-medium">H2H:</span>
+            {{ match.player1 }} <span class="font-semibold text-slate-900">{{ h2hInfo.p1Wins }}-{{ h2hInfo.p2Wins }}</span> {{ match.player2 }}
+            <span class="text-slate-500"> · último: {{ h2hInfo.last.tournament }} {{ h2hInfo.last.date.slice(0, 4) }},
+              ganó {{ h2hInfo.last.winner === 'p1' ? match.player1 : match.player2 }}<template v-if="h2hInfo.last.sets">&nbsp;({{ h2hInfo.last.sets }})</template></span>
+          </template>
+          <span v-else class="text-slate-500">H2H: nunca se han enfrentado (en los partidos guardados desde 2010)</span>
+        </div>
+
         <!-- Frozen games model (information; its lab is still collecting sample) -->
         <div
           v-if="gamesInfo"
@@ -144,6 +155,19 @@ const props = defineProps({
   }
 })
 
+const h2hInfo = computed(() => {
+  const h = props.match.h2hDetail
+  if (!h || !h.meetings?.length) return null
+  return { ...h, last: h.meetings[0] }
+})
+const h2hTitle = computed(() => {
+  const h = h2hInfo.value
+  if (!h) return 'Sin partidos entre ellos en nuestra base (ATP desde 2010).'
+  const surf = { hard: 'cemento', clay: 'arcilla', grass: 'césped' }
+  return h.meetings
+    .map(m => `${m.date} · ${m.tournament || '?'}${m.surface ? ' (' + (surf[m.surface] || m.surface) + ')' : ''} · ganó ${m.winner === 'p1' ? props.match.player1 : props.match.player2}${m.sets ? ' ' + m.sets : ''}${m.games ? ' · ' + m.games.join(' ') : ''}`)
+    .join('\n') + (h.total > h.meetings.length ? `\n… y ${h.total - h.meetings.length} más` : '')
+})
 const gamesInfo = computed(() => {
   const g = props.match.gamesModel
   if (props.sport !== 'tennis' || !g || props.match.status === 'FINISHED') return null

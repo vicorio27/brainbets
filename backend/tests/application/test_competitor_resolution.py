@@ -35,3 +35,10 @@ def test_a_bare_surname_cannot_contradict():
 
 def test_two_equally_plausible_candidates_resolve_to_nobody():
     assert ts.pick_candidate("A. Zverev", _c("Zverev A.", "Zverev A.M.")) is None
+
+
+def test_two_spellings_of_the_same_player_resolve_to_one_of_them():
+    pool = _c("Struff J.L.", "Struff J-L.")
+
+    assert ts.pick_candidate("J-L. Struff", pool).name in {"Struff J.L.", "Struff J-L."}
+    assert ts.pick_candidate("C. H. Tseng", _c("Tseng C.H.", "Tseng C. H.")) is not None

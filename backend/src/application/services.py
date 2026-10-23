@@ -374,14 +374,16 @@ class DataService:
             .all()
         }
         from src.application.games_model_service import upcoming_games
+        from src.application.h2h_service import h2h_for_matches
         from src.application.streak_service import streaks_for_matches
 
         rows = self.db.query(Match).filter(Match.id.in_(match_ids)).all()
         streaks = streaks_for_matches(self.db, rows)
         games = upcoming_games(self.db, rows)
+        h2h = h2h_for_matches(self.db, rows)
         return {
             mid: {"final": finals.get(mid), "prog": progs.get(mid), "streaks": streaks.get(mid) or {},
-                  "games": games.get(mid)}
+                  "games": games.get(mid), "h2h": h2h.get(mid)}
             for mid in match_ids
         }
 
@@ -453,7 +455,8 @@ class DataService:
             surface=surface,
             formPlayer1=form_p1,
             formPlayer2=form_p2,
-            h2h=meta.get("h2h"),
+            h2h=(f"{live['h2h']['p1Wins']}-{live['h2h']['p2Wins']}" if live.get("h2h") else meta.get("h2h")),
+            h2hDetail=live.get("h2h"),
             acesAvgPlayer1=p1.extra_data.get("aces_avg") if p1.extra_data else None,
             acesAvgPlayer2=p2.extra_data.get("aces_avg") if p2.extra_data else None,
             eloPlayer1=float(overall_p1.current_elo) if overall_p1 and overall_p1.current_elo else None,

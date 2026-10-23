@@ -17,6 +17,8 @@ class TennisMatch(BaseModel):
     formPlayer1: Optional[str] = None
     formPlayer2: Optional[str] = None
     h2h: Optional[str] = None
+    # {p1Wins, p2Wins, total, meetings: [{date, tournament, surface, winner 'p1'|'p2', sets, games}]}
+    h2hDetail: Optional[Dict[str, Any]] = None
     acesAvgPlayer1: Optional[float] = None
     acesAvgPlayer2: Optional[float] = None
     eloPlayer1: Optional[float] = None

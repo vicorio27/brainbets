@@ -8,6 +8,7 @@ import re
 import unicodedata
 from datetime import datetime
 
+from src.application.h2h_service import meeting_winner
 from src.timezone import to_bogota
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -138,7 +139,13 @@ def pick_candidate(name: str, candidates: List[Any]) -> Optional[Any]:
         scored = [(len(target_initials & _given_initials(c.name, target_tokens)), c) for c in pool]
         top = max(score for score, _ in scored)
         best = [c for score, c in scored if score == top]
-        return best[0] if len(best) == 1 else None
+        if len(best) == 1:
+            return best[0]
+        # 'Struff J.L.' and 'Struff J-L.' give the same initials: one player spelled
+        # two ways, not two players. Returning None here created a third row
+        # ('J-L. Struff') and split his matches, so his head-to-heads went missing.
+        same_person = len({frozenset(_given_initials(c.name, target_tokens)) for c in best}) == 1
+        return best[0] if top > 0 and same_person else None
 
     same = [c for c in candidates if _normalize_name(c.name) == target]
     if same:
@@ -222,23 +229,22 @@ def compute_tennis_h2h(
             continue
 
         score = scores.get(match.id)
-        if score:
+        home = score.home_score if score else None
+        away = score.away_score if score else None
+        winner = meeting_winner(match.external_id, home, away)
+        if winner is None:
+            continue
+        if home is not None and away is not None:
             # Map player1 -> home, player2 -> away
-            p1_sets = score.home_score if p1_mc.side == "player1" else score.away_score
-            p2_sets = score.home_score if p2_mc.side == "player1" else score.away_score
+            p1_sets = home if p1_mc.side == "player1" else away
+            p2_sets = home if p2_mc.side == "player1" else away
         else:
-            p1_sets = p1_mc.score or 0
-            p2_sets = p2_mc.score or 0
+            p1_sets = p2_sets = None  # old archive row without a score: only the winner is known
 
-        if p1_sets is None or p2_sets is None:
-            continue
-
-        if p1_sets > p2_sets:
+        if winner == p1_mc.side:
             p1_wins += 1
-        elif p2_sets > p1_sets:
-            p2_wins += 1
         else:
-            continue
+            p2_wins += 1
 
         details.append({
             "date": to_bogota(match.match_date).isoformat() if match.match_date else None,

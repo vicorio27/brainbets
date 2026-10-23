@@ -246,6 +246,11 @@ class FeatureService:
         losses = 0
         matches = 0
 
+        # The result lives in match_scores, not in MatchCompetitor.score (never
+        # populated: until 2026-10-23 every meeting counted here as 0-0, and the
+        # engine took that 0-0 over the real head-to-head string).
+        from src.application.h2h_service import meeting_winner
+
         match_ids = [r[0] for r in self.db.query(subq.c.id).all()]
         for mid in match_ids:
             mcs = (
@@ -258,12 +263,23 @@ class FeatureService:
             c_map = {mc.competitor_id: mc for mc in mcs}
             if competitor_id not in c_map or opponent_id not in c_map:
                 continue
-            my_score = c_map[competitor_id].score or 0
-            opp_score = c_map[opponent_id].score or 0
+            score = (
+                self.db.query(MatchScore)
+                .filter(MatchScore.match_id == mid, MatchScore.period == "FULL_TIME")
+                .first()
+            )
+            match = self.db.get(Match, mid)
+            winner = meeting_winner(
+                match.external_id if match else None,
+                score.home_score if score else None,
+                score.away_score if score else None,
+            )
+            if winner is None:
+                continue
             matches += 1
-            if my_score > opp_score:
+            if winner == c_map[competitor_id].side:
                 wins += 1
-            elif my_score < opp_score:
+            else:
                 losses += 1
 
         return {"wins": wins, "losses": losses, "matches": matches}
