@@ -441,7 +441,7 @@ class DataService:
                 if m:
                     live_games = f"{m.group(1)}-{m.group(2)}"
 
-        return TennisMatch(
+        tm = TennisMatch(
             matchId=match.external_id or str(match.id),
             eventId=self._extract_event_id(match.external_id),
             player1=p1.competitor.name,
@@ -487,6 +487,9 @@ class DataService:
             countryPlayer2=p2.competitor.country,
             features=match_features,
         )
+        from src.application.underdog_service import underdog_case
+        tm.underdogCase = underdog_case(tm.model_dump())
+        return tm
 
     def get_latest_matches(self) -> Optional[MatchesResponse]:
         matches = match_repository.list(self.db, limit=100)

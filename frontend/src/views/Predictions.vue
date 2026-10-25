@@ -78,6 +78,25 @@
         </div>
       </div>
       <p v-else-if="h2hBox && newsPending" class="mt-3 text-xs text-slate-500">Noticias de los jugadores: se revisan cada hora para los partidos que empiezan en las próximas 18 horas.</p>
+      <!-- The case for the underdog: data-backed arguments, each with what it has been worth -->
+      <div v-if="dogBox" class="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-slate-700">
+        <p class="font-semibold text-slate-900">¿Le apuesto al no favorito?</p>
+        <p class="text-xs text-slate-600 mb-2">
+          {{ dogBox.underdog }} paga {{ dogBox.odds || '—' }} en el partido<template v-if="dogBox.set1Odds"> y {{ dogBox.set1Odds }} en el 1er set</template>;
+          la casa le da {{ Math.round(dogBox.marketProb * 100) }}% de ganar.
+        </p>
+        <template v-if="dogBox.reasons.length">
+          <p class="mb-1">Es posible que le apuestes a <span class="font-medium">{{ dogBox.underdog }}</span>, ya que:</p>
+          <ul class="space-y-1.5 mb-2">
+            <li v-for="r in dogBox.reasons" :key="r.key + r.text">
+              • {{ r.text }}
+              <span class="block pl-3 text-xs text-slate-500">Lo que dicen los datos: {{ r.evidence }}</span>
+            </li>
+          </ul>
+        </template>
+        <p v-else class="mb-2">No hay ningún dato que diga que {{ dogBox.underdog }} tiene más opciones de las que dice la cuota: si dudas de {{ dogBox.favorite }}, apuesta menos, no al otro.</p>
+        <p class="text-xs text-slate-600">{{ dogBox.note }}</p>
+      </div>
     </div>
 
     <!-- Tabs -->
@@ -305,6 +324,7 @@ const newsPending = computed(() => {
   const m = currentTennisMatch.value
   return !!m && m.status === 'SCHEDULED' && !m.playerNews
 })
+const dogBox = computed(() => currentTennisMatch.value?.underdogCase || null)
 const newsBox = computed(() => {
   const m = currentTennisMatch.value
   const n = m?.playerNews

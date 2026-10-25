@@ -48,6 +48,7 @@ class TennisMatch(BaseModel):
     streakPlayer1: Optional[Dict[str, Any]] = None  # wins / upsets in this tournament so far
     streakPlayer2: Optional[Dict[str, Any]] = None
     gamesModel: Optional[Dict[str, Any]] = None  # expected games / tiebreak / deciding set (frozen games model)
+    underdogCase: Optional[Dict[str, Any]] = None  # data-backed arguments for the underdog (underdog_service)
     tournamentTier: Optional[int] = None
     groundType: Optional[str] = None
     countryPlayer1: Optional[str] = None
