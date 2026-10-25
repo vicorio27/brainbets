@@ -53,3 +53,47 @@ def test_load_layoff_and_news_against_the_favourite():
     assert c["underdog"] == "Basilashvili N."
     assert [r["key"] for r in c["reasons"]] == ["load", "layoff", "news_fav", "streak"]
     assert "ya está en el precio" in c["reasons"][-1]["evidence"]
+
+
+def test_headline_names_the_bets_the_arguments_support():
+    c = underdog_case(_match(
+        h2hDetail={"p1Wins": 4, "p2Wins": 2, "meetings": [{"winner": "p1"}]},
+        gamesModel={"tiebreak": 0.45, "markets": {}},
+    ))
+    assert c["headline"] == "Musetti L. podría ganarle el partido o sacarle un set a Fritz T., ya que:"
+    assert [r["market"] for r in c["reasons"]] == ["partido", "unSet"]
+
+
+def test_no_headline_without_arguments():
+    assert underdog_case(_match())["headline"] is None
+
+
+def test_options_carry_match_first_set_and_one_set_prices():
+    c = underdog_case(_match(oddsMarkets={
+        "matchWinner": {"p1": 2.67, "p2": 1.53}, "set1Winner": {"p1": 2.45, "p2": 1.6},
+        "setBetting": {"2:0": 4.33, "2:1": 5, "1:2": 4, "0:2": 2.37},
+    }, gamesModel={"markets": {"setScores": {"2-0": 0.257, "0-2": 0.37, "2-1": 0.17, "1-2": 0.2}}}))
+    opts = {o["market"]: o for o in c["options"]}
+    assert set(opts) == {"partido", "set1", "unSet"}
+    assert opts["set1"]["odds"] == 2.45
+    assert 0.60 < opts["unSet"]["marketProb"] < 0.64   # 1 - P(Fritz 2-0) without margin
+    assert opts["unSet"]["modelProb"] == 0.63
+
+
+def test_first_final_in_years_is_an_argument_with_the_study_attached():
+    c = underdog_case(_match(
+        player1="Medvedev D.", player2="Basilashvili N.", eventDate="2026-10-25", round="ATP Almaty - Final",
+        oddsMarkets={"matchWinner": {"p1": 1.26, "p2": 4.3}},
+        finalsHistory={"p1": {"lastFinal": "2026-05-01", "firstSeen": "2015-01-01"},
+                       "p2": {"lastFinal": "2022-02-27", "firstSeen": "2012-01-01"}},
+    ))
+    r = c["reasons"][0]
+    assert r["key"] == "final_drought" and r["market"] == "set1"
+    assert "desde 2022" in r["text"] and "105 finales" in r["evidence"]
+    assert c["headline"].startswith("Basilashvili N. podría ganarle el primer set")
+
+
+def test_finals_argument_only_in_a_final():
+    c = underdog_case(_match(round="ATP Lyon - Semi-finals", eventDate="2026-10-25",
+                             finalsHistory={"p1": {"lastFinal": None, "firstSeen": "2015-01-01"}}))
+    assert c["reasons"] == []

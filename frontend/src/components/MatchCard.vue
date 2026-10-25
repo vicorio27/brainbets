@@ -72,8 +72,7 @@
         </div>
 
         <div v-if="dogCase" class="mt-1 text-xs text-slate-700" :title="dogTitle">
-          🎯 No favorito: <span class="font-medium">{{ dogCase.underdog }}</span><template v-if="dogCase.odds">&nbsp;a {{ dogCase.odds }}</template>
-          · <template v-if="dogCase.reasons.length">{{ dogCase.reasons.length }} {{ dogCase.reasons.length === 1 ? 'argumento' : 'argumentos' }} a su favor</template><span v-else class="text-slate-500">sin argumentos con datos a su favor</span>
+          🎯 <template v-if="dogCase.headline">{{ dogCase.headline.replace(/, ya que:$/, '') }} ({{ dogCase.reasons.length }} {{ dogCase.reasons.length === 1 ? 'argumento' : 'argumentos' }})</template><span v-else class="text-slate-500">No favorito: {{ dogCase.underdog }}<template v-if="dogCase.odds">&nbsp;a {{ dogCase.odds }}</template> · sin argumentos con datos a su favor</span>
         </div>
 
         <!-- Frozen games model (information; its lab is still collecting sample) -->
@@ -175,7 +174,7 @@ const dogTitle = computed(() => {
   const c = dogCase.value
   if (!c) return ''
   if (!c.reasons.length) return `La casa le da ${Math.round(c.marketProb * 100)}% a ${c.underdog} y no hay ningún dato que diga que es más.`
-  return `Es posible que le apuestes a ${c.underdog}, ya que:\n` + c.reasons.map(r => '• ' + r.text).join('\n') + '\n\n' + c.note
+  return c.headline + '\n' + c.reasons.map(r => '• ' + r.text).join('\n') + '\n\n' + c.note
 })
 const h2hInfo = computed(() => {
   const h = props.match.h2hDetail

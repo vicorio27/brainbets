@@ -381,9 +381,11 @@ class DataService:
         streaks = streaks_for_matches(self.db, rows)
         games = upcoming_games(self.db, rows)
         h2h = h2h_for_matches(self.db, rows)
+        from src.application.underdog_service import finals_history
+        finals_hist = finals_history(self.db, rows)
         return {
             mid: {"final": finals.get(mid), "prog": progs.get(mid), "streaks": streaks.get(mid) or {},
-                  "games": games.get(mid), "h2h": h2h.get(mid)}
+                  "games": games.get(mid), "h2h": h2h.get(mid), "finals": finals_hist.get(mid)}
             for mid in match_ids
         }
 
@@ -481,6 +483,8 @@ class DataService:
             streakPlayer1=(live.get("streaks") or {}).get("p1"),
             streakPlayer2=(live.get("streaks") or {}).get("p2"),
             gamesModel=live.get("games"),
+            round=meta.get("round"),
+            finalsHistory=live.get("finals"),
             tournamentTier=meta.get("tournament_tier"),
             groundType=meta.get("ground_type"),
             countryPlayer1=p1.competitor.country,

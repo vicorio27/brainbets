@@ -81,12 +81,19 @@
       <!-- The case for the underdog: data-backed arguments, each with what it has been worth -->
       <div v-if="dogBox" class="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-slate-700">
         <p class="font-semibold text-slate-900">¿Le apuesto al no favorito?</p>
-        <p class="text-xs text-slate-600 mb-2">
-          {{ dogBox.underdog }} paga {{ dogBox.odds || '—' }} en el partido<template v-if="dogBox.set1Odds"> y {{ dogBox.set1Odds }} en el 1er set</template>;
-          la casa le da {{ Math.round(dogBox.marketProb * 100) }}% de ganar.
-        </p>
+        <table class="mt-1 mb-2 text-xs w-full max-w-md">
+          <thead><tr class="text-slate-500 text-left"><th class="font-normal">{{ dogBox.underdog }} podría…</th><th class="font-normal">Paga</th><th class="font-normal">Casa</th><th class="font-normal">Modelo de puntos</th></tr></thead>
+          <tbody>
+            <tr v-for="o in dogBox.options" :key="o.market">
+              <td>{{ o.label }}</td>
+              <td class="font-medium">{{ o.odds || '—' }}</td>
+              <td>{{ o.marketProb != null ? Math.round(o.marketProb * 100) + '%' : '—' }}</td>
+              <td>{{ o.modelProb != null ? Math.round(o.modelProb * 100) + '%' : '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
         <template v-if="dogBox.reasons.length">
-          <p class="mb-1">Es posible que le apuestes a <span class="font-medium">{{ dogBox.underdog }}</span>, ya que:</p>
+          <p class="mb-1 font-medium text-slate-800">{{ dogBox.headline }}</p>
           <ul class="space-y-1.5 mb-2">
             <li v-for="r in dogBox.reasons" :key="r.key + r.text">
               • {{ r.text }}

@@ -48,6 +48,8 @@ class TennisMatch(BaseModel):
     streakPlayer1: Optional[Dict[str, Any]] = None  # wins / upsets in this tournament so far
     streakPlayer2: Optional[Dict[str, Any]] = None
     gamesModel: Optional[Dict[str, Any]] = None  # expected games / tiebreak / deciding set (frozen games model)
+    round: Optional[str] = None  # api-tennis tournament_round, e.g. "ATP Almaty - Final"
+    finalsHistory: Optional[Dict[str, Any]] = None  # upcoming finals: {p1: {lastFinal, firstSeen}, p2}
     underdogCase: Optional[Dict[str, Any]] = None  # data-backed arguments for the underdog (underdog_service)
     tournamentTier: Optional[int] = None
     groundType: Optional[str] = None
