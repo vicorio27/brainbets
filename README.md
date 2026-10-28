@@ -1,64 +1,64 @@
 # BrainBets - Sports Betting Intelligence Platform
 
-Sistema de análisis y predicción deportiva para tenis y fútbol basado en Machine Learning, automatización mediante n8n y visualización en tiempo real.
+A sports analysis and prediction system for tennis and football, built on Machine Learning, automated with n8n, and visualized in real time.
 
 ---
 
-# Objetivo
+# Goal
 
-BrainBets es una plataforma diseñada para:
+BrainBets is a platform designed to:
 
-* Recolectar información deportiva automáticamente.
-* Normalizar y almacenar eventos deportivos.
-* Generar predicciones mediante modelos de Machine Learning especializados.
-* Validar resultados automáticamente.
-* Exponer información mediante APIs y dashboard web.
-* Permitir interacción mediante Telegram.
-* Mantener una arquitectura desacoplada y orientada a workflows.
+* Collect sports data automatically.
+* Normalize and store sporting events.
+* Generate predictions with specialized Machine Learning models.
+* Validate results automatically.
+* Expose information through APIs and a web dashboard.
+* Allow interaction through Telegram.
+* Keep a decoupled, workflow-oriented architecture.
 
-La plataforma está diseñada bajo el principio:
+The platform is built on one principle:
 
-> n8n orquesta la recolección y los modelos. PostgreSQL es la fuente de verdad. FastAPI solamente expone información. El frontend visualiza resultados. Los modelos generan predicciones.
+> n8n orchestrates data collection and the models. PostgreSQL is the source of truth. FastAPI only exposes information. The frontend visualizes results. The models generate predictions.
 
 ---
 
-# Estado Actual y Novedades
+# Current Status and What's New
 
-## Accuracy actual (2026-06-28)
+## Current accuracy (2026-06-28)
 
 ```text
 Total:     60.89%
-Fútbol:    65.79%
-Tenis:     33.33%
+Football:  65.79%
+Tennis:    33.33%
 ```
 
-El fútbol mantiene accuracy aceptable gracias al modelo Poisson + Elo. El tenis ahora cuenta con un modelo XGBoost real entrenado sobre datos históricos 2010-2024; su impacto en accuracy se medirá en los próximos ciclos de validación.
+Football keeps an acceptable accuracy thanks to the Poisson + Elo model. Tennis now has a real XGBoost model trained on 2010-2024 historical data; its impact on accuracy will be measured over the next validation cycles.
 
-## Últimas funcionalidades implementadas
+## Latest features
 
-- **Optimizaciones de pipeline de tenis (2026-07-01)**: Se aumentó la recolección de eventos de tenis de 5 a 50 (`data_collection_db`); se corrigió el cálculo de snapshots en vivo en `update_scores_tennis`; se agregó inferencia batch del modelo ML (`POST /api/v1/internal/predict/tennis-ml/batch`); el `Prediction Engine` de tenis consume el bloque `features` de `FeatureService`; se normalizan nombres de jugadores para H2H; el endpoint `/matches/tennis/enrich` devuelve stats completos; se mejoró el parser de odds de tenis; el cache de detalle de eventos subió a 300s; y el modelo ML incorpora features de fatiga con compatibilidad hacia modelos antiguos.
-- **Nuevos datos históricos 2025**: Se ingirió la temporada ATP 2025 desde tennis-data.co.uk (2,644 partidos) y La Liga 2024-25 desde openfootball/Wayback Machine (380 partidos). Los modelos Elo, Poisson y XGBoost de tenis se reentrenaron con esta data ampliada.
-- **Modelo ML real para tenis (XGBoost)**: Nuevo servicio `backend/src/application/tennis_ml_service.py` que entrena un clasificador XGBoost con features de Elo, Elo por superficie, ranking y forma. Expone `POST /api/v1/internal/predict/tennis-ml` para inferencia y se integra en el ensemble de `n8n/prediction_engine/tennis.py`. Entrenamiento: ~15k filas en ~10s, 99.86% test accuracy.
-- **Fix parser de odds de fútbol**: El nodo `Merge Football Odds` maneja correctamente la respuesta real de RapidAPI (`response.odds.odds.matchfactMarkets` / `oddsTabMarkets`) y empareja eventos de entrada con respuestas de odds por índice.
-- **H2H por evento para fútbol**: El workflow `data_collection_db` consulta `football-get-head-to-head?eventid={id}` de RapidAPI para cada evento nuevo y enriquece el partido con H2H real. Las respuestas se emparejan por índice porque el nodo HTTP no preserva los campos del item de entrada. El backend aplica H2H solo a partidos **nuevos** para no gastar llamadas de API en eventos ya recolectados.
-- **H2H para tenis desde histórico DB**: Se agregó `backend/src/application/tennis_stats_service.py` que calcula el head-to-head entre jugadores a partir de partidos terminados en PostgreSQL. El endpoint `POST /api/v1/internal/matches/tennis/enrich` expone los registros H2H como cadena "wins-losses". El workflow `data_collection_db` agrupa eventos de tenis, consulta el endpoint y mergea `h2h` en cada partido antes de guardarlo. El motor de tenis (`n8n/prediction_engine/tennis.py`) utiliza este H2H real como feature en el modelo XGBoost-like.
-- **Odds para fútbol**: El workflow de recolección consulta el endpoint `/football-event-odds?eventid={id}&countrycode=BR` de RapidAPI y almacena las cuotas 1X2 (`homeOdds`, `drawOdds`, `awayOdds`). El motor de fútbol usa estas cuotas normalizadas en el ensemble, con pesos dinámicos según disponibilidad de datos reales.
-- **Odds para tenis**: El workflow de recolección consulta el endpoint de odds de RapidAPI (`/api/tennis/event/{id}/odds`) y almacena las cuotas en `match_competitors.pre_match_odds`. El motor de tenis usa estas cuotas normalizadas en el ensemble, con pesos dinámicos según disponibilidad de Elo real/superficie.
-- **Filtrado de PENDING obsoletas**: El endpoint `/api/v1/predictions/history` oculta predicciones PENDING cuyo partido es anterior al día de ayer, evitando que predicciones abandonadas de semanas/meses aparezcan en el frontend.
-- **Fix en FeatureService**: Se corrigió un bug de indentación que provocaba que `POST /api/v1/internal/features/build` cargara todos los partidos de la base de datos cuando se llamaba solo con rango de fechas, colgando el pipeline de predicciones.
-- **Fix de flujos n8n**: Se reactivaron todos los workflows tras importación. Se arregló `/matches/by-date` para aceptar parámetros vacíos. Se corrigió `update_scores` para encadenar `Update Football → Update Tennis → Prepare Response`. Se cambió el paso de JSON al `Prediction Engine` a base64 + archivo temporal (`/tmp/predict_input.json`) para evitar errores por comillas simples en nombres.
-- **Proxy/cache interno**: Todos los workflows de scores en vivo (fútbol y tenis) usan `POST /api/v1/internal/proxy`, con cache en PostgreSQL y backoff ante `429`.
-- **Validación por ventana de fecha**: Solo se validan predicciones PENDING de hoy y ayer. Predicciones más antiguas se reportan como `skipped`.
+- **Tennis pipeline optimizations (2026-07-01)**: Tennis event collection went from 5 to 50 events (`data_collection_db`); the live snapshot calculation in `update_scores_tennis` was fixed; batch inference for the ML model was added (`POST /api/v1/internal/predict/tennis-ml/batch`); the tennis `Prediction Engine` consumes the `features` block from `FeatureService`; player names are normalized for H2H; the `/matches/tennis/enrich` endpoint returns full stats; the tennis odds parser was improved; the event detail cache went up to 300s; and the ML model adds fatigue features while staying compatible with older models.
+- **New 2025 historical data**: The 2025 ATP season was ingested from tennis-data.co.uk (2,644 matches) and La Liga 2024-25 from openfootball/Wayback Machine (380 matches). The tennis Elo, Poisson and XGBoost models were retrained with this larger dataset.
+- **Real ML model for tennis (XGBoost)**: A new service, `backend/src/application/tennis_ml_service.py`, trains an XGBoost classifier on Elo, surface Elo, ranking and form features. It exposes `POST /api/v1/internal/predict/tennis-ml` for inference and is part of the ensemble in `n8n/prediction_engine/tennis.py`. Training: ~15k rows in ~10s, 99.86% test accuracy.
+- **Football odds parser fix**: The `Merge Football Odds` node correctly handles the real RapidAPI response (`response.odds.odds.matchfactMarkets` / `oddsTabMarkets`) and pairs input events with odds responses by index.
+- **Per-event H2H for football**: The `data_collection_db` workflow calls RapidAPI's `football-get-head-to-head?eventid={id}` for each new event and enriches the match with real H2H data. Responses are paired by index because the HTTP node does not preserve the input item's fields. The backend applies H2H only to **new** matches, so no API calls are spent on events that were already collected.
+- **Tennis H2H from the historical DB**: Added `backend/src/application/tennis_stats_service.py`, which computes head-to-head records between players from finished matches in PostgreSQL. The `POST /api/v1/internal/matches/tennis/enrich` endpoint exposes H2H records as a "wins-losses" string. The `data_collection_db` workflow groups tennis events, calls the endpoint and merges `h2h` into each match before saving it. The tennis engine (`n8n/prediction_engine/tennis.py`) uses this real H2H as a feature in the XGBoost-like model.
+- **Football odds**: The collection workflow calls RapidAPI's `/football-event-odds?eventid={id}&countrycode=BR` endpoint and stores the 1X2 odds (`homeOdds`, `drawOdds`, `awayOdds`). The football engine uses these normalized odds in the ensemble, with dynamic weights depending on how much real data is available.
+- **Tennis odds**: The collection workflow calls RapidAPI's odds endpoint (`/api/tennis/event/{id}/odds`) and stores the odds in `match_competitors.pre_match_odds`. The tennis engine uses these normalized odds in the ensemble, with dynamic weights depending on whether real/surface Elo is available.
+- **Filtering stale PENDING predictions**: The `/api/v1/predictions/history` endpoint hides PENDING predictions whose match is older than yesterday, so predictions abandoned weeks or months ago don't show up in the frontend.
+- **FeatureService fix**: Fixed an indentation bug that made `POST /api/v1/internal/features/build` load every match in the database when called with only a date range, hanging the prediction pipeline.
+- **n8n workflow fixes**: All workflows were re-enabled after import. `/matches/by-date` now accepts empty parameters. `update_scores` was fixed to chain `Update Football → Update Tennis → Prepare Response`. JSON is now passed to the `Prediction Engine` as base64 + a temporary file (`/tmp/predict_input.json`) to avoid errors caused by single quotes in names.
+- **Internal proxy/cache**: All live score workflows (football and tennis) use `POST /api/v1/internal/proxy`, with a PostgreSQL cache and backoff on `429`.
+- **Date-window validation**: Only PENDING predictions from today and yesterday are validated. Older predictions are reported as `skipped`.
 
-## Roadmap de mejora de accuracy
+## Accuracy improvement roadmap
 
-- **Opción A - Odds para fútbol** ✅: Integrar cuotas de casas de apuestas al ensemble de fútbol (paralelo al trabajo de tenis).
-- **Opción B - Modelos reales para tenis** ✅: Entrenar XGBoost/CatBoost con los datos históricos 2010+ ya cargados, en lugar de usar heurísticas.
-- **Opción C - Mejor recolección de fútbol** 🔄: Traer xG, forma, posición en tabla, partidos programados y stats reales en lugar de placeholders.
+- **Option A - Football odds** ✅: Add bookmaker odds to the football ensemble (in parallel with the tennis work).
+- **Option B - Real tennis models** ✅: Train XGBoost/CatBoost on the 2010+ historical data already loaded, instead of using heuristics.
+- **Option C - Better football collection** 🔄: Bring in xG, form, league position, scheduled matches and real stats instead of placeholders.
 
 ---
 
-# Arquitectura General
+# Overall Architecture
 
 ```text
 ┌─────────────────────┐
@@ -73,21 +73,21 @@ El fútbol mantiene accuracy aceptable gracias al modelo Poisson + Elo. El tenis
 └──────────┬──────────┘
            │
            ▼
-┌─────────────────────┐
-│        n8n          │
+┌──────────────────────┐
+│         n8n          │
 │ Workflow Orchestrator│
-│  + Prediction Engine│
-│   (Python scripts)  │
-└──────────┬──────────┘
+│  + Prediction Engine │
+│   (Python scripts)   │
+└──────────┬───────────┘
            │
            ▼
      storage/*.json
            │
            ▼
-┌─────────────────────┐
-│   migration_worker  │
-│    (CDC a PostgreSQL)│
-└──────────┬──────────┘
+┌──────────────────────┐
+│   migration_worker   │
+│ (CDC to PostgreSQL)  │
+└──────────┬───────────┘
            │
            ▼
       PostgreSQL
@@ -101,89 +101,89 @@ El fútbol mantiene accuracy aceptable gracias al modelo Poisson + Elo. El tenis
 
 ---
 
-# Principios Arquitectónicos
+# Architectural Principles
 
-## 1. n8n es el cerebro del sistema
+## 1. n8n is the brain of the system
 
-Toda la orquestación ocurre en n8n.
+All orchestration happens in n8n.
 
-Responsabilidades:
+Responsibilities:
 
 * Scraping
-* Recolección de datos
-* Normalización
-* Ejecución de modelos
-* Validación
-* Notificaciones
-* Integración con Telegram
+* Data collection
+* Normalization
+* Running the models
+* Validation
+* Notifications
+* Telegram integration
 
-n8n es la única capa autorizada para coordinar procesos.
-
----
-
-## 2. FastAPI es Read-Only (público)
-
-FastAPI no:
-
-* Ejecuta predicciones
-* Ejecuta scraping
-* Modifica archivos
-* Entrena modelos
-
-FastAPI únicamente:
-
-* Lee desde PostgreSQL
-* Expone APIs REST
-* Agrega métricas
-* Alimenta el dashboard
-
-FastAPI sí expone endpoints internos (`/api/v1/internal/*`) protegidos con API key para que n8n y el `migration_worker` puedan escribir en PostgreSQL.
+n8n is the only layer allowed to coordinate processes.
 
 ---
 
-## 3. Prediction Engine dentro de n8n
+## 2. FastAPI is read-only (public)
 
-La lógica predictiva está implementada como scripts Python montados dentro del contenedor n8n y orquestados por workflows de n8n.
+FastAPI does not:
 
-Responsabilidades:
+* Run predictions
+* Run scraping
+* Modify files
+* Train models
 
-* Inferencia por deporte (fútbol y tenis)
-* Scoring con modelos Elo, Poisson, XGBoost-like, CatBoost-like
-* Ensemble de modelos
-* Generación de predicciones que se persisten en PostgreSQL
+FastAPI only:
 
-OpenAI recibe el output del ensemble y enriquece el `naturalLanguageReasoning` de cada predicción con un análisis de experto en apuestas en español. El motor puede evolucionar independientemente siempre que mantenga el mismo contrato JSON.
+* Reads from PostgreSQL
+* Exposes REST APIs
+* Aggregates metrics
+* Feeds the dashboard
 
-## 4. PostgreSQL es la fuente de verdad
-
-Toda la información histórica y en vivo se almacena en PostgreSQL:
-
-* Deportes, ligas, competidores (equipos/jugadores)
-* Partidos (programados, en vivo, finalizados)
-* Predicciones y sus resultados de validación
-* Estadísticas rolling, historial Elo, feature store
-* Jobs de ingesta de datos históricos
-
-El `migration_worker` actúa como CDC: detecta archivos JSON nuevos en `storage/`, los migra a PostgreSQL y los elimina después de un tiempo configurable para no llenar el disco.
+FastAPI does expose internal endpoints (`/api/v1/internal/*`), protected with an API key, so that n8n and the `migration_worker` can write to PostgreSQL.
 
 ---
 
-## 4. Frontend desacoplado
+## 3. The Prediction Engine lives inside n8n
 
-Vue.js nunca accede directamente a:
+The prediction logic is implemented as Python scripts mounted inside the n8n container and orchestrated by n8n workflows.
 
-* APIs deportivas
+Responsibilities:
+
+* Per-sport inference (football and tennis)
+* Scoring with Elo, Poisson, XGBoost-like and CatBoost-like models
+* Model ensembles
+* Generating predictions that are persisted in PostgreSQL
+
+OpenAI receives the ensemble output and enriches each prediction's `naturalLanguageReasoning` with a betting-expert analysis in Spanish. The engine can evolve independently as long as it keeps the same JSON contract.
+
+## 4. PostgreSQL is the source of truth
+
+All historical and live data is stored in PostgreSQL:
+
+* Sports, leagues, competitors (teams/players)
+* Matches (scheduled, live, finished)
+* Predictions and their validation results
+* Rolling statistics, Elo history, feature store
+* Historical data ingestion jobs
+
+The `migration_worker` acts as CDC: it detects new JSON files in `storage/`, migrates them to PostgreSQL and deletes them after a configurable time so the disk doesn't fill up.
+
+---
+
+## 5. Decoupled frontend
+
+Vue.js never accesses directly:
+
+* Sports APIs
 * OpenAI
-* Modelos ML
+* ML models
 
-Todo acceso ocurre mediante FastAPI.
+All access goes through FastAPI.
 
 ---
 
-# Arquitectura de Datos
+# Data Architecture
 
 ```text
-Data Sources (RapidAPI, CSV históricos)
+Data Sources (RapidAPI, historical CSVs)
      │
      ▼
 ┌─────────────────────────────┐
@@ -224,9 +224,9 @@ storage/predictions  storage/results
 
 ---
 
-# Stack Tecnológico
+# Tech Stack
 
-## Automatización
+## Automation
 
 * n8n
 * Webhooks
@@ -256,7 +256,7 @@ storage/predictions  storage/results
 * Elo Rating
 * Poisson Models
 
-## Infraestructura
+## Infrastructure
 
 * Docker
 * Docker Compose
@@ -265,7 +265,7 @@ storage/predictions  storage/results
 
 ---
 
-# Estructura del Proyecto
+# Project Structure
 
 ```text
 brainbets/
@@ -273,7 +273,7 @@ brainbets/
 ├── docker-compose.yml
 
 ├── backend/
-│   ├── alembic/               # Migraciones de PostgreSQL
+│   ├── alembic/               # PostgreSQL migrations
 │   │   ├── versions/
 │   │   ├── env.py
 │   │   └── init.sql
@@ -293,10 +293,10 @@ brainbets/
 │   └── Dockerfile
 
 ├── services/
-│   ├── file_writer/           # Deprecated (mantenido por compatibilidad)
+│   ├── file_writer/           # Deprecated (kept for compatibility)
 │   ├── workflow_executor/
 │   ├── telegram_bot/
-│   └── migration_worker/      # CDC a PostgreSQL (dentro de backend/)
+│   └── migration_worker/      # CDC to PostgreSQL (inside backend/)
 │
 ├── n8n/
 │   ├── Dockerfile
@@ -313,55 +313,55 @@ brainbets/
 │
 ├── schemas/
 │
-├── storage/                   # Archivos temporales antes de CDC
+├── storage/                   # Temporary files before CDC
 │   ├── matches/
 │   ├── predictions/
 │   ├── results/
 │   └── audit/
 │
-├── scripts/                   # Utilidades de administración (no usadas por flujos activos)
+├── scripts/                   # Admin utilities (not used by active workflows)
 │
 └── docs/
 ```
 
 ---
 
-# Setup / Instalación
+# Setup / Installation
 
-## Requisitos
+## Requirements
 
-* Docker Desktop o Docker Engine + Docker Compose
+* Docker Desktop, or Docker Engine + Docker Compose
 * Git
-* ~4 GB de RAM disponibles
+* ~4 GB of free RAM
 
-## Iniciar la plataforma
+## Start the platform
 
 ```bash
-# Clonar o ubicarse en el proyecto
+# Clone the project, or go to its folder
 cd brainbets
 
-# Levantar todos los servicios
+# Start all services
 docker-compose up -d --build
 
-# Verificar que todos los contenedores estén saludables
+# Check that every container is healthy
 docker-compose ps
 ```
 
-## Activar workflows de n8n (después del primer arranque)
+## Enable the n8n workflows (after the first start)
 
-Los workflows se importan automáticamente desde `n8n/workflows/`, pero n8n requiere activarlos manualmente para registrar los webhooks:
+Workflows are imported automatically from `n8n/workflows/`, but n8n needs them to be enabled manually to register the webhooks:
 
 ```bash
-# Activar todos los workflows via CLI
+# Enable all workflows via the CLI
 docker exec brainbets-n8n n8n update:workflow --all --active=true
 
-# Reiniciar n8n para que los webhooks queden registrados
+# Restart n8n so the webhooks get registered
 docker restart brainbets-n8n
 ```
 
-O alternativamente, abrir http://localhost:5678 e activar cada workflow con el toggle superior derecho.
+Alternatively, open http://localhost:5678 and enable each workflow with the toggle at the top right.
 
-## Verificar salud
+## Health checks
 
 ```bash
 # Backend
@@ -374,50 +374,50 @@ curl http://localhost:5001/health
 open http://localhost:5678
 ```
 
-## Ejecutar pipeline completo
+## Run the full pipeline
 
 ```bash
-# Via workflow executor
+# Via the workflow executor
 curl -X POST http://localhost:5001/execute/pipeline
 
-# Via Telegram Bot
-# Enviar /pipeline a @coriousreybey_bot
+# Via the Telegram Bot
+# Send /pipeline to @coriousreybey_bot
 ```
 
-## Migraciones de base de datos
+## Database migrations
 
-Las migraciones de Alembic se ejecutan automáticamente al iniciar el backend.
+Alembic migrations run automatically when the backend starts.
 
-Para ejecutarlas manualmente:
+To run them manually:
 
 ```bash
 docker exec brainbets-backend alembic upgrade head
 ```
 
-Para crear una nueva migración después de cambiar modelos:
+To create a new migration after changing the models:
 
 ```bash
 cd backend
-alembic revision --autogenerate -m "descripcion de cambios"
+alembic revision --autogenerate -m "description of changes"
 ```
 
-## Variables de entorno importantes
+## Important environment variables
 
-| Variable | Descripción | Valor por defecto |
+| Variable | Description | Default |
 |---|---|---|
-| `DATABASE_URL` | URL de PostgreSQL | `postgresql://brainbets:brainbets123@postgres:5432/brainbets` |
-| `INTERNAL_API_KEY` | API key para endpoints internos | (sin default; definir en `.env`) |
-| `WORKER_DELETE_AFTER_MIGRATE` | Borrar archivos después de migrar | `true` |
-| `WORKER_MIN_FILE_AGE_SECONDS` | Edad mínima para borrar archivos | `300` |
-| `WORKER_POLL_INTERVAL` | Intervalo de polling del CDC | `10` |
+| `DATABASE_URL` | PostgreSQL URL | `postgresql://brainbets:brainbets123@postgres:5432/brainbets` |
+| `INTERNAL_API_KEY` | API key for internal endpoints | (no default; set it in `.env`) |
+| `WORKER_DELETE_AFTER_MIGRATE` | Delete files after migrating them | `true` |
+| `WORKER_MIN_FILE_AGE_SECONDS` | Minimum file age before deleting | `300` |
+| `WORKER_POLL_INTERVAL` | CDC polling interval | `10` |
 
 ---
 
 # Football Prediction Engine
 
-## Objetivo
+## Goal
 
-Generar predicciones para:
+Generate predictions for:
 
 * Match Winner
 * Double Chance
@@ -428,9 +428,9 @@ Generar predicciones para:
 
 ---
 
-## Modelo Elo
+## Elo Model
 
-Variables:
+Inputs:
 
 ```text
 home_elo
@@ -439,7 +439,7 @@ elo_difference
 home_advantage
 ```
 
-Salida:
+Output:
 
 ```text
 home_win_probability
@@ -449,9 +449,9 @@ draw_probability
 
 ---
 
-## Modelo Poisson
+## Poisson Model
 
-Variables:
+Inputs:
 
 ```text
 goals_scored
@@ -460,7 +460,7 @@ expected_goals
 expected_goals_against
 ```
 
-Salida:
+Output:
 
 ```text
 expected_goals_home
@@ -468,7 +468,7 @@ expected_goals_away
 score_distribution
 ```
 
-Mercados:
+Markets:
 
 * Correct Score
 * Over/Under
@@ -476,7 +476,7 @@ Mercados:
 
 ---
 
-## Modelo XGBoost
+## XGBoost Model
 
 Features:
 
@@ -492,7 +492,7 @@ rest_days
 market_odds
 ```
 
-Predicciones:
+Predictions:
 
 ```text
 winner
@@ -503,7 +503,7 @@ asian_handicap
 
 ---
 
-## Ensemble Final Fútbol
+## Final Football Ensemble
 
 ```text
 40% XGBoost
@@ -511,29 +511,29 @@ asian_handicap
 25% Elo
 ```
 
-Implementado en `n8n/prediction_engine/football.py` y ejecutado dentro del workflow `prediction_pipeline_db` de n8n.
+Implemented in `n8n/prediction_engine/football.py` and run inside the `prediction_pipeline_db` n8n workflow.
 
 ---
 
 # Tennis Prediction Engine
 
-## Objetivo
+## Goal
 
-Generar predicciones para:
+Generate predictions for:
 
-* Ganador
-* Ganador primer set
-* Número de sets
-* Total de juegos
-* Handicap de juegos
+* Match winner
+* First set winner
+* Number of sets
+* Total games
+* Games handicap
 * Correct Score
 * Tie Break
 
 ---
 
-## Elo General
+## General Elo
 
-Variables:
+Inputs:
 
 ```text
 player_elo
@@ -545,7 +545,7 @@ recent_form
 
 ## Surface Elo
 
-Variables:
+Inputs:
 
 ```text
 clay_elo
@@ -557,7 +557,7 @@ grass_elo
 
 ## XGBoost
 
-Variables:
+Inputs:
 
 ```text
 ranking
@@ -576,7 +576,7 @@ fatigue
 
 ## CatBoost
 
-Variables categóricas:
+Categorical inputs:
 
 ```text
 surface
@@ -587,7 +587,7 @@ indoor_outdoor
 
 ---
 
-## Ensemble Final Tenis
+## Final Tennis Ensemble
 
 ```text
 35% Surface Elo
@@ -596,21 +596,21 @@ indoor_outdoor
 15% CatBoost
 ```
 
-Implementado en `n8n/prediction_engine/tennis.py` y ejecutado dentro del workflow `prediction_pipeline_db` de n8n.
+Implemented in `n8n/prediction_engine/tennis.py` and run inside the `prediction_pipeline_db` n8n workflow.
 
 ---
 
-# Workflows n8n
+# n8n Workflows
 
 ## 1. Data Collection
 
-Responsabilidades:
+Responsibilities:
 
-* Obtener partidos
-* Obtener estadísticas
-* Obtener rankings
-* Obtener cuotas
-* Normalizar datos
+* Fetch matches
+* Fetch statistics
+* Fetch rankings
+* Fetch odds
+* Normalize data
 
 Output:
 
@@ -622,13 +622,13 @@ storage/matches/*.json
 
 ## 2. Prediction Pipeline
 
-Responsabilidades:
+Responsibilities:
 
-* Leer matches
-* Ejecutar Prediction Engine (scripts Python dentro de n8n)
-* Generar predicciones con ensemble de modelos
-* Enviar resultados a OpenAI para enriquecer el reasoning
-* Persistir resultados
+* Read matches
+* Run the Prediction Engine (Python scripts inside n8n)
+* Generate predictions with the model ensemble
+* Send results to OpenAI to enrich the reasoning
+* Persist results
 
 Output:
 
@@ -636,21 +636,21 @@ Output:
 storage/predictions/*.json
 ```
 
-Modelos por deporte:
+Models per sport:
 
-* **Fútbol**: 40% XGBoost-like, 35% Poisson, 25% Elo
-* **Tenis**: 35% Surface Elo, 25% Elo, 25% XGBoost-like, 15% CatBoost-like
+* **Football**: 40% XGBoost-like, 35% Poisson, 25% Elo
+* **Tennis**: 35% Surface Elo, 25% Elo, 25% XGBoost-like, 15% CatBoost-like
 
 ---
 
 ## 3. Validation Pipeline
 
-Responsabilidades:
+Responsibilities:
 
-* Obtener resultados finales
-* Comparar contra predicciones
-* Calcular accuracy
-* Generar métricas
+* Fetch final results
+* Compare them against the predictions
+* Compute accuracy
+* Generate metrics
 
 Output:
 
@@ -662,20 +662,20 @@ storage/results/*.json
 
 # Telegram Bot
 
-## Regla Arquitectónica Obligatoria
+## Mandatory Architectural Rule
 
-El bot NO puede consumir directamente:
+The bot must NOT consume directly:
 
-* APIs deportivas
-* Prediction Engine
+* Sports APIs
+* The Prediction Engine
 * FastAPI
 * OpenAI
 
-Toda interacción debe realizarse mediante n8n.
+Every interaction must go through n8n.
 
 ---
 
-## Flujo Obligatorio
+## Mandatory Flow
 
 ```text
 Telegram User
@@ -693,12 +693,12 @@ n8n Webhook
 Workflow
       │
       ▼
-Respuesta Telegram
+Telegram Response
 ```
 
 ---
 
-## Comandos Iniciales
+## Initial Commands
 
 ```text
 /picks
@@ -714,21 +714,21 @@ Respuesta Telegram
 
 # OpenAI
 
-OpenAI NO genera predicciones.
+OpenAI does NOT generate predictions.
 
-OpenAI únicamente puede utilizarse para:
+OpenAI may only be used to:
 
-* Explicar predicciones
-* Generar análisis narrativos
-* Crear resúmenes
-* Responder preguntas del usuario
-* Generar insights
+* Explain predictions
+* Generate narrative analysis
+* Write summaries
+* Answer user questions
+* Generate insights
 
-La probabilidad final siempre debe provenir del Prediction Engine.
+The final probability must always come from the Prediction Engine.
 
 ---
 
-# APIs REST
+# REST APIs
 
 ## Matches
 
@@ -776,77 +776,77 @@ GET /api/v1/analytics/dashboard
 GET /api/v1/analytics/bankroll?initial=100&strategy=percent&stakePct=2&target=2&days=365
 ```
 
-Simulador de caja: backtest sobre las predicciones ya validadas **que tienen cuota guardada**.
-Parámetros: `initial`, `strategy` (`percent` | `flat` | `kelly`), `stakePct`, `kellyMultiplier`,
-`maxStakePct`, `target` (múltiplo objetivo, 2 = duplicar), `days`, `sport`, `market`,
+Bankroll simulator: a backtest over the predictions that have already been validated **and have stored odds**.
+Parameters: `initial`, `strategy` (`percent` | `flat` | `kelly`), `stakePct`, `kellyMultiplier`,
+`maxStakePct`, `target` (target multiple, 2 = double), `days`, `sport`, `market`,
 `minConfidence`, `minEv`, `useCalibrated`, `sims`, `horizonDays`.
-Devuelve `sample` (cobertura de cuotas), `backtest` (curva diaria, yield, drawdown),
-`projection` (días para llegar al objetivo), `monteCarlo` (p10/p50/p90 y prob. de quiebra),
-`byMarket` (qué mercados pagan, con test de significancia y CLV) y `stability` (¿el edge
-se sostiene en la primera vs. la segunda mitad del historial?). "Exact Set Score" está
-excluido del universo por defecto (`PAUSED_BETTING_MARKETS`) mientras se evalúa su rediseño
-— pasar `market=Exact Set Score` explícito lo sigue mostrando, para monitoreo.
+It returns `sample` (odds coverage), `backtest` (daily curve, yield, drawdown),
+`projection` (days to reach the target), `monteCarlo` (p10/p50/p90 and probability of ruin),
+`byMarket` (which markets pay, with a significance test and CLV) and `stability` (does the edge
+hold up in the first vs. the second half of the history?). "Exact Set Score" is
+excluded from the default universe (`PAUSED_BETTING_MARKETS`) while its redesign is being evaluated;
+passing `market=Exact Set Score` explicitly still shows it, for monitoring.
 
 ```http
 POST /api/v1/internal/matches/tennis/closing-odds/capture?window_hours=6
 ```
 
-Interno. Captura la cuota de tenis justo antes del saque inicial (Closing Line Value) para
-los partidos que arrancan dentro de `window_hours`, guardada en
-`matches.extra_data.odds_markets_closing`. Llamado por el nodo "Capture Closing Odds" de
-`validation_db` cada hora.
+Internal. Captures the tennis odds right before the first serve (Closing Line Value) for
+matches starting within `window_hours`, stored in
+`matches.extra_data.odds_markets_closing`. Called every hour by the "Capture Closing Odds" node in
+`validation_db`.
 
 ```http
 POST /api/v1/internal/train/exact-score-prior
 GET  /api/v1/internal/predict/tennis-exact-score-prior
 ```
 
-Internos. Entrena (desde todo el histórico de tenis con marcador final) y sirve el prior
-empírico de marcador exacto por sets — ver `exact_score_prior_service.py` y el apartado de
-rediseño de "Exact Set Score" en `AGENTS.md`.
+Internal. Trains (from the whole tennis history with a final score) and serves the empirical
+exact-score-by-sets prior. See `exact_score_prior_service.py` and the "Exact Set Score"
+redesign section in `AGENTS.md`.
 
 ```http
 GET /api/v1/internal/validate/tennis-ensemble-walkforward?cutoff_frac=0.7
 ```
 
-Interno, solo diagnóstico (no persiste nada). Ajusta los pesos del ensemble de Match Winner
-con la primera porción cronológica del histórico validado, los congela, y los evalúa contra
-la porción que nunca vieron — comparando contra las constantes hardcodeadas y contra el ajuste
-con todos los datos (lo que sirve el motor hoy). Ver `ensemble_walkforward_service.py` y el
-hallazgo de `PRIOR_STRENGTH` en `AGENTS.md`.
+Internal, diagnostics only (persists nothing). Fits the Match Winner ensemble weights
+on the first chronological slice of the validated history, freezes them, and evaluates them on
+the slice they never saw, comparing against the hardcoded constants and against the fit
+on all the data (what the engine serves today). See `ensemble_walkforward_service.py` and the
+`PRIOR_STRENGTH` finding in `AGENTS.md`.
 
 ---
 
 # Roadmap
 
-## Fase 1 (Completada)
+## Phase 1 (Done)
 
-* Recolección de datos en vivo (RapidAPI)
-* Dashboard con Vue.js
-* Predicciones básicas (Elo, Poisson, XGBoost-like, CatBoost-like)
+* Live data collection (RapidAPI)
+* Vue.js dashboard
+* Basic predictions (Elo, Poisson, XGBoost-like, CatBoost-like)
 * Telegram Bot
-* Migración a PostgreSQL con CDC desde archivos
+* Migration to PostgreSQL with CDC from files
 
-## Fase 2 (En progreso)
+## Phase 2 (In progress)
 
-* Entrenamiento automático con datos históricos (2010+)
-* Feature store y modelos reentrenables
-* Métricas avanzadas y backtesting
-* Alertas inteligentes
+* Automatic training on historical data (2010+)
+* Feature store and retrainable models
+* Advanced metrics and backtesting
+* Smart alerts
 
-## Fase 3 (Planeada)
+## Phase 3 (Planned)
 
 * MCP Server
-* Multi-deporte (NBA, MLB, eSports)
+* Multi-sport (NBA, MLB, eSports)
 * Reinforcement Learning
-* Predicciones en vivo con actualización continua
-* Bankroll management y Kelly Criterion
+* Live predictions with continuous updates
+* Bankroll management and the Kelly Criterion
 
 ---
 
-# Objetivo Futuro
+# Future Goal
 
-Exponer el Prediction Engine mediante un MCP Server para que cualquier agente de IA pueda consultar directamente:
+Expose the Prediction Engine through an MCP Server so any AI agent can query directly:
 
 ```text
 predict_football()
@@ -855,4 +855,4 @@ get_best_picks()
 get_player_analysis()
 ```
 
-sin depender del frontend o del dashboard.
+without depending on the frontend or the dashboard.
