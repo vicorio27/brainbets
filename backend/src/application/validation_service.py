@@ -179,7 +179,9 @@ def _validate_tennis(prediction: Prediction, match: Match, score: MatchScore) ->
     elif "exact set score" in market:
         winner = _tennis_winner(match, score)
         if winner:
-            actual = f"{winner} {home_score}-{away_score}"
+            # Picks read from the winner's side ("Struff 2-0"), so an away win
+            # must not be written home-first ("Struff 0-2").
+            actual = f"{winner} {max(home_score, away_score)}-{min(home_score, away_score)}"
             success = _normalize_team_name(actual) == _normalize_team_name(predicted or "")
             notes = f"Exact set score: {actual}. Prediction: {predicted}."
         else:
