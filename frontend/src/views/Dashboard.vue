@@ -679,62 +679,9 @@
           : `Ningún pick de hoy supera el ${minConfidence}% de confianza.`"
       />
 
-      <!-- Parlays / combinadas -->
-      <div v-if="minEdge >= 0" class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden mt-4">
-        <div class="px-4 py-3 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <div>
-            <h2 class="text-lg font-semibold text-slate-900">🧩 Combinadas recomendadas</h2>
-            <p class="text-xs text-slate-500">
-              1 leg por partido · solo legs donde el modelo va con el mercado
-              (|p−cuota| &lt; {{ comboLegs >= 3 ? '10' : '15' }}pts, más estricto a 3 legs) ·
-              EV combinado &gt; 0. Los EV son del modelo (sobre-confiados; se muestran capados al 100%).
-            </p>
-          </div>
-          <label class="text-sm font-medium text-slate-700 flex items-center gap-2 flex-shrink-0">
-            Legs:
-            <select
-              v-model.number="comboLegs"
-              aria-label="Legs por combinada"
-              class="px-2 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option :value="2">2</option>
-              <option :value="3">3</option>
-            </select>
-          </label>
-        </div>
-        <ul class="divide-y divide-slate-100">
-          <li v-for="(c, i) in combos" :key="i" class="px-4 py-3">
-            <div class="space-y-1 mb-2">
-              <div
-                v-for="l in c.legs"
-                :key="l.matchId + l.market"
-                class="text-sm flex items-center justify-between gap-2"
-              >
-                <span class="min-w-0 truncate">
-                  <span class="text-slate-500">{{ l.home }} vs {{ l.away }} — </span>
-                  <span class="font-medium text-slate-700">{{ l.market }}:</span>
-                  {{ l.prediction }}
-                </span>
-                <span class="text-xs text-slate-500 flex-shrink-0 whitespace-nowrap">
-                  @{{ l.odd.toFixed(2) }} · {{ Math.round(l.prob * 100) }}%
-                </span>
-              </div>
-            </div>
-            <div class="flex flex-wrap items-center gap-2 text-xs">
-              <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-semibold">cuota {{ c.oddsCombo.toFixed(2) }}</span>
-              <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-semibold">prob {{ (c.pCombo * 100).toFixed(0) }}%</span>
-              <span
-                class="px-2 py-0.5 rounded-full font-semibold"
-                :class="c.evShown > 0.10 ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'"
-                :title="c.evCapped ? `EV del modelo ${(c.evCombo * 100).toFixed(0)}% — capado en pantalla` : ''"
-              >EV +{{ (c.evShown * 100).toFixed(0) }}%{{ c.evCapped ? '+' : '' }}</span>
-              <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">stake ¼ Kelly {{ (c.kelly * 25).toFixed(1) }}%</span>
-            </div>
-          </li>
-        </ul>
-        <p v-if="!combos.length" class="px-4 py-6 text-sm text-slate-500 text-center">
-          No hay combinadas con EV positivo hoy — pocas legs pasan el filtro modelo↔mercado.
-        </p>
+      <!-- The user's own combo, built from "Lo más probable" on each match card -->
+      <div class="bg-white rounded-lg shadow-sm border border-slate-200 px-4 py-3 mt-4">
+        <ComboPanel />
       </div>
     </div>
 
@@ -883,6 +830,9 @@
       </p>
     </div>
 
+    <!-- Room so the combo bar never hides the last card -->
+    <div v-if="combo.count" class="h-16" aria-hidden="true"></div>
+    <ComboBar />
   </div>
 </template>
 
@@ -892,11 +842,15 @@ import { useMatchesStore } from '../stores/matches.js'
 import { usePredictionsStore } from '../stores/predictions.js'
 import { useAnalyticsStore } from '../stores/analytics.js'
 import MatchCard from '../components/MatchCard.vue'
+import ComboPanel from '../components/ComboPanel.vue'
+import ComboBar from '../components/ComboBar.vue'
+import { useComboStore } from '../stores/combo.js'
 import EmptyState from '../components/EmptyState.vue'
 import { streakTags } from '../utils/streak.js'
 import { betEdge, betKelly, betProbability, modelEdge, isSuspicious, formatEdge, edgeLabel } from '../utils/edge.js'
 import { clearApiCache } from '../stores/api.js'
 
+const combo = useComboStore()
 const matchesStore = useMatchesStore()
 const predictionsStore = usePredictionsStore()
 const analyticsStore = useAnalyticsStore()
@@ -1099,8 +1053,7 @@ const bettingPickCount = computed(() =>
   bettingRecs.value.reduce((n, r) => n + r.picks.filter((p) => !p.context).length, 0)
 )
 
-// --- Parlays / combinadas ---
-const comboLegs = ref(2)
+// --- Leg helpers (pick of the day) ---
 
 function comboLegOdd(p) {
   const od = p.reasoningData?.oddsDecimal
@@ -1116,84 +1069,6 @@ function comboLegProb(p) {
   // model's (calibrated, raw for Exact Set Score) -- see utils/edge.js.
   return betProbability(p)
 }
-
-// Model overconfidence compounds in a parlay, so the tolerance for the
-// model disagreeing with the market tightens as legs are added.
-const COMBO_MAX_DIVERGENCE = { 2: 0.15, 3: 0.10 }
-const COMBO_MIN_LEG_PROB = { 2: 0.35, 3: 0.42 }
-// Displayed EV is capped; a combined EV above this is model noise, not signal.
-const COMBO_EV_DISPLAY_CAP = 1.0
-const COMBO_EV_DROP = 2.5
-
-// Best qualifying leg per match: has odds, model agrees with the market
-// (kills the +50% artifacts), not a longshot, positive edge. The thresholds
-// depend on how many legs the combo will have.
-const comboPool = computed(() => {
-  const today = getUtcTodayStr()
-  const k = comboLegs.value
-  const maxDiv = COMBO_MAX_DIVERGENCE[k] ?? 0.15
-  const minProb = COMBO_MIN_LEG_PROB[k] ?? 0.35
-  const byMatch = {}
-  for (const p of predictionsStore.latest?.predictions || []) {
-    if (String(p.sport).toLowerCase() !== 'tennis') continue
-    if (PAUSED_BETTING_MARKETS.has(p.market)) continue
-    if (p.eventDate && p.eventDate !== today) continue
-    const odd = comboLegOdd(p)
-    const prob = comboLegProb(p)
-    if (odd == null || odd <= 1 || prob == null) continue
-    if (prob < minProb) continue
-    if (Math.abs(prob - 1 / odd) > maxDiv) continue
-    const ev = prob * odd - 1
-    if (ev <= 0) continue
-    const m = tennisMatchById.value[p.matchId] || {}
-    const leg = {
-      matchId: p.matchId,
-      home: p.homeName || m.player1 || 'J1',
-      away: p.awayName || m.player2 || 'J2',
-      market: p.market,
-      prediction: p.prediction,
-      odd, prob, ev
-    }
-    if (!byMatch[p.matchId] || leg.ev > byMatch[p.matchId].ev) byMatch[p.matchId] = leg
-  }
-  return Object.values(byMatch).sort((a, b) => b.ev - a.ev)
-})
-
-function combinationsOf(arr, k) {
-  const res = []
-  const rec = (start, acc) => {
-    if (acc.length === k) { res.push(acc.slice()); return }
-    for (let i = start; i < arr.length; i++) { acc.push(arr[i]); rec(i + 1, acc); acc.pop() }
-  }
-  rec(0, [])
-  return res
-}
-
-const combos = computed(() => {
-  const pool = comboPool.value
-  const k = comboLegs.value
-  if (pool.length < k) return []
-  return combinationsOf(pool, k)
-    .map((legs) => {
-      const pCombo = legs.reduce((x, l) => x * l.prob, 1)
-      const oddsCombo = legs.reduce((x, l) => x * l.odd, 1)
-      const evCombo = pCombo * oddsCombo - 1
-      const b = oddsCombo - 1
-      const kelly = b > 0 ? Math.max(0, (b * pCombo - (1 - pCombo)) / b) : 0
-      return {
-        legs,
-        pCombo,
-        oddsCombo,
-        evCombo,
-        evShown: Math.min(evCombo, COMBO_EV_DISPLAY_CAP),
-        evCapped: evCombo > COMBO_EV_DISPLAY_CAP,
-        kelly: Math.min(kelly, 4 * COMBO_EV_DISPLAY_CAP) // keep ¼-Kelly stake sane too
-      }
-    })
-    .filter((c) => c.evCombo > 0 && c.evCombo <= COMBO_EV_DROP)
-    .sort((a, b) => b.evCombo - a.evCombo)
-    .slice(0, 8)
-})
 
 // --- Pick of the day: the single most attention-worthy single bet ---
 const MARKET_ES = {

@@ -14,6 +14,7 @@ Only outcomes at 50% or more are listed, most likely first. "Most likely" is not
 from typing import Any, Dict, List, Optional, Tuple
 
 MIN_PROB = 0.50
+STALE_GAP = 0.06       # same as best_bets_service: a best price this far above the reference may be stale
 DEFAULT_MARGIN = 1.06   # a two-way tennis market's usual overround, when the match price is missing
 MAX_PICKS = 4
 # History key of each pick kind (best_bets_service.band_history).
@@ -70,9 +71,26 @@ def _estimated_price(fair: float, margin: float) -> float:
     return round(max(1.01, 1 / (fair * margin)), 2)
 
 
+def _best_price(books: Any, side: str, reference: float) -> Dict[str, Any]:
+    """Highest price among the collected bookmakers for one side, and whether it needs checking."""
+    prices = sorted(
+        ((float(v[side]), book) for book, v in (books or {}).items()
+         if isinstance(v, dict) and v.get(side) and float(v[side]) > 1),
+        reverse=True,
+    )
+    if not prices or prices[0][0] <= reference:
+        return {"bestOdds": reference, "bestBook": None, "bestNeedsCheck": False}
+    best, book = prices[0]
+    return {"bestOdds": best, "bestBook": book, "bestNeedsCheck": best / reference - 1 > STALE_GAP}
+
+
 def likely_picks(m: Dict[str, Any], history: Optional[Dict[str, Dict[str, Any]]] = None,
-                 band_of=None) -> Optional[List[Dict[str, Any]]]:
-    """Most likely bets of an upcoming match, or None when it has no price yet."""
+                 band_of=None, books: Optional[Dict[str, Any]] = None) -> Optional[List[Dict[str, Any]]]:
+    """Most likely bets of an upcoming match, or None when it has no price yet.
+
+    `books` is extra_data["odds_lines"]["books"] ({matchWinner|set1Winner: {book: {p1, p2}}}):
+    the best price there rides along for the combo builder.
+    """
     if m.get("status") != "SCHEDULED":
         return None
     markets = m.get("oddsMarkets") or {}
@@ -81,7 +99,8 @@ def likely_picks(m: Dict[str, Any], history: Optional[Dict[str, Dict[str, Any]]]
     mw = _pair(markets.get("matchWinner"))
     margin = (1 / mw[0] + 1 / mw[1]) if mw else DEFAULT_MARGIN
 
-    def add(kind: str, label: str, prob: float, odds: Optional[float], direct: bool, note: Optional[str] = None):
+    def add(kind: str, label: str, prob: float, odds: Optional[float], direct: bool, note: Optional[str] = None,
+            best: Optional[Dict[str, Any]] = None):
         if prob < MIN_PROB or not odds:
             return
         band = band_of(prob) if band_of else None
@@ -100,6 +119,7 @@ def likely_picks(m: Dict[str, Any], history: Optional[Dict[str, Dict[str, Any]]]
             "note": note,
             "band": band,
             "history": past,
+            **(best or {"bestOdds": odds, "bestBook": None, "bestNeedsCheck": False}),
         })
 
     for kind, key, what in (("partido", "matchWinner", "gana el partido"), ("set1", "set1Winner", "gana el 1er set")):
@@ -108,7 +128,8 @@ def likely_picks(m: Dict[str, Any], history: Optional[Dict[str, Dict[str, Any]]]
             continue
         a, b = 1 / pair[0], 1 / pair[1]
         for side, price, inv in (("p1", pair[0], a), ("p2", pair[1], b)):
-            add(kind, f"{names[side]} {what}", inv / (a + b), price, True)
+            add(kind, f"{names[side]} {what}", inv / (a + b), price, True,
+                best=_best_price((books or {}).get(key), side, price))
 
     board = board_outcomes(markets.get("setBetting"))
     one_set = markets.get("oneSet") or {}

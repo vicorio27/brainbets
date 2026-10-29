@@ -76,10 +76,22 @@
           <div class="font-medium text-emerald-800">✅ Lo más probable</div>
           <div v-for="p in likelyPicks" :key="p.label" class="mt-1 flex items-baseline gap-1.5" :title="pickTitle(p)">
             <span class="w-9 shrink-0 font-semibold text-slate-900">{{ Math.round(p.probability * 100) }}%</span>
-            <span>
+            <span class="min-w-0 flex-1">
               {{ p.label }}
               <span class="block text-slate-600">{{ p.oddsKind === 'aprox' ? 'cuota ≈' : 'cuota ' }}{{ p.odds.toFixed(2) }} · +${{ p.payPer100 }} por $100<template v-if="p.history"> · antes salió {{ Math.round(p.history.winRate * 100) }}% de {{ p.history.n }}</template></span>
             </span>
+            <button
+              class="shrink-0 self-center rounded border px-1.5 text-sm font-semibold leading-5"
+              :class="combo.has(pickKey(p)) ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-emerald-300 bg-white text-emerald-800 hover:bg-emerald-100'"
+              :aria-label="combo.has(pickKey(p)) ? `Quitar de mi combinada: ${p.label}` : `Agregar a mi combinada: ${p.label}`"
+              :title="combo.has(pickKey(p)) ? 'Está en tu combinada (toca para quitarla)' : 'Agregar a mi combinada'"
+              @click.stop.prevent="togglePick(p)"
+            >{{ combo.has(pickKey(p)) ? '✓' : '+' }}</button>
+          </div>
+          <div v-if="clash" class="mt-1.5 rounded bg-amber-50 px-2 py-1 text-amber-800">
+            Ya tienes «{{ clash.current.label }}» de este partido. Dos apuestas del mismo partido dependen una de la otra.
+            <button class="ml-1 font-semibold underline" @click.stop.prevent="replaceClash">cambiarla por esta</button>
+            <button class="ml-1 underline" @click.stop.prevent="clash = null">dejarla</button>
           </div>
         </div>
 
@@ -146,7 +158,8 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { useComboStore, legKey } from '../stores/combo.js'
 import { formatDateTime, formatDate, formatTime } from '../utils/format.js'
 import { streakTags } from '../utils/streak.js'
 
@@ -182,6 +195,27 @@ const newsItems = computed(() => {
 const newsCount = computed(() => newsItems.value.length)
 const newsNegative = computed(() => newsItems.value.filter(i => i.impact === 'negativo').length)
 const likelyPicks = computed(() => (props.sport === 'tennis' ? props.match.likelyPicks || [] : []))
+const combo = useComboStore()
+const clash = ref(null)
+const pickKey = (p) => legKey(props.match.matchId, p.label)
+function pickLeg(p) {
+  return {
+    key: pickKey(p), matchId: props.match.matchId, match: `${props.match.player1} vs ${props.match.player2}`,
+    eventDate: props.match.eventDate, eventTime: props.match.eventTime,
+    label: p.label, kind: p.kind, probability: p.probability, odds: p.odds, oddsKind: p.oddsKind,
+    bestOdds: p.bestOdds || p.odds, bestBook: p.bestBook || null, bestNeedsCheck: !!p.bestNeedsCheck
+  }
+}
+function togglePick(p) {
+  clash.value = null
+  if (combo.has(pickKey(p))) { combo.remove(pickKey(p)); return }
+  const current = combo.add(pickLeg(p))
+  if (current) clash.value = { current, leg: pickLeg(p) }
+}
+function replaceClash() {
+  combo.replace(clash.value.leg)
+  clash.value = null
+}
 const pickTitle = (p) => {
   const lines = [`${p.label}: la casa le da ${Math.round(p.probability * 100)}% (sin su margen); pierdes ${Math.round(p.lossProbability * 100)} de cada 100 veces.`]
   lines.push(p.oddsKind === 'aprox' ? `Cuota estimada ≈${p.odds.toFixed(2)}: confírmala en la casa.` : `Cuota de la casa: ${p.odds.toFixed(2)}.`)

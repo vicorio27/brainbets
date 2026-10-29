@@ -73,3 +73,15 @@ def test_history_without_a_real_price_keeps_only_the_hit_rate():
     hist = {"One Set": {"90-100": {"n": 900, "winRate": 0.93, "expected": 0.92, "yield": -0.1}}}
     p = next(x for x in likely_picks(_match(), hist, band_of) if x["kind"] == "unSet")
     assert p["history"] == {"n": 900, "winRate": 0.93, "expected": 0.92}
+
+
+def test_best_price_across_books_and_stale_flag():
+    books = {"set1Winner": {"bet365": {"p1": 1.36, "p2": 3.3}, "Pncl": {"p1": 1.33, "p2": 3.5}},
+             "matchWinner": {"Sbo": {"p1": 1.35, "p2": 4.0}}}
+    picks = likely_picks(_match(), {}, band_of, books)
+    s1 = next(x for x in picks if x["kind"] == "set1")
+    assert s1["bestOdds"] == 1.36 and s1["bestBook"] == "bet365" and not s1["bestNeedsCheck"]
+    mw = next(x for x in picks if x["kind"] == "partido")
+    assert mw["bestOdds"] == 1.35 and mw["bestNeedsCheck"]        # 12% above the reference: may be stale
+    one = next(x for x in picks if x["kind"] == "unSet")
+    assert one["bestOdds"] == one["odds"] and one["bestBook"] is None
