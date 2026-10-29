@@ -63,6 +63,29 @@ def settle_leg(kind: str, selector: Dict[str, str], status: Optional[str], home:
     return "WON" if won else "LOST"
 
 
+def settle_live_leg(kind: str, selector: Dict[str, str], live_home: Optional[int],
+                    live_away: Optional[int]) -> Optional[str]:
+    """Settle a leg mid-match only when no later set can change it, from the sets won so far.
+
+    At least one set is won once the side has a set; winning without dropping a
+    set is lost once the side drops one; straight sets is decided once both have
+    a set; the first set is known while exactly one set has been played.
+    """
+    if live_home is None or live_away is None:
+        return None
+    side = selector.get("side")
+    mine, theirs = (live_home, live_away) if side == "p1" else (live_away, live_home)
+    if kind == "unSet" and mine >= 1:
+        return "WON"
+    if kind == "sinCeder" and theirs >= 1:
+        return "LOST"
+    if kind == "sets" and min(live_home, live_away) >= 1:
+        return "LOST" if selector.get("sets") == "corridos" else "WON"
+    if kind == "set1" and live_home + live_away == 1:
+        return "WON" if mine == 1 else "LOST"
+    return None
+
+
 def bet_outcome(legs: List[Tuple[Optional[str], float]]) -> Tuple[str, Optional[float]]:
     """(status, price paid) of a bet from its legs' (status, price)."""
     statuses = [s for s, _ in legs]
@@ -72,7 +95,7 @@ def bet_outcome(legs: List[Tuple[Optional[str], float]]) -> Tuple[str, Optional[
         return "PENDING", None
     if all(s == "VOID" for s in statuses):
         return "VOID", 1.0
-    return "WON", round(math.prod(o for s, o in legs if s == "WON"), 3)
+    return "WON", math.prod(o for s, o in legs if s == "WON")  # unrounded: 1.16 x 1.07 pays 1.2412, not 1.241
 
 
 def profit_of(status: str, amount: float, payout_odds: Optional[float]) -> Optional[float]:
@@ -182,6 +205,15 @@ def settle_pending(db: Session) -> Dict[str, int]:
         s.match_id: s
         for s in db.query(MatchScore).filter(MatchScore.match_id.in_(match_ids), MatchScore.period == "FULL_TIME")
     }
+    # Sets won so far in matches being played: the latest live snapshot.
+    live_ids = [mid for mid in match_ids if mid not in scores]
+    live: Dict[Any, Tuple[int, int]] = {}
+    if live_ids:
+        from src.domain.models import PredictionProgress
+        for p in (db.query(PredictionProgress)
+                  .filter(PredictionProgress.match_id.in_(live_ids))
+                  .order_by(PredictionProgress.snapshot_at.asc())):
+            live[p.match_id] = (p.home_score, p.away_score)
     now = datetime.now(timezone.utc)
     settled = 0
     for bet in bets:
@@ -192,6 +224,10 @@ def settle_pending(db: Session) -> Dict[str, int]:
             result = settle_leg(leg.kind, leg.selector or {}, leg.match.status,
                                 sc.home_score if sc else None, sc.away_score if sc else None,
                                 _first_set_p1(leg.match))
+            # A live snapshot means it started: the tennis live update writes the
+            # score but can leave the match status at SCHEDULED until it ends.
+            if result is None and leg.match.status in ("LIVE", "SCHEDULED") and leg.match_id in live:
+                result = settle_live_leg(leg.kind, leg.selector or {}, *live[leg.match_id])
             if result:
                 leg.status, leg.settled_at = result, now
         status, paid = bet_outcome([(l.status, float(l.odds)) for l in bet.legs])

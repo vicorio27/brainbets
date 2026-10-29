@@ -33,7 +33,8 @@ def test_combo_lost_on_one_leg_and_void_legs_price_one():
     assert bet_outcome([("LOST", 1.2), ("PENDING", 1.1)]) == ("LOST", 0.0)   # lost before the rest finishes
     assert bet_outcome([("WON", 1.2), ("VOID", 1.1)]) == ("WON", 1.2)
     assert bet_outcome([("VOID", 1.2)]) == ("VOID", 1.0)
-    assert bet_outcome([("WON", 1.16), ("WON", 1.08)]) == ("WON", 1.253)
+    status, paid = bet_outcome([("WON", 1.16), ("WON", 1.07)])
+    assert status == "WON" and profit_of(status, 1_000_000, paid) == 241_200.0
 
 
 def test_profit_and_summary():
@@ -53,3 +54,14 @@ def test_profit_and_summary():
 def test_selector_validation():
     assert valid_selector("partido", P1) and valid_selector("sets", {"sets": "largo"})
     assert not valid_selector("sets", P1) and not valid_selector("aces", P1) and not valid_selector("set1", {"side": "x"})
+
+
+def test_live_settles_only_what_no_later_set_can_change():
+    from src.application.user_bets_service import settle_live_leg
+    assert settle_live_leg("unSet", P1, 1, 0) == "WON"            # Zverev took set 1
+    assert settle_live_leg("unSet", P1, 0, 1) is None
+    assert settle_live_leg("sinCeder", P1, 1, 1) == "LOST"
+    assert settle_live_leg("sets", {"sets": "largo"}, 1, 1) == "WON"
+    assert settle_live_leg("set1", P2, 1, 0) == "LOST"
+    assert settle_live_leg("set1", P1, 1, 1) is None                # who took set 1 is unknown from the count
+    assert settle_live_leg("partido", P1, 1, 0) is None
