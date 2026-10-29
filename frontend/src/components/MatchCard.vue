@@ -202,7 +202,7 @@ function pickLeg(p) {
   return {
     key: pickKey(p), matchId: props.match.matchId, match: `${props.match.player1} vs ${props.match.player2}`,
     eventDate: props.match.eventDate, eventTime: props.match.eventTime,
-    label: p.label, kind: p.kind, probability: p.probability, odds: p.odds, oddsKind: p.oddsKind,
+    label: p.label, kind: p.kind, selector: p.selector, probability: p.probability, odds: p.odds, oddsKind: p.oddsKind,
     bestOdds: p.bestOdds || p.odds, bestBook: p.bestBook || null, bestNeedsCheck: !!p.bestNeedsCheck
   }
 }

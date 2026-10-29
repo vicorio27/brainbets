@@ -18,7 +18,7 @@ export function legKey(matchId, label) {
 }
 
 export const useComboStore = defineStore('combo', {
-  state: () => ({ ...load(), open: false }),
+  state: () => ({ ...load(), open: false, justSaved: false }),
   getters: {
     has: (state) => (key) => state.legs.some((l) => l.key === key),
     count: (state) => state.legs.length
@@ -36,6 +36,7 @@ export const useComboStore = defineStore('combo', {
       const clash = this.legs.find((l) => l.matchId === leg.matchId)
       if (clash && clash.key !== leg.key) return clash
       if (!clash) this.legs.push({ ...leg, myOdds: leg.bestOdds || leg.odds })
+      this.justSaved = false
       this.save()
       return null
     },

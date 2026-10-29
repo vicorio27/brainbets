@@ -5,6 +5,10 @@
       <button v-if="combo.legs.length" class="text-xs text-slate-600 underline hover:text-slate-900" @click="combo.clear()">vaciar</button>
     </div>
 
+    <p v-if="combo.justSaved && !combo.legs.length" class="mt-2 text-green-700">
+      Registrada. Se liquida sola cuando terminen los partidos:
+      <router-link to="/mis-apuestas" class="font-semibold underline">ver Mis apuestas</router-link>
+    </p>
     <p v-if="!combo.legs.length" class="mt-2 text-slate-600">
       Agrega apuestas con el botón <span class="font-semibold">+</span> en «Lo más probable» de cada partido (pestaña Hoy).
       Una por partido.
@@ -63,6 +67,17 @@
         <div class="col-span-2 text-slate-600">Si la repites 10 veces, sale las 10 el {{ pct(numbers.allTen) }} de las veces.</div>
       </div>
 
+      <div class="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          class="rounded-lg bg-emerald-700 px-3 py-1.5 font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+          :disabled="saving || !canRegister"
+          @click="register"
+        >{{ saving ? 'Registrando…' : `Registrar ${combo.legs.length === 1 ? 'apuesta sola' : 'combinada'} por $${cop(combo.amount)}` }}</button>
+        <span class="text-xs text-slate-500">Regístrala cuando ya la hayas hecho en la casa, con la cuota que te dieron.</span>
+      </div>
+      <p v-if="!canRegister" class="mt-1 text-xs text-amber-700">{{ blockReason }}</p>
+      <p v-if="saveError" class="mt-1 text-xs text-red-700">{{ saveError }}</p>
+
       <p class="mt-2 text-xs text-slate-500">
         Las probabilidades son las de la casa sin su margen. En una combinada pagas ese margen una vez por cada apuesta,
         así que en promedio pierde más que la peor de sus apuestas sola.
@@ -72,11 +87,35 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useComboStore, comboNumbers } from '../stores/combo.js'
+import { useMyBetsStore } from '../stores/mybets.js'
 
 const combo = useComboStore()
+const myBets = useMyBetsStore()
 const numbers = computed(() => comboNumbers(combo.legs, combo.amount))
+
+const saving = ref(false)
+const saveError = ref(null)
+const blockReason = computed(() => {
+  if (combo.legs.some((l) => !l.selector)) return 'Hay selecciones agregadas antes de esta versión: quítalas y vuelve a agregarlas desde su partido.'
+  if (combo.legs.some(started)) return 'Quita los partidos que ya empezaron: solo se registran apuestas antes del inicio.'
+  return ''
+})
+const canRegister = computed(() => combo.legs.length > 0 && !blockReason.value)
+async function register() {
+  saving.value = true
+  saveError.value = null
+  try {
+    await myBets.register(combo.amount, combo.legs)
+    combo.clear()
+    combo.justSaved = true
+  } catch (err) {
+    saveError.value = err.response?.data?.detail || err.message
+  } finally {
+    saving.value = false
+  }
+}
 
 const BOOKS = { Pncl: 'Pinnacle' }
 const bookName = (b) => BOOKS[b] || b

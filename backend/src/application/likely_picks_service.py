@@ -100,7 +100,7 @@ def likely_picks(m: Dict[str, Any], history: Optional[Dict[str, Dict[str, Any]]]
     margin = (1 / mw[0] + 1 / mw[1]) if mw else DEFAULT_MARGIN
 
     def add(kind: str, label: str, prob: float, odds: Optional[float], direct: bool, note: Optional[str] = None,
-            best: Optional[Dict[str, Any]] = None):
+            best: Optional[Dict[str, Any]] = None, selector: Optional[Dict[str, str]] = None):
         if prob < MIN_PROB or not odds:
             return
         band = band_of(prob) if band_of else None
@@ -110,6 +110,7 @@ def likely_picks(m: Dict[str, Any], history: Optional[Dict[str, Dict[str, Any]]]
             past = {k: past[k] for k in ("n", "winRate", "expected") if k in past}
         picks.append({
             "kind": kind,
+            "selector": selector,   # what settles it (user_bets_service.settle_leg)
             "label": label,
             "probability": round(prob, 4),
             "odds": odds,
@@ -129,7 +130,7 @@ def likely_picks(m: Dict[str, Any], history: Optional[Dict[str, Dict[str, Any]]]
         a, b = 1 / pair[0], 1 / pair[1]
         for side, price, inv in (("p1", pair[0], a), ("p2", pair[1], b)):
             add(kind, f"{names[side]} {what}", inv / (a + b), price, True,
-                best=_best_price((books or {}).get(key), side, price))
+                best=_best_price((books or {}).get(key), side, price), selector={"side": side})
 
     board = board_outcomes(markets.get("setBetting"))
     one_set = markets.get("oneSet") or {}
@@ -143,21 +144,24 @@ def likely_picks(m: Dict[str, Any], history: Optional[Dict[str, Dict[str, Any]]]
         label = f"{names[side]} gana al menos un set"
         if yes and no and yes > 1 and no > 1:
             add("unSet", label, (1 / yes) / (1 / yes + 1 / no), yes, True,
-                "Mercado «Gana al menos un set» (= hándicap +1.5 sets).")
+                "Mercado «Gana al menos un set» (= hándicap +1.5 sets).", selector={"side": side})
         elif board:
             fair = board[side]["unSet"][0]
             add("unSet", label, fair, _estimated_price(fair, margin), False,
-                "Se apuesta como hándicap +1.5 sets o «Gana al menos un set»; cuota estimada, confírmala en la casa.")
+                "Se apuesta como hándicap +1.5 sets o «Gana al menos un set»; cuota estimada, confírmala en la casa.",
+                selector={"side": side})
     if board:
         for side in ("p1", "p2"):
             fair, price = board[side]["sinCeder"]
-            add("sinCeder", f"{names[side]} gana {win}-0", fair, price, True)
+            add("sinCeder", f"{names[side]} gana {win}-0", fair, price, True, selector={"side": side})
         fair = board["match"]["corridos"][0]
         add("sets", f"Se decide en {win} sets (sin set decisivo)", fair, _estimated_price(fair, margin), False,
-            f"Se apuesta como Menos de {win + 0.5} sets; cuota estimada, confírmala en la casa.")
+            f"Se apuesta como Menos de {win + 0.5} sets; cuota estimada, confírmala en la casa.",
+            selector={"sets": "corridos"})
         fair = board["match"]["largo"][0]
         add("sets", "Se va a 3 sets" if win == 2 else "Dura 4 sets o más", fair, _estimated_price(fair, margin), False,
-            f"Se apuesta como Más de {win + 0.5} sets; cuota estimada, confírmala en la casa.")
+            f"Se apuesta como Más de {win + 0.5} sets; cuota estimada, confírmala en la casa.",
+            selector={"sets": "largo"})
 
     if not picks:
         return None

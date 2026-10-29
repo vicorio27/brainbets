@@ -1083,7 +1083,14 @@ def get_router() -> APIRouter:
 
         If sport is provided, only predictions for that sport are validated.
         """
-        return validate_pending_predictions(db, sport=sport)
+        out = validate_pending_predictions(db, sport=sport)
+        try:
+            # The user's registered bets settle on the same results.
+            from src.application.user_bets_service import settle_pending
+            out["userBets"] = settle_pending(db)
+        except Exception as e:  # never let it fail the validation
+            logging.warning("user bets settle failed: %s", e)
+        return out
 
     @r.post("/predictions/progress")
     async def record_prediction_progress(

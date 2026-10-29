@@ -440,3 +440,49 @@ class ExternalApiCache(Base):
     hit_count = Column(Integer, default=0)
 
     __table_args__ = (UniqueConstraint("url", "method", name="uq_external_api_cache_url_method"),)
+
+
+class UserBet(Base):
+    """A bet the user registered from the combo calculator: one leg = a single, more = a combo."""
+    __tablename__ = "user_bets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+    amount = Column(Numeric(14, 2), nullable=False)
+    odds = Column(Numeric(10, 3), nullable=False)          # product of the legs' prices when registered
+    probability = Column(Numeric(6, 4))                    # the bookmaker's, without margin, when registered
+    status = Column(String(10), nullable=False, default="PENDING")
+    payout_odds = Column(Numeric(10, 3))                   # price actually paid (void legs count 1.0)
+    profit = Column(Numeric(14, 2))
+    settled_at = Column(DateTime(timezone=True))
+
+    legs = relationship("UserBetLeg", back_populates="bet", cascade="all, delete-orphan",
+                        order_by="UserBetLeg.position")
+
+    __table_args__ = (
+        CheckConstraint("status IN ('PENDING', 'WON', 'LOST', 'VOID')", name="ck_user_bet_status"),
+    )
+
+
+class UserBetLeg(Base):
+    __tablename__ = "user_bet_legs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    bet_id = Column(UUID(as_uuid=True), ForeignKey("user_bets.id", ondelete="CASCADE"), nullable=False, index=True)
+    position = Column(Integer, nullable=False, default=0)
+    match_id = Column(UUID(as_uuid=True), ForeignKey("matches.id"), nullable=False, index=True)
+    kind = Column(String(20), nullable=False)               # partido | set1 | unSet | sinCeder | sets
+    selector = Column(JSONB, nullable=False)                # {"side": "p1"} or {"sets": "corridos" | "largo"}
+    label = Column(String(200), nullable=False)
+    probability = Column(Numeric(6, 4))
+    odds = Column(Numeric(10, 3), nullable=False)
+    best_odds = Column(Numeric(10, 3))
+    status = Column(String(10), nullable=False, default="PENDING")
+    settled_at = Column(DateTime(timezone=True))
+
+    bet = relationship("UserBet", back_populates="legs")
+    match = relationship("Match")
+
+    __table_args__ = (
+        CheckConstraint("status IN ('PENDING', 'WON', 'LOST', 'VOID')", name="ck_user_bet_leg_status"),
+    )

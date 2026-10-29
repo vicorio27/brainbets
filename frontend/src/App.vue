@@ -27,6 +27,9 @@
             <router-link to="/caja" class="text-sm font-medium text-emerald-50 hover:text-white">
               Caja
             </router-link>
+            <router-link to="/mis-apuestas" class="text-sm font-medium text-emerald-50 hover:text-white">
+              Mis apuestas
+            </router-link>
           </div>
           <div class="flex items-center sm:hidden">
             <button
@@ -83,6 +86,14 @@
             :class="{ 'bg-emerald-700 text-white': $route.path === '/caja' }"
           >
             Caja
+          </router-link>
+          <router-link
+            to="/mis-apuestas"
+            @click="mobileMenuOpen = false"
+            class="block px-3 py-2 rounded-md text-base font-medium text-emerald-50 hover:text-white hover:bg-emerald-700"
+            :class="{ 'bg-emerald-700 text-white': $route.path === '/mis-apuestas' }"
+          >
+            Mis apuestas
           </router-link>
         </div>
       </div>
