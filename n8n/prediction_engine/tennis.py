@@ -649,6 +649,31 @@ def _empirical_sets_lost(best_of: int, rank_diff: float) -> Optional[Tuple[Dict[
     return dist, int(entry.get('samples', 0)), key
 
 
+# Total Sets fallback when the bookmaker has no set board: logit shift on the
+# i.i.d. "goes past straight sets" probability, fitted on the engine's settled
+# picks up to 2026-10-29 (scratchpad sets_fit.py). Frozen: do not refit on
+# later results; move the date if it changes.
+TOTAL_SETS_FROZEN_AT = '2026-10-29'
+TOTAL_SETS_SHIFT = {3: -0.23, 5: -0.57}
+
+
+def _board_long_match_prob(board: Any, best_of: int) -> Optional[float]:
+    """P(the match goes past straight sets) from the bookmaker's set-score
+    board without its margin ("2:0" keys from player1's side), or None when
+    the board is missing or incomplete."""
+    if not isinstance(board, dict):
+        return None
+    keys = ('3:0', '3:1', '3:2', '2:3', '1:3', '0:3') if best_of >= 5 else ('2:0', '2:1', '1:2', '0:2')
+    try:
+        inv = {k: 1.0 / float(board[k]) for k in keys if float(board[k]) > 1.0}
+    except (KeyError, TypeError, ValueError):
+        return None
+    if len(inv) != len(keys):
+        return None
+    sweeps = inv[keys[0]] + inv[keys[-1]]
+    return 1.0 - sweeps / sum(inv.values())
+
+
 def _iid_sets_lost(p: float, best_of: int) -> Dict[int, float]:
     """P(a player with single-set win probability p lost exactly k sets),
     GIVEN that player wins the match -- a pure reparameterization of the old
@@ -914,12 +939,21 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
     set_p2 = 1.0 - set_p1
 
     # Total sets over/under the format line. "Over" = the match goes past a
-    # straight-sets result. Blended with a ranking-closeness nudge because
-    # i.i.d. sets underestimate long matches between evenly matched players.
+    # straight-sets result.
     rank_diff = abs(p1_rank - p2_rank)
-    closeness = sigmoid((30 - rank_diff) / 10.0)
     straight_sets_prob = set_p1 ** sets_to_win + set_p2 ** sets_to_win
-    close_match_prob = 0.7 * (1.0 - straight_sets_prob) + 0.3 * closeness
+    # Measured 2026-10-29 on the engine's own settled picks: the old blend
+    # (0.7 x i.i.d. + 0.3 x ranking closeness) had the right average but no
+    # skill -- worse log-loss than a constant rate, and the bookmaker's set
+    # board beat it on the same 307 best-of-3 matches (58.0% vs 53.1% right).
+    # So the bookmaker's board decides when it is there; otherwise i.i.d. sets
+    # with a logit shift frozen that day (TOTAL_SETS_SHIFT).
+    sets_source = 'market_board'
+    close_match_prob = _board_long_match_prob((safe_get(match, 'odds_markets') or {}).get('setBetting'), best_of)
+    if close_match_prob is None:
+        sets_source = 'iid_shifted'
+        iid_long = min(max(1.0 - straight_sets_prob, 0.02), 0.98)
+        close_match_prob = sigmoid(math.log(iid_long / (1.0 - iid_long)) + TOTAL_SETS_SHIFT[best_of])
     close_match_prob = min(max(close_match_prob, 0.05), 0.95)
     over_sets = close_match_prob > 0.5
 
@@ -970,7 +1004,9 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
     fmt_label = 'al mejor de 5 sets (Grand Slam)' if best_of >= 5 else 'al mejor de 3 sets'
     sets_reasoning = (
         f"Partido {fmt_label}. Diferencia de ranking: {rank_diff}. "
-        f"Probabilidad de más de {sets_line} sets: {round(close_match_prob*100,1)}%."
+        f"Probabilidad de más de {sets_line} sets: {round(close_match_prob*100,1)}%"
+        + (" (la de la casa sin su margen, según el marcador exacto)." if sets_source == 'market_board'
+           else " (sets independientes con la corrección del 29-oct).")
     )
 
     # Exact set score: each player's "sets lost given they win" distribution,
@@ -1163,7 +1199,7 @@ def predict_tennis(match: Dict[str, Any], ml_probs: Optional[Dict[str, float]] =
             'modelContributions': {'elo': 0.5, 'catboost': 0.5},
             'reasoning': sets_reasoning,
             'reasoningData': {
-                'model': 'heuristic',
+                'model': sets_source,
                 'rankDifference': rank_diff,
                 'bestOf': best_of,
                 'line': sets_line,
