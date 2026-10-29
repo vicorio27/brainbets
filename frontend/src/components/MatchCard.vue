@@ -71,6 +71,18 @@
           📰 {{ newsCount }} {{ newsCount === 1 ? 'noticia' : 'noticias' }} a tener en cuenta<template v-if="newsNegative">&nbsp;· <span class="text-red-700 font-medium">{{ newsNegative }} {{ newsNegative === 1 ? 'negativa' : 'negativas' }} para un jugador</span></template>
         </div>
 
+        <!-- Most likely bets, however little they pay (likely_picks_service) -->
+        <div v-if="likelyPicks.length" class="mt-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-xs text-slate-700">
+          <div class="font-medium text-emerald-800">✅ Lo más probable</div>
+          <div v-for="p in likelyPicks" :key="p.label" class="mt-1 flex items-baseline gap-1.5" :title="pickTitle(p)">
+            <span class="w-9 shrink-0 font-semibold text-slate-900">{{ Math.round(p.probability * 100) }}%</span>
+            <span>
+              {{ p.label }}
+              <span class="block text-slate-600">{{ p.oddsKind === 'aprox' ? 'cuota ≈' : 'cuota ' }}{{ p.odds.toFixed(2) }} · +${{ p.payPer100 }} por $100<template v-if="p.history"> · antes salió {{ Math.round(p.history.winRate * 100) }}% de {{ p.history.n }}</template></span>
+            </span>
+          </div>
+        </div>
+
         <div v-if="dogCase" class="mt-1 text-xs text-slate-700" :title="dogTitle">
           🎯 <template v-if="dogCase.headline">{{ dogCase.headline.replace(/, ya que:$/, '') }} ({{ dogCase.reasons.length }} {{ dogCase.reasons.length === 1 ? 'argumento' : 'argumentos' }})</template><span v-else class="text-slate-500">No favorito: {{ dogCase.underdog }}<template v-if="dogCase.odds">&nbsp;a {{ dogCase.odds }}</template> · sin argumentos con datos a su favor</span>
         </div>
@@ -169,6 +181,20 @@ const newsItems = computed(() => {
 })
 const newsCount = computed(() => newsItems.value.length)
 const newsNegative = computed(() => newsItems.value.filter(i => i.impact === 'negativo').length)
+const likelyPicks = computed(() => (props.sport === 'tennis' ? props.match.likelyPicks || [] : []))
+const pickTitle = (p) => {
+  const lines = [`${p.label}: la casa le da ${Math.round(p.probability * 100)}% (sin su margen); pierdes ${Math.round(p.lossProbability * 100)} de cada 100 veces.`]
+  lines.push(p.oddsKind === 'aprox' ? `Cuota estimada ≈${p.odds.toFixed(2)}: confírmala en la casa.` : `Cuota de la casa: ${p.odds.toFixed(2)}.`)
+  if (p.note) lines.push(p.note)
+  const h = p.history
+  if (h) {
+    let s = `Apuestas como esta (tramo ${p.band}%): salieron ${Math.round(h.winRate * 100)}% de ${h.n}, se esperaba ${Math.round(h.expected * 100)}%.`
+    if (h.yield != null) s += ` A la cuota de la casa rindieron ${(h.yield * 100).toFixed(1)}% por apuesta (rango probable ${(h.yieldLow * 100).toFixed(1)}% a ${(h.yieldHigh * 100).toFixed(1)}%).`
+    lines.push(s)
+  }
+  lines.push('Lo más probable no es lo más rentable: la casa cobra su margen también aquí.')
+  return lines.join('\n')
+}
 const dogCase = computed(() => (props.sport === 'tennis' ? props.match.underdogCase : null))
 const dogTitle = computed(() => {
   const c = dogCase.value

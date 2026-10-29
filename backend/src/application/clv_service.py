@@ -110,6 +110,15 @@ def extract_odds_markets(markets: Any) -> Optional[Dict[str, Any]]:
     if sb_out:
         out["setBetting"] = sb_out
 
+    one_set = {}
+    for side, n in (("p1", 1), ("p2", 2)):
+        ws = markets.get(f"Win at least one set (Player {n})") or {}
+        yes, no = _pick_odd(ws.get("Yes")), _pick_odd(ws.get("No"))
+        if yes and no:
+            one_set[side] = {"yes": yes, "no": no}
+    if one_set:
+        out["oneSet"] = one_set
+
     for key, (name, kind) in LINE_MARKETS.items():
         parsed = _line_market(markets.get(name), kind)
         if parsed:

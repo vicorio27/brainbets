@@ -493,6 +493,10 @@ class DataService:
         )
         from src.application.underdog_service import underdog_case
         tm.underdogCase = underdog_case(tm.model_dump())
+        if match.status == "SCHEDULED":
+            from src.application.best_bets_service import band_history, band_of
+            from src.application.likely_picks_service import likely_picks
+            tm.likelyPicks = likely_picks(tm.model_dump(), band_history(self.db), band_of)
         return tm
 
     def get_latest_matches(self) -> Optional[MatchesResponse]:

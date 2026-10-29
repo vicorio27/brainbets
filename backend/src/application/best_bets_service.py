@@ -22,6 +22,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from src.application import point_model_service as point_model
+from src.application.likely_picks_service import board_outcomes
 from src.application.streak_service import streaks_for_matches
 from src.domain.models import Match, MatchCompetitor, MatchScore, Prediction, Sport
 from src.timezone import to_bogota
@@ -128,6 +129,23 @@ def band_history(db: Session) -> Dict[str, Dict[str, Dict[str, Any]]]:
                 band = band_of(fair)
                 if band:
                     buckets.setdefault(market, {}).setdefault(band, []).append((won, price, fair))
+        # Bets read off the set-score board (likely_picks_service).
+        board = board_outcomes(prices.get("setBetting"))
+        if board:
+            home, away = sc.home_score, sc.away_score
+            settled = (
+                ("One Set", board["p1"]["unSet"], home >= 1), ("One Set", board["p2"]["unSet"], away >= 1),
+                ("Straight Sets", board["p1"]["sinCeder"], home > away and away == 0),
+                ("Straight Sets", board["p2"]["sinCeder"], away > home and home == 0),
+                ("Total Sets", board["match"]["corridos"], min(home, away) == 0),
+                ("Total Sets", board["match"]["largo"], min(home, away) >= 1),
+            )
+            for market, (fair, price), won in settled:
+                band = band_of(fair)
+                if band:
+                    # Lines added together have no price of their own: their fair odds
+                    # stand in, so only the hit rate of these buckets is meaningful.
+                    buckets.setdefault(market, {}).setdefault(band, []).append((won, price or 1 / fair, fair))
     data = {market: {band: band_summary(xs) for band, xs in bands.items()} for market, bands in buckets.items()}
     _history_cache.update(at=datetime.now(timezone.utc), data=data)
     return data

@@ -51,6 +51,7 @@ class TennisMatch(BaseModel):
     round: Optional[str] = None  # api-tennis tournament_round, e.g. "ATP Almaty - Final"
     finalsHistory: Optional[Dict[str, Any]] = None  # upcoming finals: {p1: {lastFinal, firstSeen}, p2}
     underdogCase: Optional[Dict[str, Any]] = None  # data-backed arguments for the underdog (underdog_service)
+    likelyPicks: Optional[List[Dict[str, Any]]] = None  # most likely bets, however little they pay (likely_picks_service)
     tournamentTier: Optional[int] = None
     groundType: Optional[str] = None
     countryPlayer1: Optional[str] = None
