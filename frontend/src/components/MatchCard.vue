@@ -67,6 +67,9 @@
           </template>
           <span v-else class="text-slate-500">H2H: nunca se han enfrentado (en los partidos guardados desde 2010)</span>
         </div>
+        <div v-for="s in newsStakes" :key="s.headline" class="mt-1 text-xs text-amber-900" :title="`${s.headline} (${s.source}, ${s.date})`">
+          🏆 <span class="font-medium">En juego:</span> {{ s.note || s.headline }}
+        </div>
         <div v-if="newsCount" class="mt-1 text-xs text-slate-700" title="Noticias fuera de la cancha de esta semana: ábrelo para leerlas">
           📰 {{ newsCount }} {{ newsCount === 1 ? 'noticia' : 'noticias' }} a tener en cuenta<template v-if="newsNegative">&nbsp;· <span class="text-red-700 font-medium">{{ newsNegative }} {{ newsNegative === 1 ? 'negativa' : 'negativas' }} para un jugador</span></template>
         </div>
@@ -193,6 +196,7 @@ const newsItems = computed(() => {
   return [...(n.player1 || []), ...(n.player2 || [])]
 })
 const newsCount = computed(() => newsItems.value.length)
+const newsStakes = computed(() => newsItems.value.filter(i => i.factor === 'en_juego').slice(0, 2))
 const newsNegative = computed(() => newsItems.value.filter(i => i.impact === 'negativo').length)
 const likelyPicks = computed(() => (props.sport === 'tennis' ? props.match.likelyPicks || [] : []))
 const combo = useComboStore()

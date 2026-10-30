@@ -32,7 +32,8 @@ OPENAI_ENDPOINT = os.environ.get("OPENAI_ENDPOINT", "https://api.openai.com/v1/c
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 LOOKBACK_DAYS = 5
-MAX_HEADLINES = 25            # per player, newest first, sent to the model
+MAX_HEADLINES = 35            # per player, sent to the model
+MAX_STAKES = 12               # of which headlines about what is at stake go first
 HOURS_AHEAD = 18              # matches starting within this window get news
 STALE_MINUTES = 180           # refresh after this long...
 STALE_MINUTES_NEAR = 60       # ...or this long once the match is less than NEAR_HOURS away
@@ -45,9 +46,20 @@ NOISE = re.compile(
     r"\svs?\.?\s.*·|match atp|watchalong|how to watch|live stream|d[oó]nde ver|fecha, hora|hot shot",
     re.I,
 )
-NOISE_SOURCES = {"robinhood", "sofascore", "flashscore", "sportytrader", "oddschecker", "unisba media", "bet365"}
+MARKET_SOURCES = {"robinhood", "coinbase", "polymarket", "kalshi", "oddschecker", "bet365", "sportytrader", "dimers", "legalbet"}
+NOISE_SOURCES = MARKET_SOURCES | {"sofascore", "flashscore", "unisba media"}
 
-FACTORS = {"lesion", "fisico", "personal", "local", "entrenador", "motivacion", "calendario", "otro"}
+# What a win or a loss decides (No. 1, the Finals, the top 10, a title defence, a farewell).
+# On 29-oct "Zverev ... a una victoria de ser el N°1 del mundo" was headline 30 of a famous
+# player's week and fell outside the 25 newest; these go first and are never dropped as score pages.
+STAKES = re.compile(
+    r"n[uú]mero (1|uno)\b|n\.?\s?[ºo°]\s?1\b|\bno\.?\s?1\b|number one|world no|cima del (tenis|ranking)|"
+    r"top[- ]?(5|10)\b|atp finals|nitto|tur[ií]n|\bfinals\b|clasific|qualif|race to|carrera a|"
+    r"defend|defiende|defensor|campe[oó]n defensor|retir|farewell|despedida|[uú]ltimo torneo|last (match|tournament)",
+    re.I,
+)
+
+FACTORS = {"en_juego", "lesion", "fisico", "personal", "local", "entrenador", "motivacion", "calendario", "otro"}
 IMPACTS = {"positivo", "negativo", "incierto"}
 
 
@@ -67,9 +79,19 @@ def mentions(title: str, name: str) -> bool:
     return _fold(surname(name)) in _fold(title)
 
 
+def is_stakes(title: str) -> bool:
+    return bool(STAKES.search(title or ""))
+
+
 def is_noise(title: str, source: str) -> bool:
+    """Score pages, live feeds and betting markets. A headline about what is at stake stays
+    even from a score site ("Landaluce ... ante el futuro número uno"), never from a market."""
     src = (source or "").strip().lower()
     src = re.sub(r"^www\.|\.(com|es|net|org|co)$", "", src)
+    if any(src.startswith(n) for n in MARKET_SOURCES) or re.search(r"prediction market", title or "", re.I):
+        return True
+    if is_stakes(title) and not re.search(r"\bvs?\.?\s.*·|pron[oó]stico|prediction|odds|cuotas", title or "", re.I):
+        return False
     return bool(NOISE.search(title or "")) or any(src.startswith(n) for n in NOISE_SOURCES)
 
 
@@ -107,6 +129,11 @@ def headlines(name: str) -> List[Dict[str, Any]]:
             items += _rss(query, hl, gl)
         except Exception as exc:  # network / XML: news is optional, never fail the caller
             logging.warning("[NEWS] rss failed for %s: %s", query, exc)
+    return select_headlines(items, name)
+
+
+def select_headlines(items: List[Dict[str, Any]], name: str) -> List[Dict[str, Any]]:
+    """De-duplicate and drop noise; headlines about what is at stake first, then the newest."""
     seen, kept = set(), []
     for it in sorted(items, key=lambda x: x["published"], reverse=True):
         key = re.sub(r"\W+", " ", it["title"].lower()).strip()
@@ -114,18 +141,30 @@ def headlines(name: str) -> List[Dict[str, Any]]:
             continue
         seen.add(key)
         kept.append(it)
-    return kept[:MAX_HEADLINES]
+    stakes = [it for it in kept if is_stakes(it["title"])][:MAX_STAKES]
+    rest = [it for it in kept if it not in stakes][: MAX_HEADLINES - len(stakes)]
+    return sorted(stakes + rest, key=lambda x: x["published"], reverse=True)
 
 
 SYSTEM_PROMPT = (
     "Eres analista de tenis para apuestas. Recibes titulares recientes que mencionan el apellido de cada "
     "jugador de un partido ATP. Algunos son de otra persona con el mismo apellido, o solo dicen un resultado. "
-    "Quédate SOLO con los que son sobre ESE jugador y dicen algo que pueda influir en este partido más allá del "
+    "Lo PRIMERO que buscas es qué se juega cada uno en ESTE partido: si ganarlo le da el número 1 del mundo, "
+    "la clasificación a las ATP Finals, entrar al top 10, defender un título o puntos, o si es su despedida. Si "
+    "algún titular lo dice, va como factor en_juego y la nota dice qué gana o pierde en este partido con las "
+    "palabras del titular; prefiere el titular más directo (\"a una victoria de\"). Solo es en_juego si el "
+    "titular dice que ESE jugador se juega algo: si habla de lo que se juega otro (\"X elimina a Djokovic, un golpe "
+    "a SUS opciones de Finals\" habla de Djokovic, no de X), no lo uses para X. Si los titulares dicen que ya lo aseguró, di que ya está asegurado y que este partido no "
+    "lo decide. Ante la duda, no lo pongas. "
+    "Después, quédate SOLO con los que son sobre ESE jugador y dicen algo que pueda influir en este partido más allá del "
     "marcador: lesión, enfermedad, molestias, cansancio o calendario cargado, asuntos personales o familiares, "
     "conexión con la ciudad o el país del torneo (juega en casa, familia allí, público a favor), cambio de "
     "entrenador, motivación (defiende puntos, carrera por las Finals, retiro), declaraciones sobre su estado. "
+    "Planes de vacaciones o de después de la temporada, premios, polémicas con terceros y opiniones de otros NO "
+    "son factores: no deduzcas de ellos que el jugador está relajado, distraído o desenfocado. "
     "Usa EXCLUSIVAMENTE lo que dicen los titulares: no agregues datos que sepas por tu cuenta ni supongas. "
-    "Si nada aporta, devuelve la lista vacía. Responde en español, en JSON."
+    "Si nada aporta, devuelve la lista vacía. El resumen solo repite lo que pusiste en las listas, empezando por "
+    "lo que está en juego; si las listas están vacías, el resumen es cadena vacía. Responde en español, en JSON."
 )
 
 
@@ -144,7 +183,7 @@ def _ask_model(match_ctx: Dict[str, Any], p1: List[Dict[str, Any]], p2: List[Dic
         "jugador1": {"nombre": match_ctx["player1"], "titulares": listing(p1)},
         "jugador2": {"nombre": match_ctx["player2"], "titulares": listing(p2)},
         "responde_con_exactamente_estas_claves": {
-            "jugador1": "LISTA de objetos {i: índice del titular, factor: " + "|".join(sorted(FACTORS))
+            "jugador1": "array JSON (no un objeto) de objetos {i: índice del titular, factor: " + "|".join(sorted(FACTORS))
                         + ", impacto: positivo|negativo|incierto (para ese jugador en este partido), "
                         "nota: una frase con qué dice y por qué podría importar}; lista vacía si nada aporta",
             "jugador2": "igual que jugador1",
@@ -176,8 +215,8 @@ def _ask_model(match_ctx: Dict[str, Any], p1: List[Dict[str, Any]], p2: List[Dic
 
 def clean_items(raw: Any, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Keep only model rows that point at a real headline; attach its source, date and link."""
-    if isinstance(raw, dict):  # the model sometimes echoes the input shape: {nombre, titulares: [...]}
-        raw = raw.get("titulares") or raw.get("items") or []
+    if isinstance(raw, dict):  # the model wraps the list: {nombre, titulares: [...]} or {"LISTA": [...]}
+        raw = next((v for v in raw.values() if isinstance(v, list)), [])
     out, used = [], set()
     for row in raw if isinstance(raw, list) else []:
         try:
@@ -219,12 +258,14 @@ def news_for_match(match: Match) -> Optional[Dict[str, Any]]:
     answer = _ask_model(ctx, h1, h2) if (h1 or h2) else {}
     if answer is None:
         return None
+    items1, items2 = clean_items(answer.get("jugador1"), h1), clean_items(answer.get("jugador2"), h2)
     return {
         "fetchedAt": datetime.now(timezone.utc).isoformat(),
         "headlinesRead": {"player1": len(h1), "player2": len(h2)},
-        "player1": clean_items(answer.get("jugador1"), h1),
-        "player2": clean_items(answer.get("jugador2"), h2),
-        "summary": str(answer.get("resumen") or "").strip()[:500],
+        "player1": items1,
+        "player2": items2,
+        # a summary with no news behind it was invented (29-oct: "Zverev, más enfocado en sus vacaciones")
+        "summary": str(answer.get("resumen") or "").strip()[:500] if (items1 or items2) else "",
     }
 
 

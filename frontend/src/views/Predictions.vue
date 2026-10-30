@@ -316,7 +316,7 @@ const h2hBox = computed(() => {
 })
 
 const factorEs = {
-  lesion: 'lesión', fisico: 'físico', personal: 'personal', local: 'en casa', entrenador: 'entrenador',
+  en_juego: 'en juego', lesion: 'lesión', fisico: 'físico', personal: 'personal', local: 'en casa', entrenador: 'entrenador',
   motivacion: 'motivación', calendario: 'calendario', otro: 'otro'
 }
 const impactClass = {
