@@ -50,7 +50,7 @@ def test_news_goes_stale_faster_close_to_the_start():
 def test_what_is_at_stake_goes_first_and_survives_the_noise_filter():
     # 29-oct: the No. 1 line was headline 30 of Zverev's week and fell outside the 25 newest
     t0 = datetime(2026, 10, 29, 15, tzinfo=timezone.utc)
-    filler = [{"title": f"Zverev opina sobre el tema {i}", "source": "Tennis World", "link": "x",
+    filler = [{"title": f"Zverev w{i}a w{i}b w{i}c", "source": "Tennis World", "link": "x",
                "published": t0 - timedelta(hours=i)} for i in range(60)]
     stake = {"title": "Zverev quedó a una victoria de ser el N°1 del mundo", "source": "ESPN Deportes",
              "link": "y", "published": t0 - timedelta(days=2)}
@@ -67,3 +67,27 @@ def test_a_list_wrapped_under_any_key_is_read():
     items = [{"title": "Zverev, a una victoria del N°1", "source": "ESPN", "link": "z", "published": now}]
     out = pn.clean_items({"LISTA": [{"i": 0, "factor": "en_juego", "impacto": "positivo", "nota": "x"}]}, items)
     assert len(out) == 1 and out[0]["factor"] == "en_juego"
+
+
+def test_the_same_story_from_another_outlet_or_language_is_kept_once():
+    t0 = datetime(2026, 10, 29, 20, tzinfo=timezone.utc)
+    titles = [
+        "ATP roundup: Alexander Zverev clinches world No. 1 ranking",
+        "Germany's Alexander Zverev clinches tennis No. 1 ranking",
+        "Alexander Zverev's first No. 1 ranking to be confirmed Monday with win in Vienna",
+        "Alexander Zverev's first No. 1 ranking will be confirmed Monday thanks to win in Vienna",
+        "Es oficial: Alexander Zverev será el No.1 del tenis mundial desde el lunes",
+        "Alexander Zverev será el nuevo número uno del mundo desde el próximo lunes",
+        "Zverev saves 4 MPs, survives Landaluce test in Vienna",
+        "Alexander Zverev confirms his holiday destination and how long he will rest",
+    ]
+    items = [{"title": t, "source": "S", "link": str(i), "published": t0 - timedelta(minutes=i)}
+             for i, t in enumerate(titles)]
+    kept = [it["title"] for it in pn.select_headlines(items, "Zverev A.")]
+    assert kept == [titles[0], titles[2], titles[4], titles[6], titles[7]]
+
+
+def test_victoria_and_triunfo_tell_the_same_story():
+    a = pn.headline_signature("Zverev ganó el partido del día, salvó cuatro match points y quedó a una victoria de ser el N°1 del mundo", "Zverev A.")
+    b = pn.headline_signature("ATP 500 Viena 2026: Alexander Zverev salva cuatro match points y queda a un triunfo del N.º 1 del mundo", "Zverev A.")
+    assert pn.same_story(a, b)

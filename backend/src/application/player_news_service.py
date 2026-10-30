@@ -132,14 +132,50 @@ def headlines(name: str) -> List[Dict[str, Any]]:
     return select_headlines(items, name)
 
 
+SIMILAR = 0.4  # word overlap (Jaccard) from which two headlines tell the same story
+_SIG_STOP = set(
+    "the a an of to in on at for and with his her its as by from after before is are was be will has have that this "
+    "who what how vs his him new set el la los las de del en y al con por para su sus que se un una es tras ante "
+    "sobre lo le como mas ya tennis tenis atp".split()
+)
+# Same idea, other words or language: "No. 1" = "número uno" = "number one", "Viena" = "Vienna"...
+_SIG_CANON = [
+    (r"\bn\s?\.?\s?[oº°]?\s?\.?\s?1\b|\bn[uú]mero (?:1|uno)\b|\bnumber (?:1|one)\b|\bworld no\b", " numberone "),
+    (r"\bmund\w*|\bworld\b", " world "),
+    (r"\bvien+a\b|\bwien\b", " vienna "),
+    (r"\blunes\b", " monday "),
+    (r"\brank\w*|\bclasificaci\w+", " ranking "),
+    (r"\b(?:becom\w*|ser[aá]|convierte\w*|convertirse|alcanz\w*|reach\w*|clinch\w*|asegur\w*|secur\w*|tomar[aá]|top|cima)\b",
+     " become "),
+    (r"\b(?:wins?|won|beats?|defeats?|gan[oóa]\w*|venc\w*|venci\w*|edges?|survives?|victor\w*|triunf\w*)\b", " win "),
+    (r"\bqued\w*", " queda "),
+]
+
+
+def headline_signature(title: str, name: str = "") -> set:
+    """The words that carry the story, without the player's own name (every headline has it)."""
+    s = " " + _fold(title) + " "
+    for pat, rep in _SIG_CANON:
+        s = re.sub(pat, rep, s)
+    own = set(re.findall(r"[a-z0-9]+", _fold(surname(name))))
+    return {w for w in re.findall(r"[a-z0-9]+", s)
+            if len(w) > 2 and not w.isdigit() and w not in _SIG_STOP and w not in own}
+
+
+def same_story(a: set, b: set) -> bool:
+    return bool(a | b) and len(a & b) / len(a | b) >= SIMILAR
+
+
 def select_headlines(items: List[Dict[str, Any]], name: str) -> List[Dict[str, Any]]:
-    """De-duplicate and drop noise; headlines about what is at stake first, then the newest."""
-    seen, kept = set(), []
+    """Drop noise and repeats of the same story (newest kept); what is at stake first, then the newest."""
+    kept, sigs = [], []
     for it in sorted(items, key=lambda x: x["published"], reverse=True):
-        key = re.sub(r"\W+", " ", it["title"].lower()).strip()
-        if key in seen or is_noise(it["title"], it["source"]) or not mentions(it["title"], name):
+        if is_noise(it["title"], it["source"]) or not mentions(it["title"], name):
             continue
-        seen.add(key)
+        sig = headline_signature(it["title"], name)
+        if any(same_story(sig, s) for s in sigs):
+            continue
+        sigs.append(sig)
         kept.append(it)
     stakes = [it for it in kept if is_stakes(it["title"])][:MAX_STAKES]
     rest = [it for it in kept if it not in stakes][: MAX_HEADLINES - len(stakes)]
