@@ -85,3 +85,30 @@ def test_best_price_across_books_and_stale_flag():
     assert mw["bestOdds"] == 1.35 and mw["bestNeedsCheck"]        # 12% above the reference: may be stale
     one = next(x for x in picks if x["kind"] == "unSet")
     assert one["bestOdds"] == one["odds"] and one["bestBook"] is None
+
+
+GAMES = {"bestOf": 3, "trust": 1.0,
+         "markets": {"matchP1": 0.29, "set1P1": 0.35, "setScores": {"2-0": 0.16, "2-1": 0.13, "1-2": 0.21, "0-2": 0.50}}}
+
+
+def test_a_match_without_any_price_gets_its_picks_from_the_point_model():
+    picks = likely_picks(_match(oddsMarkets={}, gamesModel=GAMES))
+    assert picks and all(p["source"] == "modelo" and p["oddsKind"] == "aprox" for p in picks)
+    labels = {p["label"]: p["probability"] for p in picks}
+    assert labels["Griekspoor T. gana al menos un set"] == 0.84    # 1 - P(Zverev 2-0)
+    assert labels["Griekspoor T. gana el partido"] == 0.71
+    assert all(p["history"] is None for p in picks)
+
+
+def test_the_model_only_fills_the_bets_the_bookmaker_did_not_quote():
+    m = _match(oddsMarkets={"matchWinner": {"p1": 1.2, "p2": 5.0}, "set1Winner": {"p1": 1.31, "p2": 3.6}},
+               gamesModel=GAMES)
+    picks = likely_picks(m)
+    by_kind = {(p["kind"], p["source"]) for p in picks}
+    assert ("partido", "casa") in by_kind and ("partido", "modelo") not in by_kind
+    assert ("set1", "modelo") not in by_kind
+    assert any(p["source"] == "modelo" and p["kind"] in ("unSet", "sets", "sinCeder") for p in picks)
+
+
+def test_little_history_behind_the_model_gives_no_picks():
+    assert likely_picks(_match(oddsMarkets={}, gamesModel={**GAMES, "trust": 0.1})) is None

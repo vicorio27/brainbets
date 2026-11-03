@@ -81,7 +81,7 @@
             <span class="w-9 shrink-0 font-semibold text-slate-900">{{ Math.round(p.probability * 100) }}%</span>
             <span class="min-w-0 flex-1">
               {{ p.label }}
-              <span class="block text-slate-600">{{ p.oddsKind === 'aprox' ? 'cuota ≈' : 'cuota ' }}{{ p.odds.toFixed(2) }} · +${{ p.payPer100 }} por $100<template v-if="p.history"> · antes salió {{ Math.round(p.history.winRate * 100) }}% de {{ p.history.n }}</template></span>
+              <span class="block text-slate-600"><template v-if="p.source === 'modelo'"><span class="font-medium text-amber-800">modelo, sin cuota de la casa</span> · </template>{{ p.oddsKind === 'aprox' ? 'cuota ≈' : 'cuota ' }}{{ p.odds.toFixed(2) }} · +${{ p.payPer100 }} por $100<template v-if="p.history"> · antes salió {{ Math.round(p.history.winRate * 100) }}% de {{ p.history.n }}</template></span>
             </span>
             <button
               class="shrink-0 self-center rounded border px-1.5 text-sm font-semibold leading-5"
@@ -221,7 +221,8 @@ function replaceClash() {
   clash.value = null
 }
 const pickTitle = (p) => {
-  const lines = [`${p.label}: la casa le da ${Math.round(p.probability * 100)}% (sin su margen); pierdes ${Math.round(p.lossProbability * 100)} de cada 100 veces.`]
+  const who = p.source === 'modelo' ? 'el modelo de saque y resto le da' : 'la casa le da'
+  const lines = [`${p.label}: ${who} ${Math.round(p.probability * 100)}%${p.source === 'modelo' ? '' : ' (sin su margen)'}; pierdes ${Math.round(p.lossProbability * 100)} de cada 100 veces.`]
   lines.push(p.oddsKind === 'aprox' ? `Cuota estimada ≈${p.odds.toFixed(2)}: confírmala en la casa.` : `Cuota de la casa: ${p.odds.toFixed(2)}.`)
   if (p.note) lines.push(p.note)
   const h = p.history

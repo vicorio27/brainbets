@@ -8,6 +8,11 @@ come from:
   * setBetting (the exact set score board): at least one set (= handicap +1.5
     sets at the bookmaker), without dropping a set, and 2 vs 3 sets.
 
+When the bookmaker has not quoted a bet yet (no line at all, or only the match
+and first-set prices), that bet comes from the point model (gamesModel.markets)
+with an estimated price, marked `source: "modelo"`: the model has not beaten the
+price in testing, so the user is told to put in their bookmaker's price.
+
 Only outcomes at 50% or more are listed, most likely first. "Most likely" is not
 "profitable": see the history each pick carries (best_bets_service.band_history).
 """
@@ -17,6 +22,9 @@ MIN_PROB = 0.50
 STALE_GAP = 0.06       # same as best_bets_service: a best price this far above the reference may be stale
 DEFAULT_MARGIN = 1.06   # a two-way tennis market's usual overround, when the match price is missing
 MAX_PICKS = 4
+MIN_MODEL_TRUST = 0.2   # below this the point model has too few serve points behind it
+MODEL_NOTE = ("La casa aún no cotiza esta apuesta: probabilidad del modelo de saque y resto "
+              "(no le ha ganado a la cuota) y cuota estimada; pon la cuota de tu casa.")
 # History key of each pick kind (best_bets_service.band_history).
 # Kinds whose history was measured at the bookmaker's own price, so its yield means something.
 PRICED_HISTORY = {"partido", "set1", "sinCeder"}
@@ -99,12 +107,18 @@ def likely_picks(m: Dict[str, Any], history: Optional[Dict[str, Dict[str, Any]]]
     mw = _pair(markets.get("matchWinner"))
     margin = (1 / mw[0] + 1 / mw[1]) if mw else DEFAULT_MARGIN
 
+    covered = set()   # (kind, selector) the bookmaker priced, so the model does not repeat them
+
     def add(kind: str, label: str, prob: float, odds: Optional[float], direct: bool, note: Optional[str] = None,
-            best: Optional[Dict[str, Any]] = None, selector: Optional[Dict[str, str]] = None):
+            best: Optional[Dict[str, Any]] = None, selector: Optional[Dict[str, str]] = None,
+            source: str = "casa"):
+        if source == "casa":
+            covered.add((kind, tuple(sorted((selector or {}).items()))))
         if prob < MIN_PROB or not odds:
             return
         band = band_of(prob) if band_of else None
-        past = ((history or {}).get(HISTORY_KEY[kind]) or {}).get(band or "")
+        # The history is of the bookmaker's probability, not the model's.
+        past = None if source != "casa" else ((history or {}).get(HISTORY_KEY[kind]) or {}).get(band or "")
         if past and kind not in PRICED_HISTORY:
             # Measured without a real price: only how often it came in counts.
             past = {k: past[k] for k in ("n", "winRate", "expected") if k in past}
@@ -118,6 +132,7 @@ def likely_picks(m: Dict[str, Any], history: Optional[Dict[str, Dict[str, Any]]]
             "payPer100": round((odds - 1) * 100),
             "lossProbability": round(1 - prob, 4),
             "note": note,
+            "source": source,
             "band": band,
             "history": past,
             **(best or {"bestOdds": odds, "bestBook": None, "bestNeedsCheck": False}),
@@ -163,7 +178,41 @@ def likely_picks(m: Dict[str, Any], history: Optional[Dict[str, Dict[str, Any]]]
             f"Se apuesta como Más de {win + 0.5} sets; cuota estimada, confírmala en la casa.",
             selector={"sets": "largo"})
 
+    _model_picks(m, names, margin, covered, add)
     if not picks:
         return None
     picks.sort(key=lambda p: -p["probability"])
     return picks[:MAX_PICKS]
+
+
+def _model_picks(m: Dict[str, Any], names: Dict[str, Any], margin: float, covered: set, add) -> None:
+    """The bets the bookmaker has not quoted, from the point model."""
+    games = m.get("gamesModel") or {}
+    mk = games.get("markets") or {}
+    scores = mk.get("setScores") or {}
+    if (games.get("trust") or 0) < MIN_MODEL_TRUST or mk.get("matchP1") is None:
+        return
+    win = 3 if games.get("bestOf") == 5 else 2
+    sweep1, sweep2 = scores.get(f"{win}-0"), scores.get(f"0-{win}")
+
+    def model(kind, label, prob, selector):
+        if prob is None or (kind, tuple(sorted(selector.items()))) in covered:
+            return
+        add(kind, label, prob, _estimated_price(prob, margin), False, MODEL_NOTE,
+            selector=selector, source="modelo")
+
+    p1 = float(mk["matchP1"])
+    model("partido", f"{names['p1']} gana el partido", p1, {"side": "p1"})
+    model("partido", f"{names['p2']} gana el partido", 1 - p1, {"side": "p2"})
+    if mk.get("set1P1") is not None:
+        s1 = float(mk["set1P1"])
+        model("set1", f"{names['p1']} gana el 1er set", s1, {"side": "p1"})
+        model("set1", f"{names['p2']} gana el 1er set", 1 - s1, {"side": "p2"})
+    if sweep1 is None or sweep2 is None:
+        return
+    model("unSet", f"{names['p1']} gana al menos un set", 1 - sweep2, {"side": "p1"})
+    model("unSet", f"{names['p2']} gana al menos un set", 1 - sweep1, {"side": "p2"})
+    model("sinCeder", f"{names['p1']} gana {win}-0", sweep1, {"side": "p1"})
+    model("sinCeder", f"{names['p2']} gana {win}-0", sweep2, {"side": "p2"})
+    model("sets", f"Se decide en {win} sets (sin set decisivo)", sweep1 + sweep2, {"sets": "corridos"})
+    model("sets", "Se va a 3 sets" if win == 2 else "Dura 4 sets o más", 1 - sweep1 - sweep2, {"sets": "largo"})
