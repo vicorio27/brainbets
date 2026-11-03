@@ -77,3 +77,13 @@ def test_games_in_a_set_from_the_set_rows():
     assert settle_leg("gamesSet", {"set": 3, "line": 9.5, "pick": "mas"}, "FINISHED", 2, 0, True,
                       rows[:2]) == "VOID"                                               # set 3 never played
     assert valid_selector("gamesSet", over) and not valid_selector("gamesSet", {**over, "line": 9})
+
+
+def test_games_in_the_match_and_tiebreaks():
+    rows = [{"p1": 4, "p2": 6}, {"p1": 6, "p2": 1}, {"p1": 6, "p2": 7}]   # 30 games, one tiebreak
+    assert settle_leg("gamesMatch", {"line": 29.5, "pick": "mas"}, "FINISHED", 1, 2, False, rows) == "WON"
+    assert settle_leg("gamesMatch", {"line": 30.5, "pick": "mas"}, "FINISHED", 1, 2, False, rows) == "LOST"
+    assert settle_leg("tiebreak", {"pick": "si"}, "FINISHED", 1, 2, False, rows) == "WON"
+    assert settle_leg("tiebreak", {"pick": "no"}, "FINISHED", 1, 2, False, rows) == "LOST"
+    assert settle_leg("tiebreak", {"pick": "si"}, "FINISHED", 1, 2, False, rows[:2]) is None   # a set row missing
+    assert valid_selector("tiebreak", {"pick": "si"}) and valid_selector("gamesMatch", {"line": 22.5, "pick": "menos"})

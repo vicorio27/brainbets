@@ -13,6 +13,12 @@ and first-set prices), that bet comes from the point model (gamesModel.markets)
 with an estimated price, marked `source: "modelo"`: the model has not beaten the
 price in testing, so the user is told to put in their bookmaker's price.
 
+Games come apart (`group: "games"`, up to MAX_GAMES_PICKS): over/under lines of
+the first set and of the match at the bookmaker's own price (first set over
+12.5 = a tiebreak in it), and a tiebreak anywhere in the match from the point
+model (its correction is frozen in games_model_service). Lines paying under
+MIN_GAMES_ODDS are left out: at 1.01-1.07 they risk everything for nothing.
+
 Only outcomes at 50% or more are listed, most likely first. "Most likely" is not
 "profitable": see the history each pick carries (best_bets_service.band_history).
 """
@@ -22,6 +28,9 @@ MIN_PROB = 0.50
 STALE_GAP = 0.06       # same as best_bets_service: a best price this far above the reference may be stale
 DEFAULT_MARGIN = 1.06   # a two-way tennis market's usual overround, when the match price is missing
 MAX_PICKS = 4
+MAX_GAMES_PICKS = 4
+MAX_PER_GAMES_KIND = 2
+MIN_GAMES_ODDS = 1.10
 MIN_MODEL_TRUST = 0.2   # below this the point model has too few serve points behind it
 MODEL_NOTE = ("La casa aún no cotiza esta apuesta: probabilidad del modelo de saque y resto "
               "(no le ha ganado a la cuota) y cuota estimada; pon la cuota de tu casa.")
@@ -30,6 +39,7 @@ MODEL_NOTE = ("La casa aún no cotiza esta apuesta: probabilidad del modelo de s
 PRICED_HISTORY = {"partido", "set1", "sinCeder"}
 HISTORY_KEY = {"partido": "Match Winner", "set1": "Set 1 Winner", "unSet": "One Set",
                "sinCeder": "Straight Sets", "sets": "Total Sets"}
+GAMES_KINDS = {"gamesSet", "gamesMatch", "tiebreak"}
 
 
 def _pair(odds: Any) -> Optional[Tuple[float, float]]:
@@ -118,7 +128,7 @@ def likely_picks(m: Dict[str, Any], history: Optional[Dict[str, Dict[str, Any]]]
             return
         band = band_of(prob) if band_of else None
         # The history is of the bookmaker's probability, not the model's.
-        past = None if source != "casa" else ((history or {}).get(HISTORY_KEY[kind]) or {}).get(band or "")
+        past = None if source != "casa" else ((history or {}).get(HISTORY_KEY.get(kind, "")) or {}).get(band or "")
         if past and kind not in PRICED_HISTORY:
             # Measured without a real price: only how often it came in counts.
             past = {k: past[k] for k in ("n", "winRate", "expected") if k in past}
@@ -133,6 +143,7 @@ def likely_picks(m: Dict[str, Any], history: Optional[Dict[str, Dict[str, Any]]]
             "lossProbability": round(1 - prob, 4),
             "note": note,
             "source": source,
+            "group": "games" if kind in GAMES_KINDS else "main",
             "band": band,
             "history": past,
             **(best or {"bestOdds": odds, "bestBook": None, "bestNeedsCheck": False}),
@@ -179,10 +190,20 @@ def likely_picks(m: Dict[str, Any], history: Optional[Dict[str, Dict[str, Any]]]
             selector={"sets": "largo"})
 
     _model_picks(m, names, margin, covered, add)
+    _games_picks(m, margin, add)
     if not picks:
         return None
     picks.sort(key=lambda p: -p["probability"])
-    return picks[:MAX_PICKS]
+    main = [p for p in picks if p["group"] == "main"][:MAX_PICKS]
+    games, per_kind = [], {}
+    for p in picks:
+        if p["group"] != "games" or p["odds"] < MIN_GAMES_ODDS:
+            continue
+        if per_kind.get(p["kind"], 0) >= MAX_PER_GAMES_KIND or len(games) >= MAX_GAMES_PICKS:
+            continue
+        per_kind[p["kind"]] = per_kind.get(p["kind"], 0) + 1
+        games.append(p)
+    return (main + games) or None
 
 
 def _model_picks(m: Dict[str, Any], names: Dict[str, Any], margin: float, covered: set, add) -> None:
@@ -216,3 +237,43 @@ def _model_picks(m: Dict[str, Any], names: Dict[str, Any], margin: float, covere
     model("sinCeder", f"{names['p2']} gana {win}-0", sweep2, {"side": "p2"})
     model("sets", f"Se decide en {win} sets (sin set decisivo)", sweep1 + sweep2, {"sets": "corridos"})
     model("sets", "Se va a 3 sets" if win == 2 else "Dura 4 sets o más", 1 - sweep1 - sweep2, {"sets": "largo"})
+
+
+def _line_pair(v: Any) -> Optional[Tuple[float, float]]:
+    try:
+        o, u = float(v["over"]), float(v["under"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return (o, u) if o > 1 and u > 1 else None
+
+
+def _games_picks(m: Dict[str, Any], margin: float, add) -> None:
+    """Games lines at the bookmaker's price, and a tiebreak in the match from the point model."""
+    lines = m.get("oddsLines") or {}
+    for key, kind, where in (("set1TotalGames", "gamesSet", "en el 1er set"), ("totalGames", "gamesMatch", "en el partido")):
+        for raw, v in ((lines.get(key) or {}).get("lines") or {}).items():
+            pair = _line_pair(v)
+            try:
+                line = float(raw)
+            except ValueError:
+                continue
+            if not pair or line % 1 != 0.5:
+                continue   # whole lines can push (refund): not settled here
+            a, b = 1 / pair[0], 1 / pair[1]
+            base = {"set": 1} if kind == "gamesSet" else {}
+            if kind == "gamesSet" and line == 12.5:
+                labels = ("Hay tiebreak en el 1er set", "Sin tiebreak en el 1er set")
+            else:
+                labels = (f"Más de {raw} games {where}", f"Menos de {raw} games {where}")
+            add(kind, labels[0], a / (a + b), pair[0], True, selector={**base, "line": line, "pick": "mas"})
+            add(kind, labels[1], b / (a + b), pair[1], True, selector={**base, "line": line, "pick": "menos"})
+    games = m.get("gamesModel") or {}
+    tb = games.get("tiebreak")
+    if tb is None or (games.get("trust") or 0) < MIN_MODEL_TRUST:
+        return
+    note = ("Probabilidad del modelo de saque y resto (corrección congelada con 2.671 partidos); "
+            "cuota estimada, pon la de tu casa (mercado «Habrá tiebreak»).")
+    for prob, label, pick in ((tb, "Hay al menos un tiebreak en el partido", "si"),
+                              (1 - tb, "Ningún tiebreak en el partido", "no")):
+        add("tiebreak", label, prob, _estimated_price(prob, margin), False, note,
+            selector={"pick": pick}, source="modelo")

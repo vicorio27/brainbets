@@ -77,7 +77,9 @@
         <!-- Most likely bets, however little they pay (likely_picks_service) -->
         <div v-if="likelyPicks.length" class="mt-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-xs text-slate-700">
           <div class="font-medium text-emerald-800">✅ Lo más probable</div>
-          <div v-for="p in likelyPicks" :key="p.label" class="mt-1 flex items-baseline gap-1.5" :title="pickTitle(p)">
+          <template v-for="(p, i) in likelyPicks" :key="p.label">
+          <div v-if="p.group === 'games' && (i === 0 || likelyPicks[i - 1].group !== 'games')" class="mt-1.5 border-t border-emerald-200 pt-1 font-medium text-emerald-800">🎾 Games y tiebreaks</div>
+          <div class="mt-1 flex items-baseline gap-1.5" :title="pickTitle(p)">
             <span class="w-9 shrink-0 font-semibold text-slate-900">{{ Math.round(p.probability * 100) }}%</span>
             <span class="min-w-0 flex-1">
               {{ p.label }}
@@ -91,6 +93,7 @@
               @click.stop.prevent="togglePick(p)"
             >{{ combo.has(pickKey(p)) ? '✓' : '+' }}</button>
           </div>
+          </template>
           <div v-if="clash" class="mt-1.5 rounded bg-amber-50 px-2 py-1 text-amber-800">
             Ya tienes «{{ clash.current.label }}» de este partido. Dos apuestas del mismo partido dependen una de la otra.
             <button class="ml-1 font-semibold underline" @click.stop.prevent="replaceClash">cambiarla por esta</button>

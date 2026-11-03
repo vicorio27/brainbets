@@ -112,3 +112,22 @@ def test_the_model_only_fills_the_bets_the_bookmaker_did_not_quote():
 
 def test_little_history_behind_the_model_gives_no_picks():
     assert likely_picks(_match(oddsMarkets={}, gamesModel={**GAMES, "trust": 0.1})) is None
+
+
+LINES = {"set1TotalGames": {"book": "bet365", "lines": {
+    "7.5": {"over": 1.06, "under": 10}, "8.5": {"over": 1.22, "under": 4}, "9.5": {"over": 1.66, "under": 2.1},
+    "10.5": {"over": 3.25, "under": 1.33}, "12.5": {"over": 4.33, "under": 1.2}}},
+    "totalGames": {"book": "Pncl", "lines": {"22": {"over": 1.83, "under": 2.04}, "22.5": {"over": 1.95, "under": 1.88}}}}
+
+
+def test_games_lines_come_apart_at_the_bookmakers_price():
+    picks = likely_picks(_match(oddsLines=LINES, gamesModel={**GAMES, "tiebreak": 0.35}))
+    main = [p for p in picks if p["group"] == "main"]
+    games = [p for p in picks if p["group"] == "games"]
+    assert len(main) == 4 and 0 < len(games) <= 4
+    labels = {p["label"]: p for p in games}
+    assert "Sin tiebreak en el 1er set" in labels and labels["Sin tiebreak en el 1er set"]["odds"] == 1.2
+    assert "Más de 7.5 games en el 1er set" not in labels           # 1.06 pays nothing
+    assert all(p["selector"].get("line") != 22 for p in games)       # whole lines can push
+    assert sum(p["kind"] == "gamesSet" for p in games) <= 2
+    assert any(p["kind"] == "tiebreak" and p["source"] == "modelo" for p in games)

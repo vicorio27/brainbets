@@ -7,7 +7,9 @@ settled from the match's final set score, like the predictions' validation:
   * unSet: the side wins at least one set; sinCeder: the side wins without
     dropping one; sets: "corridos" (someone wins in straight sets) or "largo";
     gamesSet: games played in one set ({set: N | "ultimo", line: 9.5, pick: mas | menos}),
-    from the set rows of score_stats (a tiebreak set counts 13 games).
+    from the set rows of score_stats (a tiebreak set counts 13 games);
+    gamesMatch: games in the whole match ({line: X.5, pick: mas | menos});
+    tiebreak: at least one tiebreak in the match ({pick: si | no}).
 A cancelled match (retirement, walkover) voids its leg, priced 1.0, which is
 how bookmakers usually settle it. A combo is lost as soon as one leg is lost
 and won when every leg is won or void.
@@ -20,7 +22,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from src.domain.models import Match, MatchScore, UserBet, UserBetLeg
 
-KINDS = {"partido", "set1", "unSet", "sinCeder", "sets", "gamesSet"}
+KINDS = {"partido", "set1", "unSet", "sinCeder", "sets", "gamesSet", "gamesMatch", "tiebreak"}
 MAX_LEGS = 10
 
 
@@ -33,6 +35,11 @@ def valid_selector(kind: str, selector: Any) -> bool:
         return False
     if kind == "sets":
         return selector.get("sets") in ("corridos", "largo")
+    if kind == "tiebreak":
+        return selector.get("pick") in ("si", "no")
+    if kind == "gamesMatch":
+        line = selector.get("line")
+        return isinstance(line, (int, float)) and line % 1 == 0.5 and selector.get("pick") in ("mas", "menos")
     if kind == "gamesSet":
         line, which = selector.get("line"), selector.get("set")
         return (isinstance(line, (int, float)) and line % 1 == 0.5 and selector.get("pick") in ("mas", "menos")
@@ -61,6 +68,14 @@ def settle_leg(kind: str, selector: Dict[str, Any], status: Optional[str], home:
         return "VOID"
     if status != "FINISHED" or home is None or away is None or home == away:
         return None
+    if kind in ("gamesMatch", "tiebreak"):
+        per_set = [games_in_set({"set": i + 1}, set_rows) for i in range(len(set_rows or []))]
+        if len(per_set) != home + away or None in per_set:
+            return None   # set rows not in (or incomplete): wait
+        if kind == "tiebreak":
+            return "WON" if (13 in per_set) == (selector.get("pick") == "si") else "LOST"
+        over = sum(per_set) > float(selector["line"])
+        return "WON" if over == (selector.get("pick") == "mas") else "LOST"
     if kind == "gamesSet":
         games = games_in_set(selector, set_rows)
         if games is None:
