@@ -5,7 +5,9 @@ probable" picks (likely_picks_service) with the price the user took. Legs are
 settled from the match's final set score, like the predictions' validation:
   * partido: the side wins the match; set1: the side wins the first set;
   * unSet: the side wins at least one set; sinCeder: the side wins without
-    dropping one; sets: "corridos" (someone wins in straight sets) or "largo".
+    dropping one; sets: "corridos" (someone wins in straight sets) or "largo";
+    gamesSet: games played in one set ({set: N | "ultimo", line: 9.5, pick: mas | menos}),
+    from the set rows of score_stats (a tiebreak set counts 13 games).
 A cancelled match (retirement, walkover) voids its leg, priced 1.0, which is
 how bookmakers usually settle it. A combo is lost as soon as one leg is lost
 and won when every leg is won or void.
@@ -18,7 +20,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from src.domain.models import Match, MatchScore, UserBet, UserBetLeg
 
-KINDS = {"partido", "set1", "unSet", "sinCeder", "sets"}
+KINDS = {"partido", "set1", "unSet", "sinCeder", "sets", "gamesSet"}
 MAX_LEGS = 10
 
 
@@ -31,16 +33,42 @@ def valid_selector(kind: str, selector: Any) -> bool:
         return False
     if kind == "sets":
         return selector.get("sets") in ("corridos", "largo")
+    if kind == "gamesSet":
+        line, which = selector.get("line"), selector.get("set")
+        return (isinstance(line, (int, float)) and line % 1 == 0.5 and selector.get("pick") in ("mas", "menos")
+                and (which == "ultimo" or which in (1, 2, 3, 4, 5)))
     return kind in KINDS and selector.get("side") in ("p1", "p2")
 
 
-def settle_leg(kind: str, selector: Dict[str, str], status: Optional[str], home: Optional[int],
-               away: Optional[int], first_set_p1: Optional[bool]) -> Optional[str]:
+def games_in_set(selector: Dict[str, Any], set_rows: Optional[List[Dict[str, Any]]]) -> Optional[int]:
+    """Games played in the set the selector names, from score_stats.sets rows."""
+    rows = []
+    for r in set_rows or []:
+        try:
+            rows.append(int(r.get("p1")) + int(r.get("p2")))
+        except (AttributeError, TypeError, ValueError):
+            return None
+    which = selector.get("set")
+    i = len(rows) - 1 if which == "ultimo" else (which - 1 if isinstance(which, int) else -1)
+    return rows[i] if 0 <= i < len(rows) else None
+
+
+def settle_leg(kind: str, selector: Dict[str, Any], status: Optional[str], home: Optional[int],
+               away: Optional[int], first_set_p1: Optional[bool],
+               set_rows: Optional[List[Dict[str, Any]]] = None) -> Optional[str]:
     """WON / LOST / VOID, or None while it cannot be decided yet."""
     if status == "CANCELLED":
         return "VOID"
     if status != "FINISHED" or home is None or away is None or home == away:
         return None
+    if kind == "gamesSet":
+        games = games_in_set(selector, set_rows)
+        if games is None:
+            # A numbered set that was never played voids the leg; missing set rows wait.
+            played = len(set_rows or []) == home + away
+            return "VOID" if played and selector.get("set") != "ultimo" else None
+        over = games > float(selector["line"])
+        return "WON" if over == (selector.get("pick") == "mas") else "LOST"
     side = selector.get("side")
     mine, theirs = (home, away) if side == "p1" else (away, home)
     if kind == "partido":
@@ -223,7 +251,8 @@ def settle_pending(db: Session) -> Dict[str, int]:
             sc = scores.get(leg.match_id)
             result = settle_leg(leg.kind, leg.selector or {}, leg.match.status,
                                 sc.home_score if sc else None, sc.away_score if sc else None,
-                                _first_set_p1(leg.match))
+                                _first_set_p1(leg.match),
+                                ((leg.match.extra_data or {}).get("score_stats") or {}).get("sets"))
             # A live snapshot means it started: the tennis live update writes the
             # score but can leave the match status at SCHEDULED until it ends.
             if result is None and leg.match.status in ("LIVE", "SCHEDULED") and leg.match_id in live:

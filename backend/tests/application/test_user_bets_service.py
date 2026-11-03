@@ -65,3 +65,15 @@ def test_live_settles_only_what_no_later_set_can_change():
     assert settle_live_leg("set1", P2, 1, 0) == "LOST"
     assert settle_live_leg("set1", P1, 1, 1) is None                # who took set 1 is unknown from the count
     assert settle_live_leg("partido", P1, 1, 0) is None
+
+
+def test_games_in_a_set_from_the_set_rows():
+    rows = [{"p1": 4, "p2": 6}, {"p1": 6, "p2": 1}, {"p1": 6, "p2": 7}]   # Zverev - De Minaur, Vienna
+    over = {"set": "ultimo", "line": 9.5, "pick": "mas"}
+    assert settle_leg("gamesSet", over, "FINISHED", 1, 2, False, rows) == "WON"
+    assert settle_leg("gamesSet", {**over, "pick": "menos"}, "FINISHED", 1, 2, False, rows) == "LOST"
+    assert settle_leg("gamesSet", {"set": 2, "line": 9.5, "pick": "mas"}, "FINISHED", 1, 2, False, rows) == "LOST"
+    assert settle_leg("gamesSet", over, "FINISHED", 1, 2, False, None) is None          # rows not in yet: wait
+    assert settle_leg("gamesSet", {"set": 3, "line": 9.5, "pick": "mas"}, "FINISHED", 2, 0, True,
+                      rows[:2]) == "VOID"                                               # set 3 never played
+    assert valid_selector("gamesSet", over) and not valid_selector("gamesSet", {**over, "line": 9})
