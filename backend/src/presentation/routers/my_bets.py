@@ -18,7 +18,7 @@ from src.infrastructure.database import get_db
 class LegIn(BaseModel):
     matchId: str
     kind: str
-    selector: Dict[str, str]
+    selector: Dict[str, Any]
     label: str
     odds: float
     probability: Optional[float] = None
