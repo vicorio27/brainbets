@@ -36,12 +36,15 @@
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-3">
           <div class="text-base sm:text-lg font-semibold text-slate-900 truncate">
             {{ sport === 'tennis' ? match.player1 : match.homeTeam }}
+            <span v-if="favInfo" :class="favInfo.p1.cls" :title="favInfo.title" class="ml-1 align-middle inline-flex px-2 py-0.5 rounded-full text-xs font-semibold">{{ favInfo.p1.text }}</span>
           </div>
           <div class="text-sm text-slate-500 px-0 sm:px-3 flex-shrink-0">vs</div>
           <div class="text-base sm:text-lg font-semibold text-slate-900 truncate">
             {{ sport === 'tennis' ? match.player2 : match.awayTeam }}
+            <span v-if="favInfo" :class="favInfo.p2.cls" :title="favInfo.title" class="ml-1 align-middle inline-flex px-2 py-0.5 rounded-full text-xs font-semibold">{{ favInfo.p2.text }}</span>
           </div>
         </div>
+        <div v-if="favInfo && favInfo.note" class="mt-1 text-xs text-amber-800">{{ favInfo.note }}</div>
 
         <!-- Tournament streaks (information, already in the price) -->
         <div v-if="streakRows.length" class="mt-2 space-y-1">
@@ -256,6 +259,41 @@ const h2hTitle = computed(() => {
   return h.meetings
     .map(m => `${m.date} · ${m.tournament || '?'}${m.surface ? ' (' + (surf[m.surface] || m.surface) + ')' : ''} · ganó ${m.winner === 'p1' ? props.match.player1 : props.match.player2}${m.sets ? ' ' + m.sets : ''}${m.games ? ' · ' + m.games.join(' ') : ''}`)
     .join('\n') + (h.total > h.meetings.length ? `\n… y ${h.total - h.meetings.length} más` : '')
+})
+// Favourite = the side the bookmaker prices shorter (its fair probability),
+// not the better ranking: the price already weighs surface, form and fatigue.
+const favInfo = computed(() => {
+  if (props.sport !== 'tennis') return null
+  const m = props.match
+  const mw = m.oddsMarkets?.matchWinner
+  let p1 = null
+  let source = 'casa'
+  if (mw?.p1 > 1 && mw?.p2 > 1) p1 = (1 / mw.p1) / (1 / mw.p1 + 1 / mw.p2)
+  else if (m.gamesModel?.markets?.matchP1 != null && (m.gamesModel.trust ?? 0) >= 0.2) {
+    p1 = m.gamesModel.markets.matchP1
+    source = 'modelo'
+  }
+  if (p1 == null) return null
+  const pct = (x) => Math.round(x * 100)
+  const even = Math.abs(p1 - 0.5) < 0.05
+  const tag = (prob) => even
+    ? { text: `Parejo ${pct(prob)}%`, cls: 'bg-slate-100 text-slate-700' }
+    : prob > 0.5
+      ? { text: `Favorito ${pct(prob)}%`, cls: 'bg-emerald-100 text-emerald-800' }
+      : { text: `No favorito ${pct(prob)}%`, cls: 'bg-amber-100 text-amber-800' }
+  const favP1 = p1 > 0.5
+  const r1 = m.rankingPlayer1
+  const r2 = m.rankingPlayer2
+  let note = null
+  if (!even && r1 && r2 && r1 !== r2 && (favP1 ? r1 > r2 : r2 > r1)) {
+    const [fav, rf, ro] = favP1 ? [m.player1, r1, r2] : [m.player2, r2, r1]
+    const surf = { hard: 'cemento', clay: 'arcilla', grass: 'césped' }[m.surface] || m.surface
+    note = `${fav} es favorito pese al ranking (#${rf} vs #${ro})${surf ? ': la cuota pesa también la superficie (' + surf + '), la forma y el cansancio' : ''}.`
+  }
+  const title = source === 'casa'
+    ? 'Probabilidad de ganar el partido según la cuota de la casa, sin su margen. Ya incluye superficie, forma, cansancio y cara a cara; por eso puede no coincidir con el ranking.'
+    : 'La casa no publicó cuota: probabilidad del modelo de saque y resto (no le ha ganado a la cuota).'
+  return { p1: tag(p1), p2: tag(1 - p1), note, title }
 })
 const gamesInfo = computed(() => {
   const g = props.match.gamesModel
