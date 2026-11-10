@@ -360,6 +360,13 @@ def validate_pending_predictions(db: Session, sport: Optional[str] = None) -> Di
         home_name = home_team.competitor.name if home_team and home_team.competitor else ""
         away_name = away_team.competitor.name if away_team and away_team.competitor else ""
 
+        result_data.update({
+            "matchId": match.external_id or str(match.id),
+            "match": f"{home_name} vs {away_name}",
+            "market": pred.market,
+            "predicted": pred.predicted_outcome,
+        })
+
         match_key = f"{match.external_id or str(match.id)}|{home_name} vs {away_name}"
         match_bucket = summary["byMatch"].setdefault(
             match_key,
