@@ -34,6 +34,7 @@ OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 LOOKBACK_DAYS = 5
 MAX_HEADLINES = 35            # per player, sent to the model
 MAX_STAKES = 12               # of which headlines about what is at stake go first
+LATEST = 5                    # newest headlines per player shown as they are, AI or not
 HOURS_AHEAD = 18              # matches starting within this window get news
 STALE_MINUTES = 180           # refresh after this long...
 STALE_MINUTES_NEAR = 60       # ...or this long once the match is less than NEAR_HOURS away
@@ -277,6 +278,13 @@ def clean_items(raw: Any, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def latest_view(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The newest headlines as they are (already newest first, without noise or repeats)."""
+    return [{"headline": it["title"], "source": it["source"], "link": it["link"],
+             "published": it["published"].astimezone(timezone.utc).isoformat()}
+            for it in sorted(items, key=lambda x: x["published"], reverse=True)[:LATEST]]
+
+
 def news_for_match(match: Match) -> Optional[Dict[str, Any]]:
     p1 = next((c for c in match.competitors if c.side == "player1"), None)
     p2 = next((c for c in match.competitors if c.side == "player2"), None)
@@ -292,11 +300,13 @@ def news_for_match(match: Match) -> Optional[Dict[str, Any]]:
         "fecha": to_bogota(match.match_date).strftime("%Y-%m-%d %H:%M") if match.match_date else None,
     }
     answer = _ask_model(ctx, h1, h2) if (h1 or h2) else {}
-    if answer is None:
-        return None
+    analyzed = answer is not None
+    answer = answer or {}   # model down (no credits, 2026-11): the raw latest headlines still get saved
     items1, items2 = clean_items(answer.get("jugador1"), h1), clean_items(answer.get("jugador2"), h2)
     return {
         "fetchedAt": datetime.now(timezone.utc).isoformat(),
+        "analyzed": analyzed,
+        "latest": {"player1": latest_view(h1), "player2": latest_view(h2)},
         "headlinesRead": {"player1": len(h1), "player2": len(h2)},
         "player1": items1,
         "player2": items2,

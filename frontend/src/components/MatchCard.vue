@@ -77,6 +77,20 @@
           📰 {{ newsCount }} {{ newsCount === 1 ? 'noticia' : 'noticias' }} a tener en cuenta<template v-if="newsNegative">&nbsp;· <span class="text-red-700 font-medium">{{ newsNegative }} {{ newsNegative === 1 ? 'negativa' : 'negativas' }} para un jugador</span></template>
         </div>
 
+        <details v-if="latestNews" class="mt-1 text-xs text-slate-700">
+          <summary class="cursor-pointer">📰 Últimas noticias de cada jugador ({{ latestNews.total }})</summary>
+          <div v-for="side in latestNews.sides" :key="side.key" class="mt-1">
+            <div class="font-medium text-slate-800">{{ side.name }}</div>
+            <p v-if="!side.items.length" class="text-slate-500">Sin noticias en los últimos 5 días.</p>
+            <ul v-else class="space-y-0.5">
+              <li v-for="it in side.items" :key="it.link">
+                <a :href="it.link" target="_blank" rel="noopener noreferrer" class="text-blue-700 hover:underline break-words">{{ it.headline }}</a>
+                <span class="text-slate-500"> · {{ it.source }} · {{ newsAgo(it.published) }}</span>
+              </li>
+            </ul>
+          </div>
+        </details>
+
         <!-- Most likely bets, however little they pay (likely_picks_service) -->
         <div v-if="likelyPicks.length" class="mt-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-xs text-slate-700">
           <div class="font-medium text-emerald-800">✅ Lo más probable</div>
@@ -202,6 +216,23 @@ const newsItems = computed(() => {
   return [...(n.player1 || []), ...(n.player2 || [])]
 })
 const newsCount = computed(() => newsItems.value.length)
+// The newest headlines of each player as they are (no AI filter), refreshed hourly before the match
+const latestNews = computed(() => {
+  const l = props.match.playerNews?.latest
+  if (props.sport !== 'tennis' || !l) return null
+  const sides = [
+    { key: 'p1', name: props.match.player1, items: l.player1 || [] },
+    { key: 'p2', name: props.match.player2, items: l.player2 || [] }
+  ]
+  const total = sides[0].items.length + sides[1].items.length
+  return total ? { sides, total } : null
+})
+function newsAgo(iso) {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
+  if (mins < 60) return `hace ${mins} min`
+  if (mins < 48 * 60) return `hace ${Math.round(mins / 60)} h`
+  return `hace ${Math.round(mins / 1440)} días`
+}
 const newsStakes = computed(() => newsItems.value.filter(i => i.factor === 'en_juego').slice(0, 2))
 const newsNegative = computed(() => newsItems.value.filter(i => i.impact === 'negativo').length)
 const likelyPicks = computed(() => (props.sport === 'tennis' ? props.match.likelyPicks || [] : []))

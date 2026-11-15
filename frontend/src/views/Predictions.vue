@@ -64,10 +64,11 @@
           Titulares de los últimos 5 días, filtrados por IA: solo lo que podría influir fuera de la cancha. Revisado {{ newsBox.ago }}.
           Es información, no una señal probada: casi todo lo que sale en la prensa ya está en la cuota.
         </p>
+        <p v-if="newsBox.n.analyzed === false" class="text-xs text-amber-800 mb-2">El filtro por IA no está disponible ahora (OpenAI sin créditos): abajo van solo los titulares tal cual.</p>
         <p v-if="newsBox.n.summary" class="mb-2">{{ newsBox.n.summary }}</p>
         <div v-for="side in newsBox.sides" :key="side.key" class="mb-2 last:mb-0">
           <p class="font-medium text-slate-800">{{ side.name }}</p>
-          <p v-if="!side.items.length" class="text-slate-500">Nada relevante (leídos {{ side.read }} titulares).</p>
+          <p v-if="!side.items.length && newsBox.n.analyzed !== false" class="text-slate-500">Nada relevante fuera de la cancha (leídos {{ side.read }} titulares).</p>
           <ul v-else class="space-y-1">
             <li v-for="it in side.items" :key="it.link">
               <span class="inline-flex items-center px-1.5 rounded text-xs font-medium mr-1" :class="impactClass[it.impact]">{{ factorEs[it.factor] || it.factor }}</span>
@@ -75,6 +76,16 @@
               <a :href="it.link" target="_blank" rel="noopener noreferrer" class="text-blue-700 underline break-words">{{ it.source }} · {{ it.date }}</a>
             </li>
           </ul>
+          <template v-if="side.latest.length">
+            <p class="text-xs text-slate-500 mt-1">Últimas {{ side.latest.length }} noticias, tal cual:</p>
+            <ul class="space-y-0.5 text-xs">
+              <li v-for="it in side.latest" :key="'l' + it.link">
+                <a :href="it.link" target="_blank" rel="noopener noreferrer" class="text-blue-700 hover:underline break-words">{{ it.headline }}</a>
+                <span class="text-slate-500"> · {{ it.source }} · {{ newsAgoText(it.published) }}</span>
+              </li>
+            </ul>
+          </template>
+          <p v-else-if="newsBox.n.latest" class="text-xs text-slate-500">Sin noticias en los últimos 5 días.</p>
         </div>
       </div>
       <p v-else-if="h2hBox && newsPending" class="mt-3 text-xs text-slate-500">Noticias de los jugadores: se revisan cada hora para los partidos que empiezan en las próximas 18 horas.</p>
@@ -331,6 +342,12 @@ const newsPending = computed(() => {
   const m = currentTennisMatch.value
   return !!m && m.status === 'SCHEDULED' && !m.playerNews
 })
+function newsAgoText(iso) {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
+  if (mins < 60) return `hace ${mins} min`
+  if (mins < 48 * 60) return `hace ${Math.round(mins / 60)} h`
+  return `hace ${Math.round(mins / 1440)} días`
+}
 const dogBox = computed(() => currentTennisMatch.value?.underdogCase || null)
 const newsBox = computed(() => {
   const m = currentTennisMatch.value
@@ -342,8 +359,8 @@ const newsBox = computed(() => {
     n,
     ago,
     sides: [
-      { key: 'p1', name: m.player1, items: n.player1 || [], read: n.headlinesRead?.player1 ?? 0 },
-      { key: 'p2', name: m.player2, items: n.player2 || [], read: n.headlinesRead?.player2 ?? 0 }
+      { key: 'p1', name: m.player1, items: n.player1 || [], read: n.headlinesRead?.player1 ?? 0, latest: n.latest?.player1 || [] },
+      { key: 'p2', name: m.player2, items: n.player2 || [], read: n.headlinesRead?.player2 ?? 0, latest: n.latest?.player2 || [] }
     ]
   }
 })

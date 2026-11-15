@@ -91,3 +91,15 @@ def test_victoria_and_triunfo_tell_the_same_story():
     a = pn.headline_signature("Zverev ganó el partido del día, salvó cuatro match points y quedó a una victoria de ser el N°1 del mundo", "Zverev A.")
     b = pn.headline_signature("ATP 500 Viena 2026: Alexander Zverev salva cuatro match points y queda a un triunfo del N.º 1 del mundo", "Zverev A.")
     assert pn.same_story(a, b)
+
+
+def test_latest_view_keeps_the_five_newest_headlines_newest_first():
+    from datetime import datetime, timedelta, timezone
+    from src.application.player_news_service import LATEST, latest_view
+    base = datetime(2026, 11, 15, 12, tzinfo=timezone.utc)
+    items = [{"title": f"t{i}", "source": "S", "link": f"l{i}", "published": base - timedelta(hours=i)}
+             for i in (3, 0, 6, 1, 5, 2, 4)]
+    out = latest_view(items)
+    assert len(out) == LATEST == 5
+    assert [o["headline"] for o in out] == ["t0", "t1", "t2", "t3", "t4"]
+    assert out[0]["published"] == base.isoformat()
