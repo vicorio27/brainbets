@@ -74,7 +74,7 @@
         "specifyHeaders": "json",
         "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
         "options": {
-          "timeout": 30000
+          "timeout": 60000
         }
       },
       "id": "get-matches",
@@ -84,7 +84,10 @@
       "position": [
         450,
         300
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
