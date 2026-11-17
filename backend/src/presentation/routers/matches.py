@@ -92,6 +92,43 @@ def get_router() -> APIRouter:
 
         return list_best_bets(service.db)
 
+    @r.get("/bet-modes")
+    def get_bet_modes(service: DataService = Depends(get_data_service)):
+        """Conservative (singles + safest combos) and risky (backed underdog) picks
+        for the tennis matches still to play today and the next two days."""
+        from src.application.bet_modes_service import build_modes
+
+        today = today_bogota()
+        resp = service.get_matches_by_date(today, today + timedelta(days=2), sport="tennis", limit=200, sort="asc")
+        return build_modes([m.model_dump() for m in ((resp.tennis if resp else None) or [])])
+
+    @r.get("/odds-movement")
+    def get_odds_movement(service: DataService = Depends(get_data_service)):
+        """How the price of each tennis match still to play moved between collects,
+        plus the bets where a bookmaker pays above the fair price."""
+        from src.application.best_bets_service import list_best_bets
+        from src.application.odds_movement_service import BARGAIN_EDGE, movement
+        from src.domain.models import Match, Sport
+
+        now = datetime.now(timezone.utc)
+        rows = (
+            service.db.query(Match).join(Sport, Sport.id == Match.sport_id)
+            .filter(Sport.code == "tennis", Match.status == "SCHEDULED", Match.match_date > now)
+            .order_by(Match.match_date.asc()).all()
+        )
+        out = []
+        for m in rows:
+            names = {("p1" if c.side in ("home", "player1") else "p2"): c.competitor.name for c in m.competitors}
+            hist = (m.extra_data or {}).get("odds_history") or []
+            out.append({
+                "matchId": m.external_id,
+                "match": f"{names.get('p1')} vs {names.get('p2')}",
+                "snapshots": len(hist),
+                "moves": movement(hist, names),
+            })
+        bargains = [b for b in list_best_bets(service.db).get("bets") or [] if b.get("edge", -1) >= BARGAIN_EDGE]
+        return {"matches": out, "bargains": bargains}
+
     @r.get("/player-surface-career")
     def get_player_surface_career(
         player: str = Query(..., min_length=2, max_length=60),

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import json
 import logging
+from src.application.odds_movement_service import append_snapshot
 import os
 import requests
 import time
@@ -291,6 +292,7 @@ def _insert_match(
                     "ground_type": raw.get("groundType"),
                     "round": raw.get("round"),
                     "odds_markets": odds_core,
+                    "odds_history": append_snapshot(None, odds_core, datetime.now(timezone.utc).isoformat()),
                     "odds_lines": odds_lines,
                     "odds_lines_source": "live" if odds_lines is not None else None,
                     "expert_consensus": raw.get("expertConsensus"),
@@ -331,6 +333,10 @@ def _insert_match(
                 "ground_type": raw.get("groundType"),
                 "round": raw.get("round") or existing_extra.get("round"),
                 "odds_markets": odds_core if odds_core is not None else existing_extra.get("odds_markets"),
+                # every new pre-match price, to see how the line moved (odds_movement_service)
+                "odds_history": append_snapshot(existing_extra.get("odds_history"), odds_core,
+                                                datetime.now(timezone.utc).isoformat())
+                if odds_core is not None else existing_extra.get("odds_history"),
                 "odds_lines": odds_lines if odds_lines is not None else existing_extra.get("odds_lines"),
                 "odds_lines_source": "live" if odds_lines is not None else existing_extra.get("odds_lines_source"),
                 "expert_consensus": raw.get("expertConsensus")

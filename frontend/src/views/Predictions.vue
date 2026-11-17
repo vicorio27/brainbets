@@ -2,6 +2,8 @@
   <div>
     <h1 class="text-2xl font-bold text-slate-900 mb-6">Predicciones</h1>
 
+    <BetModes v-if="!matchId" />
+
     <!-- Match Filter Banner -->
     <div v-if="matchId" class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -248,6 +250,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { usePredictionsStore } from '../stores/predictions.js'
 import { useMatchesStore } from '../stores/matches.js'
 import PredictionTable from '../components/PredictionTable.vue'
+import BetModes from '../components/BetModes.vue'
 import EmptyState from '../components/EmptyState.vue'
 import Pagination from '../components/Pagination.vue'
 import { formatDateTime } from '../utils/format.js'

@@ -21,8 +21,38 @@
     </div>
 
     <!-- Pick of the day: always the best edge available, coloured by how good it is -->
+    <!-- Bet of the day, conservative (the user's own way of betting): the safest bet the
+         bookmaker prices. The price-based pick below is speculative and stays folded. -->
+    <div v-if="safeOfDay" class="rounded-2xl p-5 sm:p-6 mb-3 shadow-lg bg-gradient-to-br from-emerald-700 to-emerald-800 text-white">
+      <div class="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-white/90">
+        <span aria-hidden="true">🛡️</span> Apuesta del día · conservadora
+      </div>
+      <div class="mt-2 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+        <div class="min-w-0">
+          <div class="text-2xl sm:text-3xl font-bold leading-tight">{{ safeOfDay.label }}</div>
+          <div class="text-sm mt-1 text-white/90">{{ safeOfDay.match }} · {{ [safeOfDay.eventDate, safeOfDay.eventTime].filter(Boolean).join(' ') }}<span v-if="safeOfDay.tournament"> · {{ safeOfDay.tournament }}</span></div>
+          <p class="text-sm mt-2 text-white/90 max-w-2xl">{{ safeOfDay.why }} La casa le da {{ Math.round(safeOfDay.probability * 100) }}%: sale más o menos {{ Math.round(safeOfDay.probability * 10) }} de cada 10 veces.</p>
+        </div>
+        <div class="flex gap-6 shrink-0">
+          <div><div class="text-2xl font-bold">{{ Math.round(safeOfDay.probability * 100) }}%</div><div class="text-[11px] uppercase tracking-wide text-white/90">probabilidad</div></div>
+          <div><div class="text-2xl font-bold">{{ safeOfDay.odds.toFixed(2) }}</div><div class="text-[11px] uppercase tracking-wide text-white/90">cuota</div></div>
+        </div>
+      </div>
+      <div class="mt-3 flex flex-wrap items-center gap-2">
+        <router-link to="/predictions" class="inline-flex items-center gap-1 text-sm font-medium rounded-lg px-3 py-1.5 bg-white/15 hover:bg-white/25">Ver conservadoras y arriesgadas →</router-link>
+      </div>
+    </div>
+    <details v-if="safeOfDay && pickOfDay" class="mb-6 text-sm text-slate-700">
+      <summary class="cursor-pointer text-slate-600">Apuesta por precio (especulativa: busca una cuota por encima de la justa, no lo más probable)</summary>
+      <p class="mt-1">
+        {{ pickOfDay.market }} — <strong>{{ pickOfDay.prediction }}</strong> ({{ pickOfDay.home }} vs {{ pickOfDay.away }}, {{ pickOfDay.time }}):
+        cuota {{ pickOfDay.odd.toFixed(2) }}, probabilidad {{ Math.round(pickOfDay.prob * 100) }}%.
+        <router-link :to="pickOfDay.link" class="text-blue-700 underline">Ver detalle</router-link>
+      </p>
+      <p class="text-xs text-slate-500">Desde el 1-sep salió 45% de los días, a cuota media 2.34, sin ventaja demostrada.</p>
+    </details>
     <div
-      v-if="pickOfDay"
+      v-if="pickOfDay && !safeOfDay"
       class="rounded-2xl p-5 sm:p-6 mb-6 shadow-lg bg-gradient-to-br"
       :class="POD_STYLE[pickOfDay.level].card"
     >
@@ -73,7 +103,7 @@
       </div>
     </div>
     <div
-      v-else
+      v-else-if="!safeOfDay"
       class="rounded-2xl border border-slate-200 bg-white p-5 mb-6 text-sm text-slate-500"
     >
       <span class="font-semibold text-slate-700">🏆 Apuesta del día:</span>
@@ -848,7 +878,7 @@ import { useComboStore } from '../stores/combo.js'
 import EmptyState from '../components/EmptyState.vue'
 import { streakTags } from '../utils/streak.js'
 import { betEdge, betKelly, betProbability, modelEdge, isSuspicious, formatEdge, edgeLabel } from '../utils/edge.js'
-import { clearApiCache } from '../stores/api.js'
+import api, { clearApiCache } from '../stores/api.js'
 
 const combo = useComboStore()
 const matchesStore = useMatchesStore()
@@ -876,7 +906,7 @@ async function refresh() {
   refreshing.value = true
   clearApiCache()
   try {
-    await Promise.all([loadToday(), analyticsStore.fetchDashboard()])
+    await Promise.all([loadToday(), analyticsStore.fetchDashboard(), loadBetModes()])
     lastLoadedAt.value = new Date()
   } finally {
     refreshing.value = false
@@ -1206,6 +1236,17 @@ function betOpinions(b) {
   return out
 }
 // The card is the top of that list; without it, the best of the engine's own picks for today.
+// Conservative bet of the day: the safest bet of the matches still to play (bet_modes_service).
+const betModes = ref(null)
+async function loadBetModes() {
+  try {
+    const { data } = await api.get('/matches/bet-modes')
+    betModes.value = data
+  } catch (e) {
+    betModes.value = null
+  }
+}
+const safeOfDay = computed(() => betModes.value?.conservative?.singles?.[0] || null)
 const pickOfDay = computed(() => {
   const b = bestBets.value[0]
   if (!b) return pickCandidates.value[0] || null
@@ -1371,7 +1412,7 @@ function loadToday() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadToday(), analyticsStore.fetchDashboard()])
+  await Promise.all([loadToday(), analyticsStore.fetchDashboard(), loadBetModes()])
   lastLoadedAt.value = new Date()
 })
 </script>
