@@ -38,6 +38,15 @@
                 {{ s.favourite ? 'Favorito' : 'No favorito' }} {{ pct(s.winProbability) }}%<span v-if="s.odds"> · {{ s.odds.toFixed(2) }}</span>
               </span>
             </div>
+            <details v-if="s.level" class="mt-1 text-xs">
+              <summary class="cursor-pointer" :class="{ bien: 'text-emerald-800', mal: 'text-red-700' }[s.level.level] || 'text-slate-700'">📊 {{ s.level.headline }}</summary>
+              <ul class="mt-1 space-y-0.5">
+                <li v-for="mt in s.level.metrics" :key="mt.key" :class="mt.trend === 'mejor' ? 'text-emerald-800' : mt.trend === 'peor' ? 'text-red-700' : 'text-slate-500'">
+                  {{ mt.trend === 'mejor' ? '▲' : mt.trend === 'peor' ? '▼' : '=' }} {{ mt.text }}
+                </li>
+              </ul>
+              <p class="text-slate-500 mt-1">{{ s.level.note }}</p>
+            </details>
             <ul v-if="s.reasons.length" class="mt-1 text-xs text-slate-700 list-disc pl-4">
               <li v-for="r in s.reasons" :key="r.text" :title="r.evidence">{{ r.text }}</li>
             </ul>

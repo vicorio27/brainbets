@@ -20,6 +20,8 @@ class TennisMatch(BaseModel):
     # {p1Wins, p2Wins, total, meetings: [{date, tournament, surface, winner 'p1'|'p2', sets, games}]}
     h2hDetail: Optional[Dict[str, Any]] = None
     # Recent news read for off-court factors: {fetchedAt, player1: [...], player2: [...], summary}
+    levelPlayer1: Optional[Dict[str, Any]] = None   # form_service: recent vs own level (display only)
+    levelPlayer2: Optional[Dict[str, Any]] = None
     playerNews: Optional[Dict[str, Any]] = None
     acesAvgPlayer1: Optional[float] = None
     acesAvgPlayer2: Optional[float] = None

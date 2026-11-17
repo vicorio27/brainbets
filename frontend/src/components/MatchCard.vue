@@ -77,6 +77,9 @@
           📰 {{ newsCount }} {{ newsCount === 1 ? 'noticia' : 'noticias' }} a tener en cuenta<template v-if="newsNegative">&nbsp;· <span class="text-red-700 font-medium">{{ newsNegative }} {{ newsNegative === 1 ? 'negativa' : 'negativas' }} para un jugador</span></template>
         </div>
 
+        <div v-for="lv in levelLines" :key="lv.player" class="mt-1 text-xs" :class="LEVEL_CLASS[lv.r.level]" :title="lv.tip">
+          📊 <span class="font-medium">{{ lv.player }}:</span> {{ lv.r.headline }}
+        </div>
         <details v-if="latestNews" class="mt-1 text-xs text-slate-700">
           <summary class="cursor-pointer">📰 Últimas noticias de cada jugador ({{ latestNews.total }})</summary>
           <div v-for="side in latestNews.sides" :key="side.key" class="mt-1">
@@ -216,6 +219,17 @@ const newsItems = computed(() => {
   return [...(n.player1 || []), ...(n.player2 || [])]
 })
 const newsCount = computed(() => newsItems.value.length)
+// How each player is playing lately against his own usual level (form_service); "normal" is not shown
+const LEVEL_CLASS = { bien: 'text-emerald-800', mal: 'text-red-700', mixto: 'text-slate-700', leve: 'text-slate-600' }
+const levelLines = computed(() => {
+  if (props.sport !== 'tennis' || props.match.status === 'FINISHED') return []
+  return [[props.match.player1, props.match.levelPlayer1], [props.match.player2, props.match.levelPlayer2]]
+    .filter(([, r]) => r && r.level !== 'normal')
+    .map(([player, r]) => ({
+      player, r,
+      tip: r.metrics.map((m) => (m.trend === 'mejor' ? '▲ ' : m.trend === 'peor' ? '▼ ' : '= ') + m.text).join('\n') + '\n\n' + r.note
+    }))
+})
 // The newest headlines of each player as they are (no AI filter), refreshed hourly before the match
 const latestNews = computed(() => {
   const l = props.match.playerNews?.latest

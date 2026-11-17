@@ -383,9 +383,12 @@ class DataService:
         h2h = h2h_for_matches(self.db, rows)
         from src.application.underdog_service import finals_history
         finals_hist = finals_history(self.db, rows)
+        from src.application.form_service import form_for_matches
+        form = form_for_matches(self.db, rows)
         return {
             mid: {"final": finals.get(mid), "prog": progs.get(mid), "streaks": streaks.get(mid) or {},
-                  "games": games.get(mid), "h2h": h2h.get(mid), "finals": finals_hist.get(mid)}
+                  "games": games.get(mid), "h2h": h2h.get(mid), "finals": finals_hist.get(mid),
+                  "form": form.get(mid) or {}}
             for mid in match_ids
         }
 
@@ -480,6 +483,8 @@ class DataService:
             liveGames=live_games,
             livePeriod=live_period,
             liveUpdatedAt=live_updated,
+            levelPlayer1=(live.get("form") or {}).get("p1"),
+            levelPlayer2=(live.get("form") or {}).get("p2"),
             streakPlayer1=(live.get("streaks") or {}).get("p1"),
             streakPlayer2=(live.get("streaks") or {}).get("p2"),
             gamesModel=live.get("games"),

@@ -191,6 +191,7 @@ def perspectives(m: Dict[str, Any]) -> Dict[str, Any]:
             "odds": case.get("odds"),
             "favourite": (case.get("marketProb") or 0) > 0.5,
             "reasons": [{"text": r["text"], "evidence": r.get("evidence")} for r in clear_reasons(case)],
+            "level": m.get("levelPlayer1" if side == "p1" else "levelPlayer2"),
             "conservative": safe,
             "risky": risky_for_side(m, side),
             "win": _leg(m, win, "Que gane el partido.") if win else None,
