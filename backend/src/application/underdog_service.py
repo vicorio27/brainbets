@@ -130,12 +130,22 @@ def underdog_case(m: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     if m.get("status") not in (None, "SCHEDULED"):
         return None
+    q1 = _fair((m.get("oddsMarkets") or {}).get("matchWinner") or {})
+    if q1 is None or abs(q1 - 0.5) < 1e-9:
+        return None
+    return player_case(m, "p2" if q1 > 0.5 else "p1")
+
+
+def player_case(m: Dict[str, Any], u: str) -> Optional[Dict[str, Any]]:
+    """The same arguments for ONE side, whether he is the underdog or not (bet_modes_service
+    looks at both players). The keys keep the underdog names: `underdog` is that player."""
+    if m.get("status") not in (None, "SCHEDULED"):
+        return None
     markets = m.get("oddsMarkets") or {}
     mw = markets.get("matchWinner") or {}
     q1 = _fair(mw)
-    if q1 is None or abs(q1 - 0.5) < 1e-9:
+    if q1 is None:
         return None
-    u = "p2" if q1 > 0.5 else "p1"          # the underdog's side
     f = "p1" if u == "p2" else "p2"
     names = {"p1": m.get("player1"), "p2": m.get("player2")}
     num = {"p1": "1", "p2": "2"}

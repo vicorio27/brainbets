@@ -20,6 +20,8 @@
         </router-link>
       </div>
 
+      <BetModes :match-id="matchId" class="mt-3 !mb-0" />
+
       <!-- Point model for this match (still to play) -->
       <div v-if="pointBox" class="mt-3 rounded border border-slate-200 bg-white p-3 text-sm text-slate-700"
         title="Modelo de puntos (saque y resto, punto a punto) con la corrección de games congelada el 16-oct-2026. Segunda opinión: no ha demostrado ganarle a la casa.">

@@ -46,3 +46,26 @@ def test_combos_pair_different_matches_safest_first():
     assert [l["matchId"] for l in top["legs"]] == ["M1", "M2"]
     assert top["odds"] == round(1.05 * 1.10, 3)
     assert all(len({l["matchId"] for l in c["legs"]}) == 2 for c in out["conservative"]["combos"])
+
+
+def test_both_players_get_their_own_perspective():
+    m = match("M1", [pick("unSet", "p1", 0.90, 1.08, "A gana al menos un set"), pick("partido", "p1", 0.72, 1.30, "A gana el partido"),
+                     pick("unSet", "p2", 0.55, 1.65, "B gana al menos un set")])
+    m["oddsMarkets"] = {"matchWinner": {"p1": 1.30, "p2": 3.40}}
+    m["h2hDetail"] = {"p1Wins": 0, "p2Wins": 3, "meetings": []}
+    view = bm.perspectives(m)
+    a, b = view["sides"]
+    assert a["favourite"] and not b["favourite"]
+    assert a["conservative"]["label"] == "A gana al menos un set" and a["risky"] is None
+    assert b["risky"]["label"] == "B gana el partido" and b["risky"]["odds"] == 3.40
+    assert any("cara a cara 3-0" in r["text"] for r in b["reasons"])
+    # B's set is 55%: below the backed line, so it stays a plain (not backed) safe version
+    assert b["conservative"]["backed"] is False
+
+
+def test_a_backed_favourite_also_gets_a_risky_straight_pick():
+    m = match("M1", [pick("unSet", "p1", 0.90, 1.08)])
+    m["oddsMarkets"] = {"matchWinner": {"p1": 1.60, "p2": 2.40}}
+    m["h2hDetail"] = {"p1Wins": 2, "p2Wins": 0, "meetings": []}
+    r = bm.risky_for_side(m, "p1")
+    assert r and r["favourite"] and r["odds"] == 1.60

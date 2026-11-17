@@ -18,6 +18,10 @@ for (const [name, width] of [['desktop', 1280], ['mobile', 390]]) {
   await page.getByRole('button', { name: 'Arriesgada', exact: true }).click()
   await page.getByText('📈 Movimiento de cuotas y gangas').click()
   await page.screenshot({ path: `audit/output/modes-risky-${name}.png`, fullPage: false })
+  await page.getByRole('button', { name: 'Los dos lados', exact: true }).click()
+  await page.screenshot({ path: `audit/output/modes-sides-${name}.png` })
+  await page.goto(base + '/predictions?matchId=TENNIS-12179696&date=2026-11-18', { waitUntil: 'networkidle' })
+  await page.screenshot({ path: `audit/output/modes-match-${name}.png` })
   console.log(name, '| tarjeta conservadora:', hero, '| desborde:', overflow, '| errores:', errors.join(' / ') || 0)
   await page.close()
 }
