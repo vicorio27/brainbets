@@ -25,12 +25,12 @@
          bookmaker prices. The price-based pick below is speculative and stays folded. -->
     <div v-if="safeOfDay" class="rounded-2xl p-5 sm:p-6 mb-3 shadow-lg bg-gradient-to-br from-emerald-700 to-emerald-800 text-white">
       <div class="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-white/90">
-        <span aria-hidden="true">🛡️</span> Apuesta del día · conservadora
+        <span aria-hidden="true">🛡️</span> {{ safeOfDay.title }}
       </div>
       <div class="mt-2 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
         <div class="min-w-0">
           <div class="text-2xl sm:text-3xl font-bold leading-tight">{{ safeOfDay.label }}</div>
-          <div class="text-sm mt-1 text-white/90">{{ safeOfDay.match }} · {{ [safeOfDay.eventDate, safeOfDay.eventTime].filter(Boolean).join(' ') }}<span v-if="safeOfDay.tournament"> · {{ safeOfDay.tournament }}</span></div>
+          <div class="text-sm mt-1 text-white/90">{{ safeOfDay.match }} · <strong class="text-white">{{ safeOfDay.when }}</strong><span v-if="safeOfDay.tournament"> · {{ safeOfDay.tournament }}</span></div>
           <p class="text-sm mt-2 text-white/90 max-w-2xl">{{ safeOfDay.why }} La casa le da {{ Math.round(safeOfDay.probability * 100) }}%: sale más o menos {{ Math.round(safeOfDay.probability * 10) }} de cada 10 veces.</p>
         </div>
         <div class="flex gap-6 shrink-0">
@@ -1246,7 +1246,20 @@ async function loadBetModes() {
     betModes.value = null
   }
 }
-const safeOfDay = computed(() => betModes.value?.conservative?.singles?.[0] || null)
+// Today's safest first; only when nothing is left today, the next day's, said in the title.
+const safeOfDay = computed(() => {
+  const singles = betModes.value?.conservative?.singles || []
+  const today = getUtcTodayStr()
+  const pick = singles.find((s) => s.eventDate === today) || singles[0]
+  if (!pick) return null
+  const tomorrow = new Date(Date.now() + 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' })
+  const day = pick.eventDate === today ? 'hoy' : pick.eventDate === tomorrow ? 'mañana' : pick.eventDate.slice(8, 10) + '/' + pick.eventDate.slice(5, 7)
+  return {
+    ...pick,
+    when: `${day}${pick.eventTime ? ' ' + pick.eventTime : ''}`,
+    title: day === 'hoy' ? 'Apuesta del día · conservadora' : `Hoy no quedan partidos · la más segura de ${day === 'mañana' ? 'mañana' : 'el ' + day}`
+  }
+})
 const pickOfDay = computed(() => {
   const b = bestBets.value[0]
   if (!b) return pickCandidates.value[0] || null

@@ -98,9 +98,21 @@ def get_router() -> APIRouter:
         for the tennis matches still to play today and the next two days."""
         from src.application.bet_modes_service import build_modes
 
+        from src.timezone import BOGOTA_TZ
+
         today = today_bogota()
         resp = service.get_matches_by_date(today, today + timedelta(days=2), sport="tennis", limit=200, sort="asc")
-        return build_modes([m.model_dump() for m in ((resp.tennis if resp else None) or [])])
+        now = datetime.now(BOGOTA_TZ).strftime("%Y-%m-%d %H:%M")
+
+        def not_started(m) -> bool:
+            # a match still "SCHEDULED" after its time has started (live status lags) or is a stale placeholder
+            if not m.eventDate:
+                return False
+            if not m.eventTime or m.eventTime == "00:00":
+                return m.eventDate >= today.isoformat()
+            return f"{m.eventDate} {m.eventTime}" > now
+
+        return build_modes([m.model_dump() for m in ((resp.tennis if resp else None) or []) if not_started(m)])
 
     @r.get("/odds-movement")
     def get_odds_movement(service: DataService = Depends(get_data_service)):

@@ -8,7 +8,7 @@ for (const [name, width] of [['desktop', 1280], ['mobile', 390]]) {
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   await page.goto(base + '/', { waitUntil: 'networkidle' })
-  const hero = await page.getByText('Apuesta del día · conservadora').count()
+  const hero = await page.getByText(/Apuesta del día · conservadora|la más segura de/).count()
   await page.screenshot({ path: `audit/output/modes-dash-${name}.png` })
   await page.goto(base + '/predictions', { waitUntil: 'networkidle' })
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
