@@ -80,6 +80,12 @@
         <div v-for="lv in levelLines" :key="lv.player" class="mt-1 text-xs" :class="LEVEL_CLASS[lv.r.level]" :title="lv.tip">
           📊 <span class="font-medium">{{ lv.player }}:</span> {{ lv.r.headline }}
         </div>
+        <div v-if="canFollow" class="mt-1 flex items-center gap-2 text-xs">
+          <button type="button" class="px-2 py-0.5 rounded border font-medium"
+            :class="followed ? 'bg-red-50 border-red-300 text-red-800' : 'border-slate-300 text-slate-700 hover:bg-slate-50'"
+            :aria-pressed="followed" @click="toggleFollow">{{ followed ? '👁 Siguiendo en vivo' : '👁 Seguir en vivo' }}</button>
+          <router-link v-if="followed" to="/en-vivo" class="text-blue-700 underline">Ver en vivo</router-link>
+        </div>
         <details v-if="latestNews" class="mt-1 text-xs text-slate-700">
           <summary class="cursor-pointer">📰 Últimas noticias de cada jugador ({{ latestNews.total }})</summary>
           <div v-for="side in latestNews.sides" :key="side.key" class="mt-1">
@@ -186,6 +192,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useComboStore, legKey } from '../stores/combo.js'
+import api from '../stores/api.js'
 import { formatDateTime, formatDate, formatTime } from '../utils/format.js'
 import { streakTags } from '../utils/streak.js'
 
@@ -219,6 +226,19 @@ const newsItems = computed(() => {
   return [...(n.player1 || []), ...(n.player2 || [])]
 })
 const newsCount = computed(() => newsItems.value.length)
+// "Seguir en vivo": the En vivo page reads the live feed only for followed matches (routers/live.py)
+const followed = ref(!!props.match.liveFollowed)
+const canFollow = computed(() => props.sport === 'tennis' && !['FINISHED', 'CANCELLED'].includes(props.match.status))
+async function toggleFollow() {
+  const was = followed.value
+  followed.value = !was
+  try {
+    if (was) await api.delete(`/live/follow/${props.match.matchId}`)
+    else await api.post(`/live/follow/${props.match.matchId}`)
+  } catch (e) {
+    followed.value = was
+  }
+}
 // How each player is playing lately against his own usual level (form_service); "normal" is not shown
 const LEVEL_CLASS = { bien: 'text-emerald-800', mal: 'text-red-700', mixto: 'text-slate-700', leve: 'text-slate-600' }
 const levelLines = computed(() => {

@@ -483,6 +483,7 @@ class DataService:
             liveGames=live_games,
             livePeriod=live_period,
             liveUpdatedAt=live_updated,
+            liveFollowed=bool(meta.get("live_follow")),
             levelPlayer1=(live.get("form") or {}).get("p1"),
             levelPlayer2=(live.get("form") or {}).get("p2"),
             streakPlayer1=(live.get("streaks") or {}).get("p1"),

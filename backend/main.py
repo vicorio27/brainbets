@@ -5,7 +5,7 @@ import structlog
 
 from src.infrastructure.database import engine
 from src.domain.models import Base
-from src.presentation.routers import matches, predictions, analytics, results, internal, my_bets
+from src.presentation.routers import matches, predictions, analytics, results, internal, my_bets, live
 
 # Configure structured logging
 structlog.configure(
@@ -41,6 +41,7 @@ app.include_router(predictions.get_router(), prefix="/api/v1")
 app.include_router(results.get_router(), prefix="/api/v1")
 app.include_router(analytics.get_router(), prefix="/api/v1")
 app.include_router(my_bets.get_router(), prefix="/api/v1")
+app.include_router(live.get_router(), prefix="/api/v1")
 app.include_router(internal.get_router(), prefix="/api/v1/internal")
 
 

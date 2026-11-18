@@ -1,3 +1,5 @@
+> **Estado (2026-11-17):** no se implementó esta especificación. La sección "En vivo" se hizo de otra forma (botón "Seguir", lectura por punto y lectura general): ver AGENTS.md, entrada del 2026-11-17.
+
 # Tarea para DeepSeek: sección "En vivo" (partidos de tenis que se están jugando)
 
 > Documento de implementación autocontenido. Léelo entero antes de escribir código.

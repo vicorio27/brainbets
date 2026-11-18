@@ -6,6 +6,7 @@ import PredictionDetail from '../views/PredictionDetail.vue'
 import Analytics from '../views/Analytics.vue'
 import Caja from '../views/Caja.vue'
 import MyBets from '../views/MyBets.vue'
+import Live from '../views/Live.vue'
 
 const routes = [
   { path: '/', component: Dashboard },
@@ -14,7 +15,8 @@ const routes = [
   { path: '/predictions/:id', component: PredictionDetail, props: true },
   { path: '/analytics', component: Analytics },
   { path: '/caja', component: Caja },
-  { path: '/mis-apuestas', component: MyBets }
+  { path: '/mis-apuestas', component: MyBets },
+  { path: '/en-vivo', component: Live }
 ]
 
 const router = createRouter({
