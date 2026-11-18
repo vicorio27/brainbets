@@ -1,7 +1,7 @@
-"""Live feed for followed matches: one get_livescore call serves every followed match.
+"""Live feed: one get_livescore call brings every ATP match in play.
 
-Called only from GET /live/followed, i.e. only while the En vivo page is open and a followed
-match is due (started or about to). Cached POLL_SECONDS; a daily cap (Bogota day) stops calls.
+Called only from GET /live/matches, i.e. only while the En vivo page is open and one of our
+matches is within its time window. Cached POLL_SECONDS; a daily cap (Bogota day) stops calls.
 The previous reading of each match and its event log live in memory (they restart with the backend).
 """
 import json
@@ -46,6 +46,20 @@ def _save_counter(data: Dict[str, Any]) -> None:
             json.dump(data, f)
     except OSError as exc:
         logging.warning("[LIVE] counter not saved: %s", exc)
+
+
+_ended: Dict[str, float] = {}
+
+
+def was_shown(match_id: Optional[str]) -> bool:
+    """The page showed it before (so it keeps it until a while after it ends)."""
+    return bool(match_id) and match_id in _prev
+
+
+def finished_long_ago(match_id: str, keep: timedelta) -> bool:
+    """Remember when a shown match ended; True once that is more than `keep` ago."""
+    at = _ended.setdefault(match_id, time.time())
+    return time.time() - at > keep.total_seconds()
 
 
 def calls_today() -> Dict[str, Any]:

@@ -2,7 +2,7 @@
   <div>
     <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
       <h1 class="text-2xl font-bold text-slate-900">En vivo</h1>
-      <span class="text-xs text-slate-500" title="Una llamada trae todos los partidos en vivo; solo se llama mientras esta página está abierta y hay un partido seguido empezando o en juego.">
+      <span class="text-xs text-slate-500" title="Una llamada trae todos los partidos en vivo; solo se llama mientras esta página está abierta y algún partido nuestro está en su horario.">
         Llamadas en vivo hoy: {{ calls.today }} de {{ calls.cap }} · se actualiza cada {{ calls.pollSeconds }} s
         <span v-if="updatedAt"> · {{ updatedAt }}</span>
       </span>
@@ -13,7 +13,8 @@
 
     <p v-if="loading" class="text-sm text-slate-500">Cargando…</p>
     <div v-else-if="!matches.length" class="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">
-      No sigues ningún partido. En el Dashboard, cada partido de tenis por jugar tiene el botón <strong>👁 Seguir en vivo</strong>.
+      Ahora no se está jugando ningún partido ATP de los nuestros.
+      <span v-if="!reading">No se gastan llamadas: el feed se lee solo desde 10 minutos antes de la hora de un partido.</span>
     </div>
 
     <div v-for="m in matches" :key="m.matchId" class="mb-4 rounded-lg border border-slate-200 bg-white p-4">
@@ -24,7 +25,6 @@
         </div>
         <div class="flex items-center gap-2">
           <span class="px-2 py-0.5 rounded text-xs font-medium" :class="STATE_CLASS[m.state]">{{ m.state === 'en vivo' ? '🔴 en vivo' : m.state }}</span>
-          <button type="button" class="text-xs text-slate-600 underline" @click="unfollow(m)">Dejar de seguir</button>
         </div>
       </div>
 
@@ -82,8 +82,15 @@
         </details>
       </template>
       <p v-else class="mt-2 text-sm text-slate-500">
-        {{ m.state === 'por empezar' ? 'Empieza a leerse 10 minutos antes de la hora del partido.' : 'Todavía no aparece en el feed en vivo.' }}
+        Todavía no aparece en el feed en vivo.
       </p>
+    </div>
+    <div v-if="upcoming.length" class="mt-2 text-sm text-slate-600">
+      <h2 class="font-semibold text-slate-900 mb-1">Faltan hoy</h2>
+      <ul class="space-y-0.5">
+        <li v-for="u in upcoming" :key="u.matchId"><span class="tabular-nums">{{ u.time }}</span> · {{ u.player1 }} vs {{ u.player2 }}<span v-if="u.tournament" class="text-slate-500"> · {{ u.tournament }}</span></li>
+      </ul>
+      <p class="text-xs text-slate-500 mt-1">Aparecen arriba solos cuando empiezan (esta página se actualiza cada 30 s).</p>
     </div>
   </div>
 </template>
@@ -114,6 +121,8 @@ const STAT_ROWS = [
 ]
 
 const matches = ref([])
+const upcoming = ref([])
+const reading = ref(false)
 const calls = ref({ today: 0, cap: 0, pollSeconds: 30 })
 const note = ref('')
 const feedError = ref(null)
@@ -136,8 +145,10 @@ function hhmm(iso) {
 async function load() {
   try {
     // no client cache here: each read must reach the backend, which caches the feed itself
-    const { data } = await api.get('/live/followed', { params: { t: Date.now() } })
+    const { data } = await api.get('/live/matches', { params: { t: Date.now() } })
     matches.value = data.matches
+    upcoming.value = data.upcoming || []
+    reading.value = data.reading
     calls.value = data.calls
     note.value = data.note
     feedError.value = data.feedError
@@ -147,12 +158,6 @@ async function load() {
   } finally {
     loading.value = false
   }
-}
-async function unfollow(m) {
-  try {
-    await api.delete(`/live/follow/${m.matchId}`)
-    matches.value = matches.value.filter((x) => x.matchId !== m.matchId)
-  } catch (e) { /* keep it listed */ }
 }
 onMounted(() => {
   load()

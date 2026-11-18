@@ -20,7 +20,6 @@ class TennisMatch(BaseModel):
     # {p1Wins, p2Wins, total, meetings: [{date, tournament, surface, winner 'p1'|'p2', sets, games}]}
     h2hDetail: Optional[Dict[str, Any]] = None
     # Recent news read for off-court factors: {fetchedAt, player1: [...], player2: [...], summary}
-    liveFollowed: bool = False   # "Seguir en vivo" (routers/live.py)
     levelPlayer1: Optional[Dict[str, Any]] = None   # form_service: recent vs own level (display only)
     levelPlayer2: Optional[Dict[str, Any]] = None
     playerNews: Optional[Dict[str, Any]] = None
