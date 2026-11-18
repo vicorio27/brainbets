@@ -73,6 +73,7 @@ def parse_event(ev: Dict[str, Any]) -> Dict[str, Any]:
         "pointsPlayed": sum(pts),
         "pointsWon": {"p1": pts[0], "p2": pts[1]},
         "games": len(pbp),
+        "pbp": pbp,
         "lastGame": {"set": last.get("set_number"), "game": last.get("number_game"),
                      "server": _side(last.get("player_served")), "lostServe": _side(last.get("serve_lost"))} if last else None,
     }
@@ -133,6 +134,148 @@ def point_events(prev: Optional[Dict[str, Any]], cur: Dict[str, Any], names: Dic
     return out
 
 
+_RANK = {"0": 0, "15": 1, "30": 2, "40": 3, "A": 4}
+SERVE_GAP = 0.08     # serve points won: a gap that makes one serve "comfortable" and the other "suffering"
+LOAD_GAP = 2         # deuce games + break points faced on serve: this much more = under pressure
+
+
+def _score(text: Any):
+    parts = [x.strip() for x in str(text or "").split("-")]
+    if len(parts) != 2:
+        return None
+    try:
+        return [_RANK[x] if x in _RANK else int(x) for x in parts]
+    except ValueError:
+        return None
+
+
+def game_points(game: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Who won each point of one game. Point scores in the feed go from player 1's side
+    ("15 - 30" = player 2 leads); the last point is not listed: it went to the game winner."""
+    server = _side(game.get("player_served"))
+    if not server:
+        return None
+    lost = _side(game.get("serve_lost"))
+    winner = ("p2" if server == "p1" else "p1") if lost else server
+    prev, won = [0, 0], {"p1": 0, "p2": 0}
+    deuce, bps = False, 0
+    for pt in game.get("points") or []:
+        cur = _score(pt.get("score"))
+        if cur is None:
+            continue
+        if cur[0] > prev[0] or cur[1] < prev[1]:
+            won["p1"] += 1
+        else:
+            won["p2"] += 1
+        if cur == [3, 3]:
+            deuce = True
+        if pt.get("break_point"):
+            bps += 1
+        prev = cur
+    won[winner] += 1
+    return {"server": server, "won": won, "deuce": deuce, "breakPoints": bps, "broken": bool(lost)}
+
+
+def pressure(pbp: List[Dict[str, Any]], last: Optional[int] = None) -> Dict[str, Dict[str, Any]]:
+    """Per player, from the point by point: serve points won, games on serve that went to deuce,
+    break points faced, breaks suffered and points won. `last`: only the last N games."""
+    games = [g for g in (game_points(x) for x in pbp) if g]
+    if last:
+        games = games[-last:]
+    out = {s: {"servePlayed": 0, "serveWon": 0, "serveGames": 0, "deuceGames": 0, "bpFaced": 0,
+               "broken": 0, "points": 0} for s in ("p1", "p2")}
+    for g in games:
+        s = g["server"]
+        o = "p2" if s == "p1" else "p1"
+        out[s]["servePlayed"] += g["won"][s] + g["won"][o]
+        out[s]["serveWon"] += g["won"][s]
+        out[s]["serveGames"] += 1
+        out[s]["deuceGames"] += int(g["deuce"])
+        out[s]["bpFaced"] += g["breakPoints"]
+        out[s]["broken"] += int(g["broken"])
+        out["p1"]["points"] += g["won"]["p1"]
+        out["p2"]["points"] += g["won"]["p2"]
+    return out
+
+
+def leader(pbp: List[Dict[str, Any]]) -> Optional[str]:
+    """Who is ahead on the scoreboard (sets, then games of the set in play), or None when level.
+    Game scores in the point by point go from player 1's side, per set."""
+    last_by_set: Dict[str, Any] = {}
+    for g in pbp:
+        sc = _score(g.get("score"))
+        if sc:
+            last_by_set[str(g.get("set_number"))] = sc
+    if not last_by_set:
+        return None
+    rows = list(last_by_set.values())
+    sets = {"p1": 0, "p2": 0}
+    for a, b in rows[:-1]:
+        sets["p1" if a > b else "p2"] += 1
+    a, b = rows[-1]
+    if set_done(a, b):
+        sets["p1" if a > b else "p2"] += 1
+        a = b = 0
+    if sets["p1"] != sets["p2"]:
+        return "p1" if sets["p1"] > sets["p2"] else "p2"
+    return None if a == b else ("p1" if a > b else "p2")
+
+
+def _times(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
+
+
+def who_is_better(pbp: List[Dict[str, Any]], names: Dict[str, str]) -> List[str]:
+    """Who is playing better, from how each one wins his points, whatever the score says."""
+    pr = pressure(pbp)
+    if min(pr["p1"]["serveGames"], pr["p2"]["serveGames"]) < 2:
+        return []
+    if not (pr["p1"]["servePlayed"] and pr["p2"]["servePlayed"]):
+        return []
+    serve = {s: pr[s]["serveWon"] / pr[s]["servePlayed"] for s in ("p1", "p2")}
+    load = {s: pr[s]["deuceGames"] + pr[s]["bpFaced"] for s in ("p1", "p2")}
+    # the one under more pressure on serve
+    hi = "p1" if (load["p1"], -serve["p1"]) > (load["p2"], -serve["p2"]) else "p2"
+    lo = "p2" if hi == "p1" else "p1"
+    better = lo if ((load[hi] - load[lo] >= LOAD_GAP and serve[lo] >= serve[hi])
+                    or serve[lo] - serve[hi] >= SERVE_GAP) else None
+    items = []
+    if better and pr[better]["points"] < pr[hi]["points"]:
+        o = hi
+        items.append(
+            f"Parejo, con matices: {names[better]} saca más cómodo y le genera más presión a {names[o]} en su saque, "
+            f"pero {names[o]} gana más puntos ({pr[o]['points']} a {pr[better]['points']}).")
+    elif better:
+        o = hi
+        lead = leader(pbp)
+        tail = ("." if lead == better else
+                f", aunque el marcador va a favor de {names[o]}." if lead == o else
+                ", aunque el marcador va parejo.")
+        items.append(
+            f"Juega mejor {names[better]}: saca más cómodo y presiona más el saque de {names[o]} "
+            f"(puntos: {names[better]} {pr[better]['points']}, {names[o]} {pr[o]['points']})" + tail)
+    else:
+        items.append(
+            f"Parejo en el juego: puntos {names['p1']} {pr['p1']['points']}, {names['p2']} {pr['p2']['points']}; "
+            "ninguno presiona claramente más el saque del otro.")
+    for s in (lo, hi):
+        g = pr[s]
+        txt = (f"{names[s]} gana el {_pct(serve[s])} de sus puntos de saque ({g['serveWon']} de {g['servePlayed']}); "
+               f"{g['deuceGames']} de sus {g['serveGames']} juegos de saque fueron a deuce y enfrentó "
+               f"{_times(g['bpFaced'], 'punto de break', 'puntos de break')}")
+        if g["broken"]:
+            txt += f"; le quebraron el saque {_times(g['broken'], 'vez', 'veces')}"
+        items.append(txt + ".")
+    recent = pressure(pbp, last=4)
+    for s in ("p1", "p2"):
+        r = recent[s]
+        if r["serveGames"] >= 2 and r["bpFaced"] + r["deuceGames"] >= 3:
+            items.append(f"Ojo en los últimos juegos: {names[s]} está sufriendo con su saque "
+                         f"({r['deuceGames']} deuce y {_times(r['bpFaced'], 'punto de break', 'puntos de break')} "
+                         f"en sus últimos {r['serveGames']} juegos de saque).")
+    return items
+
+
 def _pct(x: float) -> str:
     return f"{round(x * 100)}%"
 
@@ -143,7 +286,7 @@ def general_read(cur: Dict[str, Any], names: Dict[str, str], usual: Optional[Dic
     if played < MIN_POINTS:
         return {"points": played, "items": [f"Muy pronto para sacar conclusiones ({played} puntos jugados)."]}
     st = cur["stats"]
-    items: List[str] = []
+    items: List[str] = who_is_better(cur.get("pbp") or [], names)
     has_shots = all("winners" in st[s] and "ue" in st[s] for s in ("p1", "p2"))
     if has_shots:
         agg = {s: (st[s]["winners"] + st[s]["ue"]) / played for s in ("p1", "p2")}

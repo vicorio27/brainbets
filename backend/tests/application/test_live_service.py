@@ -69,3 +69,31 @@ def test_first_serve_against_his_usual_level():
     cur = ls.parse_event(event(30, 25, more=more))
     items = ls.general_read(cur, NAMES, {"p1": {"firstIn": 0.68}})["items"]
     assert any(i.startswith("Fils mete menos primeros de lo normal: 52% (lo normal en él: 68%)") for i in items)
+
+
+# Real point by point: Fils vs Jodar, ATP Finals, 17-nov-2026 (4-6 6-2 6-2), from get_fixtures.
+import json as _json
+from pathlib import Path as _Path
+
+_PBP = _json.loads((_Path(__file__).parent / "fils_jodar_pbp.json").read_text())
+_FJ = {"p1": "Fils", "p2": "Jodar"}
+
+
+def test_pressure_matches_the_official_match_stats():
+    pr = ls.pressure(_PBP)
+    assert (pr["p1"]["points"], pr["p2"]["points"]) == (85, 68)         # Total Points Won 85/153
+    assert (pr["p1"]["serveWon"], pr["p1"]["servePlayed"]) == (50, 66)  # Service Points Won 50/66
+    assert pr["p1"]["bpFaced"] == 2 and pr["p2"]["broken"] == 4
+
+
+def test_at_4_4_fils_is_playing_better_though_the_score_is_level():
+    set1 = [g for g in _PBP if g["set_number"] == "Set 1"]
+    out = ls.who_is_better(set1[:8], _FJ)
+    assert out[0].startswith("Juega mejor Fils: saca más cómodo y presiona más el saque de Jodar")
+    assert out[0].endswith("aunque el marcador va parejo.")
+
+
+def test_when_the_pressing_player_wins_fewer_points_it_is_called_level():
+    set1 = [g for g in _PBP if g["set_number"] == "Set 1"]
+    assert ls.who_is_better(set1[:10], _FJ)[0].startswith("Parejo, con matices")
+    assert ls.leader(set1[:10]) == "p2"
