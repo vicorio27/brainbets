@@ -47,6 +47,7 @@
               </ul>
               <p class="text-slate-500 mt-1">{{ s.level.note }}</p>
             </details>
+            <MatchContext :ctx="ctxOf(v)" :side="s.side" :with-rival="false" />
             <ul v-if="s.reasons.length" class="mt-1 text-xs text-slate-700 list-disc pl-4">
               <li v-for="r in s.reasons" :key="r.text" :title="r.evidence">{{ r.text }}</li>
             </ul>
@@ -99,6 +100,7 @@
               </div>
               <div class="text-xs text-slate-500">{{ s.match }} · {{ when(s) }}<span v-if="s.tournament"> · {{ s.tournament }}</span></div>
               <div v-if="s.backed" class="text-xs text-slate-700 mt-0.5">{{ s.why }}</div>
+              <MatchContext :ctx="ctxOf(s)" :side="sideOf(s)" />
             </div>
             <div class="text-right shrink-0">
               <div class="font-semibold text-slate-900">{{ pct(s.probability) }}%</div>
@@ -106,6 +108,7 @@
             </div>
           </li>
         </ul>
+        <p class="text-xs text-slate-500 mt-2">{{ CONTEXT_NOTE }}</p>
       </template>
       <template v-else>
         <p v-if="!modes.conservative.combos.length" class="text-sm text-slate-500">Hacen falta al menos dos partidos con apuesta segura.</p>
@@ -117,6 +120,7 @@
                   <span class="font-medium text-slate-900">{{ l.label }}</span>
                   <span class="text-slate-600"> · {{ pct(l.probability) }}% · {{ l.odds.toFixed(2) }}</span>
                   <div class="text-xs text-slate-500">{{ l.match }} · {{ when(l) }}</div>
+                  <MatchContext :ctx="ctxOf(l)" :side="sideOf(l)" />
                 </li>
               </ul>
               <div class="text-right shrink-0">
@@ -127,7 +131,8 @@
             </div>
           </li>
         </ul>
-        <p class="text-xs text-slate-500 mt-2">Probabilidad de que salgan las dos según la casa, sin margen. Al pulsar "Usar esta" reemplaza tu combinada y la puedes registrar abajo.</p>
+        <p class="text-xs text-slate-500 mt-2">{{ CONTEXT_NOTE }}</p>
+        <p class="text-xs text-slate-500 mt-1">Probabilidad de que salgan las dos según la casa, sin margen. Al pulsar "Usar esta" reemplaza tu combinada y la puedes registrar abajo.</p>
       </template>
     </template>
 
@@ -148,6 +153,7 @@
             <div class="min-w-0 flex-1">
               <div class="font-medium text-slate-900">{{ r.label }}</div>
               <div class="text-xs text-slate-500">{{ r.match }} · {{ when(r) }}</div>
+              <MatchContext :ctx="ctxOf(r)" :side="sideOf(r)" />
               <ul class="mt-1 text-sm text-slate-700 list-disc pl-5">
                 <li v-for="x in r.reasons" :key="x.text" :title="x.evidence">{{ x.text }}</li>
               </ul>
@@ -207,6 +213,7 @@ import { ref, computed, onMounted } from 'vue'
 import api from '../stores/api.js'
 import { useComboStore, legKey } from '../stores/combo.js'
 import ComboPanel from './ComboPanel.vue'
+import MatchContext from './MatchContext.vue'
 
 const MODES = [
   { key: 'conservadora', label: 'Conservadora', on: 'bg-emerald-700 text-white' },
@@ -243,6 +250,10 @@ function setType(t) {
 const pct = (p) => (p == null ? '-' : Math.round(p * 100))
 const when = (x) => [x.eventDate, x.eventTime].filter(Boolean).join(' ')
 const key = (x) => legKey(x.matchId, x.label)
+// 🏆 qué se juega · 🧑‍🏫 entrenador · 🏟️ bajo techo · 🔟 contra top 10 (context_service)
+const CONTEXT_NOTE = '🏆 qué se juega · 🧑‍🏫 entrenador · 🏟️ bajo techo · 🔟 contra top 10: lo que el precio solo no dice. Información para decidir; todavía no se ha medido contra la cuota.'
+const ctxOf = (x) => (modes.value.context || {})[x.matchId] || null
+const sideOf = (x) => x.selector?.side || 'p1'
 function leg(x) {
   return {
     key: key(x), matchId: x.matchId, match: x.match, eventDate: x.eventDate, eventTime: x.eventTime,

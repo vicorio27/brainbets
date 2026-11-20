@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
@@ -112,7 +113,19 @@ def get_router() -> APIRouter:
                 return m.eventDate >= today.isoformat()
             return f"{m.eventDate} {m.eventTime}" > now
 
-        return build_modes([m.model_dump() for m in ((resp.tennis if resp else None) or []) if not_started(m)])
+        todo = [m.model_dump() for m in ((resp.tennis if resp else None) or []) if not_started(m)]
+        out = build_modes(todo)
+        # what each player has at stake and in what conditions (stakes, coach, indoor, top 10)
+        try:
+            from src.application.context_service import context_for_matches
+            from src.domain.models import Match
+            ids = [m.get("matchId") for m in todo if m.get("matchId")]
+            rows = service.db.query(Match).filter(Match.external_id.in_(ids)).all() if ids else []
+            out["context"] = context_for_matches(service.db, rows)
+        except Exception:
+            logging.getLogger(__name__).exception("bet-modes context failed")
+            out["context"] = {}
+        return out
 
     @r.get("/odds-movement")
     def get_odds_movement(service: DataService = Depends(get_data_service)):

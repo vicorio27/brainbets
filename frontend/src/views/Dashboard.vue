@@ -32,6 +32,12 @@
           <div class="text-2xl sm:text-3xl font-bold leading-tight">{{ safeOfDay.label }}</div>
           <div class="text-sm mt-1 text-white/90">{{ safeOfDay.match }} · <strong class="text-white">{{ safeOfDay.when }}</strong><span v-if="safeOfDay.tournament"> · {{ safeOfDay.tournament }}</span></div>
           <p class="text-sm mt-2 text-white/90 max-w-2xl">{{ safeOfDay.why }} La casa le da {{ Math.round(safeOfDay.probability * 100) }}%: sale más o menos {{ Math.round(safeOfDay.probability * 10) }} de cada 10 veces.</p>
+          <ul v-if="safeOfDay.context.length" class="mt-2 text-sm space-y-0.5 max-w-2xl">
+            <li v-for="c in safeOfDay.context" :key="c.who + c.key" :title="c.detail">
+              <span aria-hidden="true">{{ HERO_ICON[c.key] || '•' }}</span>
+              <span class="text-white/80">{{ c.who }}:</span> {{ c.text }}<span v-if="c.tone !== 'neutral'" class="ml-1 text-xs font-semibold" :class="c.tone === 'good' ? 'text-emerald-200' : 'text-red-200'">{{ c.tone === 'good' ? '▲' : '▼' }}</span>
+            </li>
+          </ul>
         </div>
         <div class="flex gap-6 shrink-0">
           <div><div class="text-2xl font-bold">{{ Math.round(safeOfDay.probability * 100) }}%</div><div class="text-[11px] uppercase tracking-wide text-white/90">probabilidad</div></div>
@@ -1238,6 +1244,7 @@ function betOpinions(b) {
 // The card is the top of that list; without it, the best of the engine's own picks for today.
 // Conservative bet of the day: the safest bet of the matches still to play (bet_modes_service).
 const betModes = ref(null)
+const HERO_ICON = { stakes: '🏆', stakes_news: '🏆', coach: '🧑‍🏫', indoor: '🏟️', top10: '🔟' }
 async function loadBetModes() {
   try {
     const { data } = await api.get('/matches/bet-modes')
@@ -1254,8 +1261,14 @@ const safeOfDay = computed(() => {
   if (!pick) return null
   const tomorrow = new Date(Date.now() + 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' })
   const day = pick.eventDate === today ? 'hoy' : pick.eventDate === tomorrow ? 'mañana' : pick.eventDate.slice(8, 10) + '/' + pick.eventDate.slice(5, 7)
+  // what each player has at stake and in what conditions (context_service): bettor first, then rival
+  const ctx = (betModes.value?.context || {})[pick.matchId] || {}
+  const mine = pick.selector?.side || 'p1'
+  const context = [mine, mine === 'p1' ? 'p2' : 'p1'].flatMap((sd) =>
+    (ctx[sd]?.items || []).map((it) => ({ ...it, who: ctx[sd].player })))
   return {
     ...pick,
+    context,
     when: `${day}${pick.eventTime ? ' ' + pick.eventTime : ''}`,
     title: day === 'hoy' ? 'Apuesta del día · conservadora' : `Hoy no quedan partidos · la más segura de ${day === 'mañana' ? 'mañana' : 'el ' + day}`
   }
