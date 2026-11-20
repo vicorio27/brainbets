@@ -4,8 +4,8 @@
       <h1 class="text-2xl font-bold text-slate-900">Dashboard</h1>
       <div class="flex items-center gap-3">
         <span class="text-xs text-slate-500 text-right">
-          <span v-if="dash">
-            Collect {{ ago(dash.lastMatchesUpdate) }} · Predict {{ ago(dash.lastPredictionsUpdate) }} · Validate {{ ago(dash.lastResultsUpdate) }}<br />
+          <span v-if="dash && lastTouch" :title="`Partidos y cuotas: ${ago(dash.lastMatchesUpdate)} · resultados validados: ${ago(dash.lastResultsUpdate)}`">
+            Datos actualizados {{ ago(lastTouch) }}<br />
           </span>
           Cargado {{ lastLoadedAt ? fmtClock(lastLoadedAt) : '—' }}
         </span>
@@ -25,19 +25,27 @@
          bookmaker prices. The price-based pick below is speculative and stays folded. -->
     <div v-if="safeOfDay" class="rounded-2xl p-5 sm:p-6 mb-3 shadow-lg bg-gradient-to-br from-emerald-700 to-emerald-800 text-white">
       <div class="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-white/90">
-        <span aria-hidden="true">🛡️</span> {{ safeOfDay.title }}
+        {{ safeOfDay.title }}
       </div>
       <div class="mt-2 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
         <div class="min-w-0">
           <div class="text-2xl sm:text-3xl font-bold leading-tight">{{ safeOfDay.label }}</div>
           <div class="text-sm mt-1 text-white/90">{{ safeOfDay.match }} · <strong class="text-white">{{ safeOfDay.when }}</strong><span v-if="safeOfDay.tournament"> · {{ safeOfDay.tournament }}</span></div>
-          <p class="text-sm mt-2 text-white/90 max-w-2xl">{{ safeOfDay.why }} La casa le da {{ Math.round(safeOfDay.probability * 100) }}%: sale más o menos {{ Math.round(safeOfDay.probability * 10) }} de cada 10 veces.</p>
-          <ul v-if="safeOfDay.context.length" class="mt-2 text-sm space-y-0.5 max-w-2xl">
-            <li v-for="c in safeOfDay.context" :key="c.who + c.key" :title="c.detail">
-              <span aria-hidden="true">{{ HERO_ICON[c.key] || '•' }}</span>
-              <span class="text-white/80">{{ c.who }}:</span> {{ c.text }}<span v-if="c.tone !== 'neutral'" class="ml-1 text-xs font-semibold" :class="c.tone === 'good' ? 'text-emerald-200' : 'text-red-200'">{{ c.tone === 'good' ? '▲' : '▼' }}</span>
-            </li>
-          </ul>
+          <p class="text-sm mt-2 text-white/90 max-w-2xl">{{ safeOfDay.why }} Sale más o menos {{ Math.round(safeOfDay.probability * 10) }} de cada 10 veces.</p>
+          <div v-if="safeOfDay.table.rows.length" class="mt-3 max-w-2xl rounded-lg bg-white/10 px-3 py-2 text-sm">
+            <div class="grid grid-cols-[5.5rem_1fr_1fr] sm:grid-cols-[8rem_1fr_1fr] gap-x-3 gap-y-1">
+              <div></div>
+              <div class="font-semibold truncate">{{ safeOfDay.table.mine }}</div>
+              <div class="font-semibold truncate text-white/80">{{ safeOfDay.table.rival }}</div>
+              <template v-for="r in safeOfDay.table.rows" :key="r.key">
+                <div class="text-xs text-white/75 self-center">{{ r.label }}</div>
+                <div v-for="(c, i) in [r.mine, r.rival]" :key="i" :title="c && (c.detail || c.text)" :class="[HERO_TONE[c ? c.tone : 'neutral'], i ? 'text-white/85' : '']">
+                  <template v-if="c">{{ c.short }}<span v-if="c.tone !== 'neutral'" class="ml-1 text-xs">{{ c.tone === 'good' ? '▲' : '▼' }}</span></template>
+                  <span v-else class="text-white/50">-</span>
+                </div>
+              </template>
+            </div>
+          </div>
         </div>
         <div class="flex gap-6 shrink-0">
           <div><div class="text-2xl font-bold">{{ Math.round(safeOfDay.probability * 100) }}%</div><div class="text-[11px] uppercase tracking-wide text-white/90">probabilidad</div></div>
@@ -781,13 +789,13 @@
       <div v-else class="grid grid-cols-1 gap-8" :class="footballMatches.length ? 'lg:grid-cols-2' : ''">
         <div>
           <h2 class="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
-            <span>🎾</span> Tenis
-            <span class="text-sm font-normal text-slate-500">({{ tennisMatches.length }})</span>
+            Tenis
+            <span class="text-sm font-normal text-slate-500">({{ tennisOpen.length }} por jugar<template v-if="tennisDone.length"> · {{ tennisDone.length }} terminados</template>)</span>
           </h2>
           <!-- Without football the tennis cards use both columns -->
           <div :class="footballMatches.length ? 'space-y-4' : 'grid grid-cols-1 lg:grid-cols-2 gap-4 items-start'">
             <MatchCard
-              v-for="match in tennisMatches"
+              v-for="match in tennisOpen"
               :key="match.matchId"
               :match="match"
               sport="tennis"
@@ -802,6 +810,18 @@
               message="No hay partidos disponibles para hoy."
             />
           </div>
+          <!-- Finished: slim result lines, open on their own when nothing is left to play -->
+          <details v-if="tennisDone.length" :open="!tennisOpen.length" class="mt-4">
+            <summary class="cursor-pointer text-sm font-medium text-slate-600">Terminados hoy ({{ tennisDone.length }})</summary>
+            <div class="mt-2 grid grid-cols-1 lg:grid-cols-2 gap-2">
+              <MatchCard
+                v-for="match in tennisDone"
+                :key="match.matchId"
+                :match="match"
+                sport="tennis"
+              />
+            </div>
+          </details>
         </div>
 
         <div v-if="footballMatches.length">
@@ -824,9 +844,9 @@
     </div>
 
     <!-- Player set stats (tennis, today) -->
-    <div v-if="activeTab === 'today' && setStatsPlayers.length" class="mt-8 bg-white rounded-lg shadow-sm border border-slate-200 p-4">
-      <h2 class="text-lg font-semibold text-slate-900 mb-1">🎾 Games y puntos por set — jugadores de hoy</h2>
-      <p class="text-sm text-slate-500 mb-4">
+    <details v-if="activeTab === 'today' && setStatsPlayers.length" class="mt-8 bg-white rounded-lg shadow-sm border border-slate-200 p-4">
+      <summary class="cursor-pointer text-base font-semibold text-slate-900">Games y puntos por set — jugadores de hoy <span class="text-sm font-normal text-slate-500">({{ setStatsPlayers.length }} jugadores)</span></summary>
+      <p class="text-sm text-slate-500 mt-2 mb-4">
         Promedio de games y puntos ganados-perdidos por set en cada superficie, sobre los partidos con detalle por set.
       </p>
       <div class="overflow-x-auto" tabindex="0">
@@ -834,9 +854,9 @@
           <thead>
             <tr class="text-left text-xs text-slate-500 uppercase tracking-wider">
               <th class="py-2 pr-4">Jugador</th>
-              <th class="py-2 px-3">🟠 Arcilla</th>
-              <th class="py-2 px-3">🔵 Dura</th>
-              <th class="py-2 px-3">🟢 Hierba</th>
+              <th class="py-2 px-3">Arcilla</th>
+              <th class="py-2 px-3">Dura</th>
+              <th class="py-2 px-3">Hierba</th>
             </tr>
           </thead>
           <tbody>
@@ -864,7 +884,7 @@
         Formato: games ganados-perdidos por set (sets con datos) y, debajo, puntos por set cuando hay estadísticas.
         Resaltado = superficie del partido de hoy.
       </p>
-    </div>
+    </details>
 
     <!-- Room so the combo bar never hides the last card -->
     <div v-if="combo.count" class="h-16" aria-hidden="true"></div>
@@ -894,6 +914,12 @@ const analyticsStore = useAnalyticsStore()
 const lastLoadedAt = ref(null)
 const refreshing = ref(false)
 const dash = computed(() => analyticsStore.dashboard)
+// the most recent of "a match was written" and "a result was validated"
+const lastTouch = computed(() => {
+  const d = dash.value
+  const times = [d?.lastMatchesUpdate, d?.lastResultsUpdate].filter(Boolean).map((x) => new Date(x).getTime())
+  return times.length ? new Date(Math.max(...times)).toISOString() : null
+})
 
 function fmtClock(d) {
   return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'America/Bogota' })
@@ -966,6 +992,9 @@ const top3MatchIds = computed(() => {
 })
 
 const tennisMatches = computed(() => sortByConfidence(matchesStore.latest?.tennis || []))
+const isDone = (m) => ['FINISHED', 'CANCELLED'].includes(m.status)
+const tennisOpen = computed(() => tennisMatches.value.filter((m) => !isDone(m)))
+const tennisDone = computed(() => tennisMatches.value.filter(isDone))
 const footballMatches = computed(() => sortByConfidence(matchesStore.latest?.football || []))
 
 // All matches (both sports) grouped by tournament / league name
@@ -1244,7 +1273,7 @@ function betOpinions(b) {
 // The card is the top of that list; without it, the best of the engine's own picks for today.
 // Conservative bet of the day: the safest bet of the matches still to play (bet_modes_service).
 const betModes = ref(null)
-const HERO_ICON = { stakes: '🏆', stakes_news: '🏆', coach: '🧑‍🏫', indoor: '🏟️', top10: '🔟' }
+const HERO_TONE = { good: 'font-semibold text-emerald-200', bad: 'font-semibold text-red-200', neutral: '' }
 async function loadBetModes() {
   try {
     const { data } = await api.get('/matches/bet-modes')
@@ -1264,11 +1293,16 @@ const safeOfDay = computed(() => {
   // what each player has at stake and in what conditions (context_service): bettor first, then rival
   const ctx = (betModes.value?.context || {})[pick.matchId] || {}
   const mine = pick.selector?.side || 'p1'
-  const context = [mine, mine === 'p1' ? 'p2' : 'p1'].flatMap((sd) =>
-    (ctx[sd]?.items || []).map((it) => ({ ...it, who: ctx[sd].player })))
+  const rival = mine === 'p1' ? 'p2' : 'p1'
+  const keys = ['stakes', 'stakes_news', 'coach', 'indoor', 'top10']
+  const rows = keys.map((k) => {
+    const a = (ctx[mine]?.items || []).find((it) => it.key === k)
+    const b = (ctx[rival]?.items || []).find((it) => it.key === k)
+    return { key: k, label: (a || b)?.label, mine: a || null, rival: b || null }
+  }).filter((r) => r.mine || r.rival)
   return {
     ...pick,
-    context,
+    table: { mine: ctx[mine]?.player || '', rival: ctx[rival]?.player || '', rows },
     when: `${day}${pick.eventTime ? ' ' + pick.eventTime : ''}`,
     title: day === 'hoy' ? 'Apuesta del día · conservadora' : `Hoy no quedan partidos · la más segura de ${day === 'mañana' ? 'mañana' : 'el ' + day}`
   }

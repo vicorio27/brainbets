@@ -42,7 +42,7 @@ def test_top10_without_a_win_this_year_is_flagged():
     rows = [{"date": d(2026, m, 1), "won": False, "rank": 5, "rival": "X"} for m in (2, 5, 8)]
     it = top10_item(rows, 2026, opp_rank=7)
     assert it["tone"] == "bad"
-    assert "0-3 (ninguna victoria)" in it["text"] and "otra oportunidad" in it["text"]
+    assert "0-3 en 2026 (ninguna victoria)" in it["text"] and "otra oportunidad" in it["text"]
 
 
 def test_top10_names_the_last_win():

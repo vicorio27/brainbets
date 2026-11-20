@@ -1,37 +1,41 @@
 <template>
+  <!-- Finished: one slim line of result, nothing to decide any more -->
   <router-link
+    v-if="finished"
+    :to="{ path: '/predictions', query: { matchId: match.matchId, date: match.eventDate } }"
+    class="block bg-slate-50 rounded-lg border border-slate-200 px-4 py-2.5 hover:border-blue-400 transition-colors"
+  >
+    <div class="flex items-center justify-between gap-3 text-xs text-slate-500">
+      <span class="truncate">{{ match.tournament || match.league }}</span>
+      <span class="whitespace-nowrap">{{ match.status === 'CANCELLED' ? 'Anulado' : 'Final' }} · {{ formatDateTime(match.eventDate, match.eventTime) }}</span>
+    </div>
+    <div class="mt-0.5 flex flex-wrap items-baseline gap-x-3 text-sm text-slate-800">
+      <span class="font-medium">{{ sport === 'tennis' ? match.player1 : match.homeTeam }} <span class="text-slate-400">vs</span> {{ sport === 'tennis' ? match.player2 : match.awayTeam }}</span>
+      <span v-if="scoreLine" class="font-bold text-slate-900">{{ scoreLine }}</span>
+      <span v-if="setScoresStr" class="text-xs text-slate-500">{{ setScoresStr }}</span>
+    </div>
+  </router-link>
+
+  <router-link
+    v-else
     :to="{ path: '/predictions', query: { matchId: match.matchId, date: match.eventDate } }"
     class="block bg-white rounded-lg shadow-sm border border-slate-200 p-4 hover:border-blue-400 hover:shadow-md transition-all cursor-pointer"
   >
     <div class="flex items-start justify-between gap-3">
       <div class="flex-1 min-w-0">
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
-          <div class="flex items-center gap-2 min-w-0">
-            <span class="text-sm font-medium text-slate-500 flex-shrink-0">{{ sport === 'tennis' ? '🎾' : '⚽' }}</span>
-            <span class="text-sm font-medium text-slate-500 truncate">{{ match.tournament || match.league }}</span>
-          </div>
-          <div class="flex items-center gap-2 flex-shrink-0">
+        <!-- Layer 1: what and when -->
+        <div class="flex items-center justify-between gap-2 mb-2 text-xs sm:text-sm">
+          <span class="font-medium text-slate-500 truncate">{{ match.tournament || match.league }}</span>
+          <span class="flex items-center gap-2 flex-shrink-0">
             <span
               v-if="bestConfidence != null"
-              :class="isTop
-                ? 'bg-orange-100 text-orange-700 border border-orange-300'
-                : 'bg-green-100 text-green-700 border border-green-200'"
-              class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap"
+              :class="isTop ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-700'"
+              class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap"
               :title="isTop ? 'Top 3: mayor confianza del día' : 'Confianza de la mejor predicción'"
-            >
-              {{ isTop ? '🔥' : '🎯' }} {{ bestConfidence }}%
-            </span>
-            <span
-              v-else
-              class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap"
-              title="Este partido aún no tiene predicción generada"
-            >
-              ⏳ Sin predicción
-            </span>
-            <span v-if="match.eventDate" class="inline-flex items-center self-start px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 whitespace-nowrap">
-              📅 {{ formatDateTime(match.eventDate, match.eventTime) }}
-            </span>
-          </div>
+            >{{ bestConfidence }}%</span>
+            <span v-if="match.eventDate" class="text-slate-600 whitespace-nowrap">{{ formatDateTime(match.eventDate, match.eventTime) }}</span>
+            <span v-else-if="match.eventTime && match.eventTime !== '00:00'" class="text-slate-600">{{ formatTime(match.eventTime) }}</span>
+          </span>
         </div>
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-3">
           <div class="text-base sm:text-lg font-semibold text-slate-900 truncate">
@@ -44,57 +48,34 @@
             <span v-if="favInfo" :class="favInfo.p2.cls" :title="favInfo.title" class="ml-1 align-middle inline-flex px-2 py-0.5 rounded-full text-xs font-semibold">{{ favInfo.p2.text }}</span>
           </div>
         </div>
+        <div class="mt-1 text-xs text-slate-500">
+          <span v-if="sport === 'tennis' && match.surface">{{ match.surface }}</span>
+          <span v-if="sport === 'tennis' && match.rankingPlayer1"><template v-if="match.surface"> · </template>Ranking #{{ match.rankingPlayer1 }} vs #{{ match.rankingPlayer2 }}</span>
+          <span v-if="sport === 'football' && match.homePosition">Posición {{ match.homePosition }} vs {{ match.awayPosition }}</span>
+          <span v-if="!(match.eventTime && match.eventTime !== '00:00') && match.eventDate"> · Hora por confirmar</span>
+        </div>
         <div v-if="favInfo && favInfo.note" class="mt-1 text-xs text-amber-800">{{ favInfo.note }}</div>
-
-        <!-- Tournament streaks (information, already in the price) -->
-        <div v-if="streakRows.length" class="mt-2 space-y-1">
-          <div v-for="row in streakRows" :key="row.name" class="flex flex-wrap items-center gap-1 text-xs">
-            <span class="font-medium text-slate-600">{{ row.name }}</span>
-            <span
-              v-for="t in row.tags"
-              :key="t.key"
-              class="inline-flex items-center px-2 py-0.5 rounded-full font-medium"
-              :class="t.cls"
-              :title="t.title"
-            >{{ t.text }}</span>
-          </div>
-        </div>
-
-        <!-- Head-to-head from our DB (every stored meeting between these two players) -->
-        <div v-if="sport === 'tennis'" class="mt-2 text-xs text-slate-600" :title="h2hTitle">
-          <template v-if="h2hInfo">
-            <span class="font-medium">H2H:</span>
-            {{ match.player1 }} <span class="font-semibold text-slate-900">{{ h2hInfo.p1Wins }}-{{ h2hInfo.p2Wins }}</span> {{ match.player2 }}
-            <span class="text-slate-500"> · último: {{ h2hInfo.last.tournament }} {{ h2hInfo.last.date.slice(0, 4) }},
-              ganó {{ h2hInfo.last.winner === 'p1' ? match.player1 : match.player2 }}<template v-if="h2hInfo.last.sets">&nbsp;({{ h2hInfo.last.sets }})</template></span>
-          </template>
-          <span v-else class="text-slate-500">H2H: nunca se han enfrentado (en los partidos guardados desde 2010)</span>
-        </div>
         <div v-for="s in newsStakes" :key="s.headline" class="mt-1 text-xs text-amber-900" :title="`${s.headline} (${s.source}, ${s.date})`">
           🏆 <span class="font-medium">En juego:</span> {{ s.note || s.headline }}
         </div>
-        <div v-if="newsCount" class="mt-1 text-xs text-slate-700" title="Noticias fuera de la cancha de esta semana: ábrelo para leerlas">
-          📰 {{ newsCount }} {{ newsCount === 1 ? 'noticia' : 'noticias' }} a tener en cuenta<template v-if="newsNegative">&nbsp;· <span class="text-red-700 font-medium">{{ newsNegative }} {{ newsNegative === 1 ? 'negativa' : 'negativas' }} para un jugador</span></template>
-        </div>
-
-        <div v-for="lv in levelLines" :key="lv.player" class="mt-1 text-xs" :class="LEVEL_CLASS[lv.r.level]" :title="lv.tip">
-          📊 <span class="font-medium">{{ lv.player }}:</span> {{ lv.r.headline }}
-        </div>
         <router-link v-if="inPlayWindow" to="/en-vivo" class="mt-1 inline-block text-xs font-medium text-red-700 underline">🔴 Ver en vivo</router-link>
-        <details v-if="latestNews" class="mt-1 text-xs text-slate-700">
-          <summary class="cursor-pointer">📰 Últimas noticias de cada jugador ({{ latestNews.total }})</summary>
-          <div v-for="side in latestNews.sides" :key="side.key" class="mt-1">
-            <div class="font-medium text-slate-800">{{ side.name }}</div>
-            <p v-if="!side.items.length" class="text-slate-500">Sin noticias en los últimos 5 días.</p>
-            <ul v-else class="space-y-0.5">
-              <li v-for="it in side.items" :key="it.link">
-                <a :href="it.link" target="_blank" rel="noopener noreferrer" class="text-blue-700 hover:underline break-words">{{ it.headline }}</a>
-                <span class="text-slate-500"> · {{ it.source }} · {{ newsAgo(it.published) }}</span>
-              </li>
-            </ul>
-          </div>
-        </details>
+        <!-- Live / result score -->
+        <div v-if="scoreLine" class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span
+            v-if="match.status === 'LIVE'"
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700"
+          >
+            <span class="w-1.5 h-1.5 rounded-full bg-red-600 animate-pulse"></span> EN VIVO
+          </span>
+          <span
+            v-else
+            class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-200 text-slate-700"
+          >Final</span>
+          <span class="text-sm font-bold text-slate-900">{{ scoreLine }}</span>
+          <span v-if="setScoresStr" class="text-xs text-slate-500">{{ setScoresStr }}</span>
+        </div>
 
+        <!-- Layer 2: the bets, which is what gets decided -->
         <!-- Most likely bets, however little they pay (likely_picks_service) -->
         <div v-if="likelyPicks.length" class="mt-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-xs text-slate-700">
           <div class="font-medium text-emerald-800">✅ Lo más probable</div>
@@ -122,6 +103,55 @@
           </div>
         </div>
 
+
+        <!-- Layer 3: everything else, folded -->
+        <details v-if="hasMore" class="mt-2 text-xs text-slate-700" @click.stop>
+          <summary class="cursor-pointer text-slate-600">Más datos<span v-if="moreHint" class="text-slate-500"> · {{ moreHint }}</span></summary>
+        <!-- Head-to-head from our DB (every stored meeting between these two players) -->
+        <div v-if="sport === 'tennis'" class="mt-2 text-xs text-slate-600" :title="h2hTitle">
+          <template v-if="h2hInfo">
+            <span class="font-medium">H2H:</span>
+            {{ match.player1 }} <span class="font-semibold text-slate-900">{{ h2hInfo.p1Wins }}-{{ h2hInfo.p2Wins }}</span> {{ match.player2 }}
+            <span class="text-slate-500"> · último: {{ h2hInfo.last.tournament }} {{ h2hInfo.last.date.slice(0, 4) }},
+              ganó {{ h2hInfo.last.winner === 'p1' ? match.player1 : match.player2 }}<template v-if="h2hInfo.last.sets">&nbsp;({{ h2hInfo.last.sets }})</template></span>
+          </template>
+          <span v-else class="text-slate-500">H2H: nunca se han enfrentado (en los partidos guardados desde 2010)</span>
+        </div>
+        <!-- Tournament streaks (information, already in the price) -->
+        <div v-if="streakRows.length" class="mt-2 space-y-1">
+          <div v-for="row in streakRows" :key="row.name" class="flex flex-wrap items-center gap-1 text-xs">
+            <span class="font-medium text-slate-600">{{ row.name }}</span>
+            <span
+              v-for="t in row.tags"
+              :key="t.key"
+              class="inline-flex items-center px-2 py-0.5 rounded-full font-medium"
+              :class="t.cls"
+              :title="t.title"
+            >{{ t.text }}</span>
+          </div>
+        </div>
+
+        <div v-if="newsCount" class="mt-1 text-xs text-slate-700" title="Noticias fuera de la cancha de esta semana: ábrelo para leerlas">
+          📰 {{ newsCount }} {{ newsCount === 1 ? 'noticia' : 'noticias' }} a tener en cuenta<template v-if="newsNegative">&nbsp;· <span class="text-red-700 font-medium">{{ newsNegative }} {{ newsNegative === 1 ? 'negativa' : 'negativas' }} para un jugador</span></template>
+        </div>
+
+        <div v-for="lv in levelLines" :key="lv.player" class="mt-1 text-xs" :class="LEVEL_CLASS[lv.r.level]" :title="lv.tip">
+          📊 <span class="font-medium">{{ lv.player }}:</span> {{ lv.r.headline }}
+        </div>
+        <details v-if="latestNews" class="mt-1 text-xs text-slate-700" @click.stop>
+          <summary class="cursor-pointer">📰 Últimas noticias de cada jugador ({{ latestNews.total }})</summary>
+          <div v-for="side in latestNews.sides" :key="side.key" class="mt-1">
+            <div class="font-medium text-slate-800">{{ side.name }}</div>
+            <p v-if="!side.items.length" class="text-slate-500">Sin noticias en los últimos 5 días.</p>
+            <ul v-else class="space-y-0.5">
+              <li v-for="it in side.items" :key="it.link">
+                <a :href="it.link" target="_blank" rel="noopener noreferrer" class="text-blue-700 hover:underline break-words">{{ it.headline }}</a>
+                <span class="text-slate-500"> · {{ it.source }} · {{ newsAgo(it.published) }}</span>
+              </li>
+            </ul>
+          </div>
+        </details>
+
         <div v-if="dogCase" class="mt-1 text-xs text-slate-700" :title="dogTitle">
           🎯 <template v-if="dogCase.headline">{{ dogCase.headline.replace(/, ya que:$/, '') }} ({{ dogCase.reasons.length }} {{ dogCase.reasons.length === 1 ? 'argumento' : 'argumentos' }})</template><span v-else class="text-slate-500">No favorito: {{ dogCase.underdog }}<template v-if="dogCase.odds">&nbsp;a {{ dogCase.odds }}</template> · sin argumentos con datos a su favor</span>
         </div>
@@ -145,31 +175,6 @@
           <span v-if="gamesInfo.g.trust < 0.5" class="block text-slate-500">Poca historia de saque y resto de alguno de los dos.</span>
         </div>
 
-        <!-- Live / result score -->
-        <div v-if="scoreLine" class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span
-            v-if="match.status === 'LIVE'"
-            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700"
-          >
-            <span class="w-1.5 h-1.5 rounded-full bg-red-600 animate-pulse"></span> EN VIVO
-          </span>
-          <span
-            v-else
-            class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-200 text-slate-700"
-          >Final</span>
-          <span class="text-sm font-bold text-slate-900">{{ scoreLine }}</span>
-          <span v-if="setScoresStr" class="text-xs text-slate-500">{{ setScoresStr }}</span>
-        </div>
-        <div class="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-600">
-          <span v-if="match.eventTime && match.eventTime !== '00:00'" class="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-100">
-            🕒 {{ formatTime(match.eventTime) }}
-          </span>
-          <span v-else-if="match.eventDate" class="text-slate-500">Hora por confirmar</span>
-          <span v-if="sport === 'tennis' && match.surface" class="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-100">🏟️ {{ match.surface }}</span>
-          <span v-if="sport === 'tennis' && match.rankingPlayer1" class="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-100">Ranking: #{{ match.rankingPlayer1 }} vs #{{ match.rankingPlayer2 }}</span>
-          <span v-if="sport === 'football' && match.homePosition" class="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-100">Pos: {{ match.homePosition }} vs {{ match.awayPosition }}</span>
-        </div>
-
         <!-- Prediction reliability by player on this surface -->
         <div v-if="reliabilityRows.length" class="mt-2 space-y-0.5 text-xs">
           <div v-for="row in reliabilityRows" :key="row.name" class="text-slate-500">
@@ -179,6 +184,7 @@
             <span class="text-slate-500"> ({{ row.sampleTotal }} preds en {{ match.surface }})</span>
           </div>
         </div>
+        </details>
       </div>
     </div>
   </router-link>
@@ -220,6 +226,8 @@ const newsItems = computed(() => {
   return [...(n.player1 || []), ...(n.player2 || [])]
 })
 const newsCount = computed(() => newsItems.value.length)
+// Finished or cancelled matches render as one slim line
+const finished = computed(() => ['FINISHED', 'CANCELLED'].includes(props.match.status))
 // From 10 min before its time to 6 h after (same window as routers/live.py), link to En vivo
 const inPlayWindow = computed(() => {
   if (props.sport !== 'tennis' || ['FINISHED', 'CANCELLED'].includes(props.match.status)) return false
@@ -416,4 +424,16 @@ const reliabilityRows = computed(() => {
   add(props.match.player2, r.player2)
   return rows
 })
+
+// Layer 3 teaser: what is inside "Más datos"
+const moreHint = computed(() => {
+  const t = []
+  if (h2hInfo.value) t.push(`H2H ${h2hInfo.value.p1Wins}-${h2hInfo.value.p2Wins}`)
+  if (latestNews.value) t.push(`${latestNews.value.total} noticias`)
+  if (levelLines.value.length) t.push('cómo vienen jugando')
+  if (dogCase.value) t.push('no favorito')
+  if (gamesInfo.value) t.push('modelo de games')
+  return t.join(' · ')
+})
+const hasMore = computed(() => props.sport === 'tennis' || streakRows.value.length > 0 || reliabilityRows.value.length > 0)
 </script>

@@ -250,8 +250,7 @@ function setType(t) {
 const pct = (p) => (p == null ? '-' : Math.round(p * 100))
 const when = (x) => [x.eventDate, x.eventTime].filter(Boolean).join(' ')
 const key = (x) => legKey(x.matchId, x.label)
-// 🏆 qué se juega · 🧑‍🏫 entrenador · 🏟️ bajo techo · 🔟 contra top 10 (context_service)
-const CONTEXT_NOTE = '🏆 qué se juega · 🧑‍🏫 entrenador · 🏟️ bajo techo · 🔟 contra top 10: lo que el precio solo no dice. Medido en 2011–2020 contra la cuota de cierre de Pinnacle: bajo techo y top 10 ya están en el precio; en las Finals, el que no se juega nada ganó menos de lo que decía la cuota (solo 18 casos).'
+const CONTEXT_NOTE = 'Qué se juega, entrenador, bajo techo y contra top 10: lo que el precio solo no dice. Medido en 2011–2020 contra la cuota de cierre de Pinnacle: bajo techo y top 10 ya están en el precio; en las Finals, el que no se juega nada ganó menos de lo que decía la cuota (solo 18 casos).'
 const ctxOf = (x) => (modes.value.context || {})[x.matchId] || null
 const sideOf = (x) => x.selector?.side || 'p1'
 function leg(x) {

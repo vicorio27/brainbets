@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session, joinedload
 
 from src.domain.models import (
@@ -1039,7 +1039,9 @@ class DataService:
 
         latest_match = match_repository.get_latest(self.db)
         if latest_match:
-            summary.lastMatchesUpdate = latest_match.created_at.isoformat() if latest_match.created_at else None
+            # when any match was last written (collect, scores, odds), not when the newest one was created
+            touched = self.db.query(func.max(Match.updated_at)).scalar() or latest_match.created_at
+            summary.lastMatchesUpdate = touched.isoformat() if touched else None
             today_start = today_start_bogota()
             summary.todayMatches = (
                 self.db.query(Match)

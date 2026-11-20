@@ -78,16 +78,19 @@ def indoor_item(rows: List[Tuple[bool, bool]]) -> Optional[Dict[str, Any]]:
     if len(ind) < INDOOR_MIN:
         return None
     ri = sum(ind) / len(ind)
-    text = f"Bajo techo: {round(ri * 100)}% ({sum(ind)}-{len(ind) - sum(ind)})"
+    text = f"{round(ri * 100)}% ({sum(ind)}-{len(ind) - sum(ind)})"
+    short = f"{round(ri * 100)}%"
     tone = "neutral"
     if out:
         ro = sum(out) / len(out)
         text += f" vs {round(ro * 100)}% al aire libre en cemento ({sum(out)}-{len(out) - sum(out)})"
+        short += f" vs {round(ro * 100)}%"
         if ri - ro >= INDOOR_GAP:
             tone = "good"
         elif ro - ri >= INDOOR_GAP:
             tone = "bad"
-    return {"key": "indoor", "tone": tone, "text": text + f", últimos {INDOOR_YEARS} años",
+    return {"key": "indoor", "label": "Bajo techo", "tone": tone, "short": short,
+            "text": text + f", últimos {INDOOR_YEARS} años",
             "detail": "Bajo techo según la cancha guardada (histórico) o el nombre del torneo."}
 
 
@@ -97,7 +100,7 @@ def top10_item(rows: List[Dict[str, Any]], year: int, opp_rank: Optional[int]) -
         return None
     w = [r for r in rows if r["won"]]
     n = len(rows)
-    text = f"Contra top 10 en {year}: {len(w)}-{n - len(w)}"
+    text = f"{len(w)}-{n - len(w)} en {year}"
     if n and not w:
         text += " (ninguna victoria)"
     tone = "neutral"
@@ -114,7 +117,8 @@ def top10_item(rows: List[Dict[str, Any]], year: int, opp_rank: Optional[int]) -
         if n and not w:
             text += "; hoy tiene otra oportunidad"
     detail.append("Ranking del rival en ese partido (o el más cercano conocido).")
-    return {"key": "top10", "tone": tone, "text": text, "detail": " ".join(detail)}
+    return {"key": "top10", "label": "Contra top 10", "tone": tone, "short": f"{len(w)}-{n - len(w)}",
+            "text": text, "detail": " ".join(detail)}
 
 
 def _status(wins: Dict[str, int], player: str) -> str:
@@ -168,16 +172,21 @@ def stakes_item(record: Tuple[int, int], st: Dict[str, frozenset]) -> Dict[str, 
     w, l = record
     head = f"Va {w}-{l} en el grupo"
     win, lose = st["win"], st["lose"]
+    rec = f"{w}-{l}"
     if win == {"out"}:
-        return {"key": "stakes", "tone": "bad", "text": f"{head}: ya está eliminado, juega sin nada en juego",
+        return {"key": "stakes", "label": "Qué se juega", "tone": "bad", "short": f"{rec} · eliminado",
+                "text": f"{head}: ya está eliminado, juega sin nada en juego",
                 "detail": "Aunque gane no pasa a semifinales."}
     if lose == {"in"}:
-        return {"key": "stakes", "tone": "neutral", "text": f"{head}: ya está en semifinales pase lo que pase",
+        return {"key": "stakes", "label": "Qué se juega", "tone": "neutral", "short": f"{rec} · ya en semis",
+                "text": f"{head}: ya está en semifinales pase lo que pase",
                 "detail": "Puede dosificarse: perder no le cambia nada."}
     # the match matters when winning can put him through and losing cannot
     tone = "good" if "in" in win and "in" not in lose else "neutral"
     text = f"{head}: si gana {SAY[win]}; si pierde {SAY[lose]}"
-    return {"key": "stakes", "tone": tone, "text": text,
+    short = f"{rec} · todo o nada" if (win == {"in"} and lose == {"out"}) else f"{rec} · " + (
+        "le sirve ganar" if tone == "good" else "depende")
+    return {"key": "stakes", "label": "Qué se juega", "tone": tone, "short": short, "text": text,
             "detail": "Por victorias, con los partidos del grupo que faltan; un empate a victorias se define por sets y games."}
 
 
@@ -190,17 +199,19 @@ def news_items(news: Optional[Dict[str, Any]], side: str) -> List[Dict[str, Any]
         f = it.get("factor")
         if f == "en_juego" and "stakes_news" not in seen:
             seen.add("stakes_news")
-            out.append({"key": "stakes_news", "tone": "good", "text": f"En juego: {it.get('note') or it.get('headline')}",
-                        "detail": it.get("headline")})
+            txt = it.get("note") or it.get("headline")
+            out.append({"key": "stakes_news", "label": "En juego", "tone": "good", "short": txt[:70],
+                        "text": txt, "detail": it.get("headline")})
         elif f == "entrenador" and "coach" not in seen:
             seen.add("coach")
-            out.append({"key": "coach", "tone": "neutral", "text": f"Entrenador: {it.get('note') or it.get('headline')}",
-                        "detail": it.get("headline")})
+            txt = it.get("note") or it.get("headline")
+            out.append({"key": "coach", "label": "Entrenador", "tone": "neutral", "short": txt[:70],
+                        "text": txt, "detail": it.get("headline")})
     if "coach" not in seen:
         for it in ((news.get("latest") or {}).get(side)) or []:
             if COACH_WORDS.search(it.get("headline") or ""):
-                out.append({"key": "coach", "tone": "neutral", "text": f"Entrenador (titular): {it['headline']}",
-                            "detail": it.get("source")})
+                out.append({"key": "coach", "label": "Entrenador", "tone": "neutral", "short": it["headline"][:70],
+                            "text": f"(titular) {it['headline']}", "detail": it.get("source")})
                 break
     return out
 

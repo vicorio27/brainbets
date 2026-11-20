@@ -2,14 +2,14 @@
   <div v-if="mine.length || (withRival && theirs.length)" class="mt-1 text-xs space-y-0.5">
     <ul v-if="mine.length" class="space-y-0.5">
       <li v-for="it in mine" :key="'m' + it.key" :class="TONE[it.tone]" :title="it.detail">
-        {{ ICON[it.key] || '•' }} {{ it.text }}
+        <span class="font-medium">{{ it.label }}:</span> {{ it.text }}<span v-if="MARK[it.tone]" class="ml-1 font-semibold">{{ MARK[it.tone] }}</span>
       </li>
     </ul>
-    <details v-if="withRival && theirs.length" class="text-slate-600">
+    <details v-if="withRival && theirs.length" class="text-slate-600" @click.stop>
       <summary class="cursor-pointer">Rival: {{ rivalName }}</summary>
       <ul class="mt-0.5 space-y-0.5 pl-3">
         <li v-for="it in theirs" :key="'t' + it.key" :class="TONE[it.tone]" :title="it.detail">
-          {{ ICON[it.key] || '•' }} {{ it.text }}
+          <span class="font-medium">{{ it.label }}:</span> {{ it.text }}<span v-if="MARK[it.tone]" class="ml-1 font-semibold">{{ MARK[it.tone] }}</span>
         </li>
       </ul>
     </details>
@@ -26,7 +26,7 @@ const props = defineProps({
   withRival: { type: Boolean, default: true }
 })
 const TONE = { good: 'text-emerald-800', bad: 'text-red-700', neutral: 'text-slate-700' }
-const ICON = { stakes: '🏆', stakes_news: '🏆', coach: '🧑‍🏫', indoor: '🏟️', top10: '🔟' }
+const MARK = { good: '▲', bad: '▼' }
 const other = computed(() => (props.side === 'p1' ? 'p2' : 'p1'))
 const mine = computed(() => (props.ctx && props.side && props.ctx[props.side]?.items) || [])
 const theirs = computed(() => (props.ctx && props.side && props.ctx[other.value]?.items) || [])
