@@ -42,7 +42,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ 'http://n8n:5678/webhook/predictions-db?from=' + new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) + '&to=' + new Date(Date.now() + 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) }}",
+        "url": "={{ 'http://n8n:5678/webhook/predictions-db?from=' + new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) + '&to=' + new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) }}",
         "sendBody": false,
         "sendHeaders": true,
         "specifyHeaders": "json",
