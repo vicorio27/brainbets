@@ -6,7 +6,9 @@ The user's own criteria (2026-11-19, Shelton and Zverev at the Finals):
 - indoor: record under a roof vs outdoor hard, last INDOOR_YEARS years (shown when this match is indoor);
 - top 10: wins against top-10 rivals this calendar year, and the date of the last one.
 
-Information, not a value signal: none of this has been measured against the price yet.
+Measured 2026-11-19 against Pinnacle closing odds, ATP 2011-2020 (scratchpad research_context.py,
+hypotheses written first): indoor gap and top-10 record are already in the price; in the Finals
+round robin a player with nothing at stake won 38.9% vs 47.7% (n=18, too few to act on).
 """
 import itertools
 import re
