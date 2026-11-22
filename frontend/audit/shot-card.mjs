@@ -24,9 +24,11 @@ for (const [name, width] of [['desktop', 1280], ['mobile', 390]]) {
   if (n) await tab.first().click()
   const stayed = new URL(page.url()).pathname === '/'
   await page.screenshot({ path: `audit/output/card-data-${name}.png`, fullPage: true })
-  const rows = page.locator('details > summary', { hasText: /Cara a cara|Primer game|Cómo vienen|Noticias/ })
+  const rows = page.locator('details > summary', { hasText: /Cara a cara|Primer game|Cómo vienen/ })
   for (let i = 0; i < await rows.count(); i++) await rows.nth(i).click()
   await page.screenshot({ path: `audit/output/card-open-${name}.png`, fullPage: true })
+  const nt = page.getByRole('tab', { name: /^Noticias/ })
+  if (await nt.count()) { await nt.first().click(); await page.screenshot({ path: `audit/output/card-news-${name}.png`, fullPage: true }) }
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   console.log(name, '| pestaña Datos:', n, '| sigue en el Dashboard:', stayed, '| desborde:', overflow, '| errores:', errors.join(' / ') || 0)
   await page.close()

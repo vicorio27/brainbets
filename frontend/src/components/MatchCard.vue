@@ -76,7 +76,7 @@
         </div>
 
         <!-- Two sections: what to bet, and the data behind it -->
-        <div v-if="hasBets || hasData" class="mt-3 flex gap-1 border-b border-slate-200" role="tablist">
+        <div v-if="hasBets || hasData || hasNews" class="mt-3 flex gap-1 border-b border-slate-200" role="tablist">
           <button
             v-if="hasBets" role="tab" :aria-selected="section === 'bets'"
             class="-mb-px border-b-2 px-3 py-1.5 text-sm font-medium"
@@ -89,6 +89,12 @@
             :class="section === 'data' ? 'border-emerald-700 text-emerald-800' : 'border-transparent text-slate-500 hover:text-slate-800'"
             @click.stop.prevent="tab = 'data'"
           >Datos<span class="ml-1 text-xs font-normal text-slate-500">{{ dataCount }}</span></button>
+          <button
+            v-if="hasNews" role="tab" :aria-selected="section === 'news'"
+            class="-mb-px border-b-2 px-3 py-1.5 text-sm font-medium"
+            :class="section === 'news' ? 'border-emerald-700 text-emerald-800' : 'border-transparent text-slate-500 hover:text-slate-800'"
+            @click.stop.prevent="tab = 'news'"
+          >Noticias<span class="ml-1 text-xs font-normal text-slate-500">{{ newsTotal }}</span></button>
         </div>
 
         <!-- Section 1: Apuestas -->
@@ -125,6 +131,23 @@
           </div>
         </div>
 
+        <!-- Section 3: Noticias -->
+        <div v-if="section === 'news'" class="mt-2 space-y-2 text-xs text-slate-700">
+          <div v-if="newsCount" title="Noticias fuera de la cancha de esta semana">
+              {{ newsCount }} {{ newsCount === 1 ? 'noticia' : 'noticias' }} a tener en cuenta<template v-if="newsNegative">&nbsp;· <span class="text-red-700 font-medium">{{ newsNegative }} {{ newsNegative === 1 ? 'negativa' : 'negativas' }} para un jugador</span></template>
+            </div>
+            <template v-if="latestNews"><div v-for="side in latestNews.sides" :key="side.key">
+              <div class="font-medium text-slate-800">{{ side.name }}</div>
+              <p v-if="!side.items.length" class="text-slate-500">Sin noticias en los últimos 5 días.</p>
+              <ul v-else class="space-y-0.5">
+                <li v-for="it in side.items" :key="it.link">
+                  <a :href="it.link" target="_blank" rel="noopener noreferrer" class="text-blue-700 hover:underline break-words" @click.stop>{{ it.headline }}</a>
+                  <span class="text-slate-500"> · {{ it.source }} · {{ newsAgo(it.published) }}</span>
+                </li>
+              </ul>
+            </div></template>
+        </div>
+
         <!-- Section 2: Datos, one folded row per category with its headline number -->
         <div v-if="section === 'data'" class="mt-2 space-y-1.5">
           <CardSection v-if="h2hInfo || sport === 'tennis'" title="Cara a cara" :hint="h2hInfo ? `${h2hInfo.p1Wins}-${h2hInfo.p2Wins}` : 'nunca se han enfrentado'">
@@ -157,21 +180,6 @@
             </div>
           </CardSection>
 
-          <CardSection v-if="newsCount || latestNews" title="Noticias" :hint="newsHint">
-            <div v-if="newsCount" title="Noticias fuera de la cancha de esta semana">
-              {{ newsCount }} {{ newsCount === 1 ? 'noticia' : 'noticias' }} a tener en cuenta<template v-if="newsNegative">&nbsp;· <span class="text-red-700 font-medium">{{ newsNegative }} {{ newsNegative === 1 ? 'negativa' : 'negativas' }} para un jugador</span></template>
-            </div>
-            <template v-if="latestNews"><div v-for="side in latestNews.sides" :key="side.key">
-              <div class="font-medium text-slate-800">{{ side.name }}</div>
-              <p v-if="!side.items.length" class="text-slate-500">Sin noticias en los últimos 5 días.</p>
-              <ul v-else class="space-y-0.5">
-                <li v-for="it in side.items" :key="it.link">
-                  <a :href="it.link" target="_blank" rel="noopener noreferrer" class="text-blue-700 hover:underline break-words" @click.stop>{{ it.headline }}</a>
-                  <span class="text-slate-500"> · {{ it.source }} · {{ newsAgo(it.published) }}</span>
-                </li>
-              </ul>
-            </div></template>
-          </CardSection>
 
           <CardSection v-if="gamesInfo" title="Modelo de games" :hint="`~${gamesInfo.g.expectedGames} games · tiebreak ${gamesInfo.tiebreak}%`">
             <div title="Modelo de games (saque y resto, juego a juego), congelado el 16-oct-2026. No ha demostrado ganarle a la casa: se está midiendo en Caja → Laboratorio.">
@@ -474,14 +482,17 @@ const newsHint = computed(() => {
 })
 const dataCount = computed(() => [
   props.sport === 'tennis', firstGameLines.value.length, levelLines.value.length, streakRows.value.length,
-  newsCount.value || latestNews.value, gamesInfo.value, reliabilityRows.value.length
+  gamesInfo.value, reliabilityRows.value.length
 ].filter(Boolean).length)
 const hasData = computed(() => dataCount.value > 0)
+const hasNews = computed(() => newsCount.value > 0 || !!latestNews.value)
+const newsTotal = computed(() => (latestNews.value ? latestNews.value.total : newsCount.value))
 const tab = ref(null)
 // Bets first when there are any; otherwise the data
 const section = computed(() => {
   if (tab.value === 'bets' && hasBets.value) return 'bets'
   if (tab.value === 'data' && hasData.value) return 'data'
-  return hasBets.value ? 'bets' : hasData.value ? 'data' : null
+  if (tab.value === 'news' && hasNews.value) return 'news'
+  return hasBets.value ? 'bets' : hasData.value ? 'data' : hasNews.value ? 'news' : null
 })
 </script>
