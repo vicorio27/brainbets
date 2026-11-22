@@ -66,6 +66,24 @@ def head_to_head(d: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "hint": f"{_short(d['p1'])} {h['p1Wins']}-{h['p2Wins']} {_short(d['p2'])}", "lines": lines}
 
 
+# 2b --------------------------------------------------------------------------
+def matchup(d: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    m = d.get("matchup")
+    if not m:
+        return None
+    lines, hints = [], []
+    for side, name in (("p1", d["p1"]), ("p2", d["p2"])):
+        blk = m.get(side) or {}
+        lines.extend(blk.get("lines") or [])
+        lines.extend("» " + n for n in blk.get("notes") or [])
+        if blk.get("record"):
+            hints.append(f"{_short(name)} {blk['record']}")
+    if not lines:
+        return None
+    return {"id": "matchup", "question": "¿Es bueno cada uno contra este rival?",
+            "hint": " · ".join(hints), "lines": lines}
+
+
 # 3 ---------------------------------------------------------------------------
 def serve(d: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     lines, hints = [], []
@@ -182,7 +200,7 @@ def why_favourite(d: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "hint": f"{_short(fav)} {round(pf * 100)}%", "lines": lines}
 
 
-RULES = (tired, head_to_head, serve, top10, at_stake, injury, history, why_favourite)
+RULES = (tired, head_to_head, matchup, serve, top10, at_stake, injury, history, why_favourite)
 
 
 def build_questions(d: Dict[str, Any]) -> List[Dict[str, Any]]:

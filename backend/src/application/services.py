@@ -513,6 +513,12 @@ class DataService:
                                           band_history(self.db), band_of,
                                           ((meta.get("odds_lines") or {}).get("books")))
         if match.status in ("SCHEDULED", "LIVE"):
+            try:
+                from src.application.matchup_service import matchup_for_match
+                base = lambda lv: next((m["base"] for m in (lv or {}).get("metrics", []) if m["key"] == "hold"), None)
+                tm.matchup = matchup_for_match(self.db, match, base(tm.levelPlayer1), base(tm.levelPlayer2))
+            except Exception as e:  # display only
+                logging.warning("matchup failed: %s", e)
             tm.questions = self._questions_for(match, tm)
         return tm
 
@@ -527,7 +533,7 @@ class DataService:
                 "p1": tm.player1, "p2": tm.player2, "surface": tm.surface,
                 "tload": compute_tournament_load(self.db, match.external_id),
                 "sload": compute_surface_load(self.db, match.external_id),
-                "h2h": tm.h2hDetail, "firstGame": tm.firstGame,
+                "h2h": tm.h2hDetail, "firstGame": tm.firstGame, "matchup": tm.matchup,
                 "levels": [tm.levelPlayer1, tm.levelPlayer2],
                 "context": {s: (ctx.get(s) or {}).get("items", []) for s in ("p1", "p2")},
                 "news": tm.playerNews, "picks": tm.likelyPicks, "odds": tm.oddsMarkets,

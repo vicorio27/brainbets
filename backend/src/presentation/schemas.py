@@ -22,6 +22,7 @@ class TennisMatch(BaseModel):
     # Recent news read for off-court factors: {fetchedAt, player1: [...], player2: [...], summary}
     levelPlayer1: Optional[Dict[str, Any]] = None   # form_service: recent vs own level (display only)
     levelPlayer2: Optional[Dict[str, Any]] = None
+    matchup: Optional[Dict[str, Any]] = None       # matchup_service: how each does against this rival (display only)
     questions: Optional[List[Dict[str, Any]]] = None   # questions_service: ready-made answers (display only)
     firstGame: Optional[Dict[str, Any]] = None      # first_game_service: holds the opening game of set 1 (display only)
     playerNews: Optional[Dict[str, Any]] = None

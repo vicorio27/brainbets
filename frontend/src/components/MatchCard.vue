@@ -173,6 +173,13 @@
               </template>
               <span v-else class="text-slate-500">Nunca se han enfrentado (en los partidos guardados desde 2010).</span>
             </div>
+            <template v-if="match.matchup">
+              <div v-for="side in ['p1', 'p2']" :key="side" class="mt-1.5 border-t border-slate-100 pt-1.5">
+                <div v-for="(l, i) in match.matchup[side].lines" :key="i">{{ l }}</div>
+                <div v-for="(n, i) in match.matchup[side].notes" :key="'n' + i" class="font-medium text-amber-800">» {{ n }}</div>
+              </div>
+              <p class="text-slate-500">Todos sus partidos guardados entre ellos. Es información: no se ha medido contra la cuota.</p>
+            </template>
           </CardSection>
 
           <CardSection v-if="firstGameLines.length" title="Primer game del 1er set" :hint="firstGameHint">

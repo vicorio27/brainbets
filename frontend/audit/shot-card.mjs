@@ -1,5 +1,7 @@
 // The full (not finished) match card: forces today's tennis matches to SCHEDULED on the API response.
 import { chromium } from 'playwright'
+import fs from 'node:fs'
+const inject = fs.existsSync('audit/output/inject.json') ? JSON.parse(fs.readFileSync('audit/output/inject.json', 'utf8')) : {}
 const base = process.env.AUDIT_BASE_URL || 'http://localhost:80'
 const browser = await chromium.launch()
 for (const [name, width] of [['desktop', 1280], ['mobile', 390]]) {
@@ -11,7 +13,7 @@ for (const [name, width] of [['desktop', 1280], ['mobile', 390]]) {
     let body = await res.text()
     try {
       const j = JSON.parse(body)
-      for (const m of j.tennis || []) { m.status = 'SCHEDULED'; m.setScores = null; m.finalSets = null; m.winner = null }
+      for (const m of j.tennis || []) { m.status = 'SCHEDULED'; m.setScores = null; m.finalSets = null; m.winner = null; Object.assign(m, inject) }
       body = JSON.stringify(j)
     } catch (e) { /* not the list */ }
     await route.fulfill({ response: res, body })
