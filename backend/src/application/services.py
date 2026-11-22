@@ -512,7 +512,31 @@ class DataService:
             tm.likelyPicks = likely_picks({**tm.model_dump(), "oddsLines": meta.get("odds_lines") or {}},
                                           band_history(self.db), band_of,
                                           ((meta.get("odds_lines") or {}).get("books")))
+        if match.status in ("SCHEDULED", "LIVE"):
+            tm.questions = self._questions_for(match, tm)
         return tm
+
+    def _questions_for(self, match: Match, tm: TennisMatch) -> Optional[List[Dict[str, Any]]]:
+        """Ready-made questions answered from stored data (questions_service); display only."""
+        try:
+            from src.application.context_service import context_for_matches
+            from src.application.questions_service import build_questions
+            from src.application.tennis_stats_service import compute_surface_load, compute_tournament_load
+            ctx = (context_for_matches(self.db, [match]).get(match.external_id) or {})
+            data = {
+                "p1": tm.player1, "p2": tm.player2, "surface": tm.surface,
+                "tload": compute_tournament_load(self.db, match.external_id),
+                "sload": compute_surface_load(self.db, match.external_id),
+                "h2h": tm.h2hDetail, "firstGame": tm.firstGame,
+                "levels": [tm.levelPlayer1, tm.levelPlayer2],
+                "context": {s: (ctx.get(s) or {}).get("items", []) for s in ("p1", "p2")},
+                "news": tm.playerNews, "picks": tm.likelyPicks, "odds": tm.oddsMarkets,
+                "rank": (tm.rankingPlayer1, tm.rankingPlayer2),
+            }
+            return build_questions(data) or None
+        except Exception as e:  # display only
+            logging.warning("questions failed: %s", e)
+            return None
 
     def get_latest_matches(self) -> Optional[MatchesResponse]:
         matches = match_repository.list(self.db, limit=100)

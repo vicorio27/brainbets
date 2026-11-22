@@ -76,7 +76,7 @@
         </div>
 
         <!-- Two sections: what to bet, and the data behind it -->
-        <div v-if="hasBets || hasData || hasNews" class="mt-3 flex gap-1 border-b border-slate-200" role="tablist">
+        <div v-if="hasBets || hasData || hasNews || hasQuestions" class="mt-3 flex gap-1 border-b border-slate-200" role="tablist">
           <button
             v-if="hasBets" role="tab" :aria-selected="section === 'bets'"
             class="-mb-px border-b-2 px-3 py-1.5 text-sm font-medium"
@@ -95,6 +95,12 @@
             :class="section === 'news' ? 'border-emerald-700 text-emerald-800' : 'border-transparent text-slate-500 hover:text-slate-800'"
             @click.stop.prevent="tab = 'news'"
           >Noticias<span class="ml-1 text-xs font-normal text-slate-500">{{ newsTotal }}</span></button>
+          <button
+            v-if="hasQuestions" role="tab" :aria-selected="section === 'ask'"
+            class="-mb-px border-b-2 px-3 py-1.5 text-sm font-medium"
+            :class="section === 'ask' ? 'border-emerald-700 text-emerald-800' : 'border-transparent text-slate-500 hover:text-slate-800'"
+            @click.stop.prevent="tab = 'ask'"
+          >Preguntas<span class="ml-1 text-xs font-normal text-slate-500">{{ questions.length }}</span></button>
         </div>
 
         <!-- Section 1: Apuestas -->
@@ -129,6 +135,14 @@
             <span class="font-medium">Si dudas del favorito:</span>&nbsp;
             <template v-if="dogCase.headline">{{ dogCase.headline.replace(/, ya que:$/, '') }} ({{ dogCase.reasons.length }} {{ dogCase.reasons.length === 1 ? 'argumento' : 'argumentos' }})</template><span v-else class="text-slate-500">{{ dogCase.underdog }}<template v-if="dogCase.odds">&nbsp;a {{ dogCase.odds }}</template> · sin argumentos con datos a su favor</span>
           </div>
+        </div>
+
+        <!-- Section 4: Preguntas, answered from our own data (no language model) -->
+        <div v-if="section === 'ask'" class="mt-2 space-y-1.5">
+          <CardSection v-for="q in questions" :key="q.id" :title="q.question" :hint="q.hint">
+            <div v-for="(l, i) in q.lines" :key="i">{{ l }}</div>
+          </CardSection>
+          <p class="px-1 text-xs text-slate-500">Respuestas calculadas con los datos guardados: son información, no una señal de valor.</p>
         </div>
 
         <!-- Section 3: Noticias -->
@@ -485,6 +499,8 @@ const dataCount = computed(() => [
   gamesInfo.value, reliabilityRows.value.length
 ].filter(Boolean).length)
 const hasData = computed(() => dataCount.value > 0)
+const questions = computed(() => (props.sport === 'tennis' && props.match.questions) || [])
+const hasQuestions = computed(() => questions.value.length > 0)
 const hasNews = computed(() => newsCount.value > 0 || !!latestNews.value)
 const newsTotal = computed(() => (latestNews.value ? latestNews.value.total : newsCount.value))
 const tab = ref(null)
@@ -493,6 +509,7 @@ const section = computed(() => {
   if (tab.value === 'bets' && hasBets.value) return 'bets'
   if (tab.value === 'data' && hasData.value) return 'data'
   if (tab.value === 'news' && hasNews.value) return 'news'
+  if (tab.value === 'ask' && hasQuestions.value) return 'ask'
   return hasBets.value ? 'bets' : hasData.value ? 'data' : hasNews.value ? 'news' : null
 })
 </script>
