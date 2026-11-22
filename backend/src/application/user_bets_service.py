@@ -18,6 +18,7 @@ import math
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from src.domain.models import Match, MatchScore, UserBet, UserBetLeg
@@ -238,7 +239,9 @@ def settle_pending(db: Session) -> Dict[str, int]:
     bets = (
         db.query(UserBet)
         .options(joinedload(UserBet.legs).joinedload(UserBetLeg.match))
-        .filter(UserBet.status == "PENDING")
+        # Also bets already decided but with a leg still open (a lost combo whose other
+        # match ended later): that leg gets its real result too.
+        .filter(or_(UserBet.status == "PENDING", UserBet.legs.any(UserBetLeg.status == "PENDING")))
         .all()
     )
     if not bets:
@@ -274,13 +277,15 @@ def settle_pending(db: Session) -> Dict[str, int]:
                 result = settle_live_leg(leg.kind, leg.selector or {}, *live[leg.match_id])
             if result:
                 leg.status, leg.settled_at = result, now
+        if bet.status != "PENDING":
+            continue
         status, paid = bet_outcome([(l.status, float(l.odds)) for l in bet.legs])
         if status != "PENDING":
             bet.status, bet.payout_odds, bet.settled_at = status, paid, now
             bet.profit = profit_of(status, float(bet.amount), paid)
             settled += 1
     db.commit()
-    return {"settled": settled, "pending": len(bets) - settled}
+    return {"settled": settled, "pending": len([b for b in bets if b.status == "PENDING"])}
 
 
 def _bet_view(bet: UserBet) -> Dict[str, Any]:

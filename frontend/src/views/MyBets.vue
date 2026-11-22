@@ -74,7 +74,7 @@
         </div>
         <ul class="mt-2 space-y-1 text-sm">
           <li v-for="(l, i) in b.legs" :key="i" class="flex items-baseline gap-2">
-            <span class="w-5 shrink-0 text-center" :title="STATUS[l.status].label">{{ STATUS[l.status].icon }}</span>
+            <span class="w-5 shrink-0 text-center" :title="legTitle(b, l)">{{ legIcon(b, l) }}</span>
             <span class="min-w-0 flex-1">
               {{ l.label }} <span class="text-slate-500">· {{ l.odds.toFixed(2) }}</span>
               <span class="block text-xs text-slate-500">{{ l.match }}<template v-if="l.matchDate"> · {{ when(l.matchDate) }}</template><template v-if="l.probability != null"> · la casa le daba {{ pct(l.probability) }}</template></span>
@@ -114,6 +114,13 @@ const STATUS = {
   LOST: { label: 'Perdida', icon: '❌', cls: 'bg-red-100 text-red-800' },
   VOID: { label: 'Anulada', icon: '➖', cls: 'bg-amber-100 text-amber-800' }
 }
+
+// A leg still open inside a bet that is already decided (e.g. a combo lost on its first leg)
+// is not "waiting for the result": the bet is over.
+const legIcon = (b, l) => (l.status === 'PENDING' && b.status !== 'PENDING' ? '➖' : STATUS[l.status].icon)
+const legTitle = (b, l) => (l.status === 'PENDING' && b.status !== 'PENDING'
+  ? 'Sin resultado propio: la apuesta ya quedó decidida por otra selección'
+  : STATUS[l.status].label)
 
 const summary = computed(() => store.data?.summary)
 const bets = computed(() => store.data?.bets || [])
