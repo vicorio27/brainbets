@@ -135,6 +135,10 @@
           📰 {{ newsCount }} {{ newsCount === 1 ? 'noticia' : 'noticias' }} a tener en cuenta<template v-if="newsNegative">&nbsp;· <span class="text-red-700 font-medium">{{ newsNegative }} {{ newsNegative === 1 ? 'negativa' : 'negativas' }} para un jugador</span></template>
         </div>
 
+        <div v-if="firstGameLines.length" class="mt-1 text-xs text-slate-700" title="Primer game del primer set: quién lo sacó y quién lo ganó, en sus partidos de 2025 y 2026. Es información: no se ha medido contra la cuota, y quién saca primero se sortea.">
+          <div class="font-medium text-slate-800">1er game del 1er set</div>
+          <div v-for="l in firstGameLines" :key="l.player"><span class="font-medium">{{ l.player }}:</span> {{ l.text }}</div>
+        </div>
         <div v-for="lv in levelLines" :key="lv.player" class="mt-1 text-xs" :class="LEVEL_CLASS[lv.r.level]" :title="lv.tip">
           📊 <span class="font-medium">{{ lv.player }}:</span> {{ lv.r.headline }}
         </div>
@@ -425,11 +429,28 @@ const reliabilityRows = computed(() => {
   return rows
 })
 
+// First game of set 1: each player's record and, between the two, who held it
+const firstGameLines = computed(() => {
+  const fg = props.match.firstGame
+  if (!fg) return []
+  const out = []
+  if (fg.p1) out.push({ player: props.match.player1, text: fg.p1.text })
+  if (fg.p2) out.push({ player: props.match.player2, text: fg.p2.text })
+  const h = fg.h2h
+  if (h && h.n) {
+    const part = (name, r) => (r.served ? `${name} sacó primero ${r.served} ${r.served === 1 ? 'vez' : 'veces'} y lo defendió ${r.held}` : null)
+    const bits = [part(props.match.player1, h.p1), part(props.match.player2, h.p2)].filter(Boolean)
+    out.push({ player: `Entre ellos (${h.n} ${h.n === 1 ? 'partido' : 'partidos'} con dato)`, text: bits.join('; ') })
+  }
+  return out
+})
+
 // Layer 3 teaser: what is inside "Más datos"
 const moreHint = computed(() => {
   const t = []
   if (h2hInfo.value) t.push(`H2H ${h2hInfo.value.p1Wins}-${h2hInfo.value.p2Wins}`)
   if (latestNews.value) t.push(`${latestNews.value.total} noticias`)
+  if (firstGameLines.value.length) t.push('1er game')
   if (levelLines.value.length) t.push('cómo vienen jugando')
   if (dogCase.value) t.push('no favorito')
   if (gamesInfo.value) t.push('modelo de games')

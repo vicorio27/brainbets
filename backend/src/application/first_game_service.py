@@ -201,3 +201,63 @@ def backfill(db: Session, start: date, stop: date) -> Dict[str, int]:
             total[k] += res[k]
         d = e + timedelta(days=1)
     return total
+
+
+# ---------- for the match cards ----------
+
+def h2h_first_game(meetings: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """meetings: {"server_p1": bool, "winner_p1": bool} per past meeting of these two
+    (p1 = the player listed first in the match to play). Counts, for each of them,
+    the times he served the opening game of set 1 against the other and held it."""
+    if not meetings:
+        return None
+    out: Dict[str, Any] = {"n": len(meetings), "p1": {"served": 0, "held": 0}, "p2": {"served": 0, "held": 0}}
+    for m in meetings:
+        who = "p1" if m["server_p1"] else "p2"
+        out[who]["served"] += 1
+        if m["winner_p1"] == m["server_p1"]:
+            out[who]["held"] += 1
+    return out
+
+
+def first_game_for_matches(db: Session, matches: Iterable[Match]) -> Dict[Any, Dict[str, Any]]:
+    """{match.id: {"p1": item|None, "p2": item|None, "h2h": {...}|None}} for matches still to play."""
+    from src.domain.models import League
+
+    targets = [m for m in matches if m.match_date and m.status not in ("FINISHED", "CANCELLED")]
+    if not targets:
+        return {}
+    comp_ids = {mc.competitor_id for m in targets for mc in m.competitors}
+    links = (db.query(MatchCompetitor, Match).join(Match, Match.id == MatchCompetitor.match_id)
+             .filter(MatchCompetitor.competitor_id.in_(list(comp_ids)), Match.status == "FINISHED",
+                     Match.extra_data["score_stats"].isnot(None)).all())
+    links = [(mc, m) for mc, m in links
+             if ((m.extra_data or {}).get("score_stats") or {}).get("firstGame")]
+    ids = list({m.id for _, m in links})
+    opp: Dict[Any, List[MatchCompetitor]] = {}
+    if ids:
+        for mc in db.query(MatchCompetitor).filter(MatchCompetitor.match_id.in_(ids)).all():
+            opp.setdefault(mc.match_id, []).append(mc)
+    leagues = {lg.id: lg.name for lg in db.query(League).filter(
+        League.id.in_(list({m.league_id for _, m in links if m.league_id}))).all()} if links else {}
+    per: Dict[Any, List[Dict[str, Any]]] = {}
+    for mc, m in links:
+        fg = m.extra_data["score_stats"]["firstGame"]
+        me = "p1" if mc.side in ("player1", "home") else "p2"
+        rival = next((o for o in opp.get(m.id, ()) if o.competitor_id != mc.competitor_id), None)
+        per.setdefault(mc.competitor_id, []).append({
+            "date": m.match_date, "served": fg.get("server") == me, "won": fg.get("winner") == me,
+            "rival": rival.competitor.name if rival else None, "rival_id": rival.competitor_id if rival else None,
+            "tournament": leagues.get(m.league_id)})
+    out: Dict[Any, Dict[str, Any]] = {}
+    for m in targets:
+        sides = _sides(m)
+        if len(sides) != 2:
+            continue
+        rows = {s: [r for r in per.get(sides[s].competitor_id, []) if r["date"] < m.match_date] for s in sides}
+        # r["served"] / r["won"] are from p1's point of view here
+        meet = [{"server_p1": r["served"], "winner_p1": r["won"]}
+                for r in rows["p1"] if r["rival_id"] == sides["p2"].competitor_id]
+        out[m.id] = {"p1": first_game_item(rows["p1"]), "p2": first_game_item(rows["p2"]),
+                     "h2h": h2h_first_game(meet)}
+    return out

@@ -1,4 +1,5 @@
 """Application services orchestrating database reads and writes."""
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -385,10 +386,16 @@ class DataService:
         finals_hist = finals_history(self.db, rows)
         from src.application.form_service import form_for_matches
         form = form_for_matches(self.db, rows)
+        try:
+            from src.application.first_game_service import first_game_for_matches
+            fgames = first_game_for_matches(self.db, rows)
+        except Exception as e:  # display only
+            logging.warning("first game for matches failed: %s", e)
+            fgames = {}
         return {
             mid: {"final": finals.get(mid), "prog": progs.get(mid), "streaks": streaks.get(mid) or {},
                   "games": games.get(mid), "h2h": h2h.get(mid), "finals": finals_hist.get(mid),
-                  "form": form.get(mid) or {}}
+                  "form": form.get(mid) or {}, "firstGame": fgames.get(mid)}
             for mid in match_ids
         }
 
@@ -485,6 +492,7 @@ class DataService:
             liveUpdatedAt=live_updated,
             levelPlayer1=(live.get("form") or {}).get("p1"),
             levelPlayer2=(live.get("form") or {}).get("p2"),
+            firstGame=live.get("firstGame"),
             streakPlayer1=(live.get("streaks") or {}).get("p1"),
             streakPlayer2=(live.get("streaks") or {}).get("p2"),
             gamesModel=live.get("games"),
