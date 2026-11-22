@@ -75,10 +75,26 @@
           <span v-if="setScoresStr" class="text-xs text-slate-500">{{ setScoresStr }}</span>
         </div>
 
-        <!-- Layer 2: the bets, which is what gets decided -->
-        <!-- Most likely bets, however little they pay (likely_picks_service) -->
-        <div v-if="likelyPicks.length" class="mt-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-xs text-slate-700">
-          <div class="font-medium text-emerald-800">✅ Lo más probable</div>
+        <!-- Two sections: what to bet, and the data behind it -->
+        <div v-if="hasBets || hasData" class="mt-3 flex gap-1 border-b border-slate-200" role="tablist">
+          <button
+            v-if="hasBets" role="tab" :aria-selected="section === 'bets'"
+            class="-mb-px border-b-2 px-3 py-1.5 text-sm font-medium"
+            :class="section === 'bets' ? 'border-emerald-700 text-emerald-800' : 'border-transparent text-slate-500 hover:text-slate-800'"
+            @click.stop.prevent="tab = 'bets'"
+          >Apuestas<span class="ml-1 text-xs font-normal text-slate-500">{{ betCount }}</span></button>
+          <button
+            v-if="hasData" role="tab" :aria-selected="section === 'data'"
+            class="-mb-px border-b-2 px-3 py-1.5 text-sm font-medium"
+            :class="section === 'data' ? 'border-emerald-700 text-emerald-800' : 'border-transparent text-slate-500 hover:text-slate-800'"
+            @click.stop.prevent="tab = 'data'"
+          >Datos<span class="ml-1 text-xs font-normal text-slate-500">{{ dataCount }}</span></button>
+        </div>
+
+        <!-- Section 1: Apuestas -->
+        <div v-if="section === 'bets'" class="mt-2">
+        <div v-if="likelyPicks.length" class="rounded border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-xs text-slate-700">
+          <div class="font-medium text-emerald-800">Lo más probable</div>
           <template v-for="(p, i) in likelyPicks" :key="p.label">
           <div v-if="p.group === 'games' && (i === 0 || likelyPicks[i - 1].group !== 'games')" class="mt-1.5 border-t border-emerald-200 pt-1 font-medium text-emerald-800">🎾 Games y tiebreaks</div>
           <div class="mt-1 flex items-baseline gap-1.5" :title="pickTitle(p)">
@@ -103,92 +119,81 @@
           </div>
         </div>
 
-
-        <!-- Layer 3: everything else, folded -->
-        <details v-if="hasMore" class="mt-2 text-xs text-slate-700" @click.stop>
-          <summary class="cursor-pointer text-slate-600">Más datos<span v-if="moreHint" class="text-slate-500"> · {{ moreHint }}</span></summary>
-        <!-- Head-to-head from our DB (every stored meeting between these two players) -->
-        <div v-if="sport === 'tennis'" class="mt-2 text-xs text-slate-600" :title="h2hTitle">
-          <template v-if="h2hInfo">
-            <span class="font-medium">H2H:</span>
-            {{ match.player1 }} <span class="font-semibold text-slate-900">{{ h2hInfo.p1Wins }}-{{ h2hInfo.p2Wins }}</span> {{ match.player2 }}
-            <span class="text-slate-500"> · último: {{ h2hInfo.last.tournament }} {{ h2hInfo.last.date.slice(0, 4) }},
-              ganó {{ h2hInfo.last.winner === 'p1' ? match.player1 : match.player2 }}<template v-if="h2hInfo.last.sets">&nbsp;({{ h2hInfo.last.sets }})</template></span>
-          </template>
-          <span v-else class="text-slate-500">H2H: nunca se han enfrentado (en los partidos guardados desde 2010)</span>
-        </div>
-        <!-- Tournament streaks (information, already in the price) -->
-        <div v-if="streakRows.length" class="mt-2 space-y-1">
-          <div v-for="row in streakRows" :key="row.name" class="flex flex-wrap items-center gap-1 text-xs">
-            <span class="font-medium text-slate-600">{{ row.name }}</span>
-            <span
-              v-for="t in row.tags"
-              :key="t.key"
-              class="inline-flex items-center px-2 py-0.5 rounded-full font-medium"
-              :class="t.cls"
-              :title="t.title"
-            >{{ t.text }}</span>
+          <div v-if="dogCase" class="mt-2 text-xs text-slate-700" :title="dogTitle">
+            <span class="font-medium">Si dudas del favorito:</span>&nbsp;
+            <template v-if="dogCase.headline">{{ dogCase.headline.replace(/, ya que:$/, '') }} ({{ dogCase.reasons.length }} {{ dogCase.reasons.length === 1 ? 'argumento' : 'argumentos' }})</template><span v-else class="text-slate-500">{{ dogCase.underdog }}<template v-if="dogCase.odds">&nbsp;a {{ dogCase.odds }}</template> · sin argumentos con datos a su favor</span>
           </div>
         </div>
 
-        <div v-if="newsCount" class="mt-1 text-xs text-slate-700" title="Noticias fuera de la cancha de esta semana: ábrelo para leerlas">
-          📰 {{ newsCount }} {{ newsCount === 1 ? 'noticia' : 'noticias' }} a tener en cuenta<template v-if="newsNegative">&nbsp;· <span class="text-red-700 font-medium">{{ newsNegative }} {{ newsNegative === 1 ? 'negativa' : 'negativas' }} para un jugador</span></template>
-        </div>
+        <!-- Section 2: Datos, one folded row per category with its headline number -->
+        <div v-if="section === 'data'" class="mt-2 space-y-1.5">
+          <CardSection v-if="h2hInfo || sport === 'tennis'" title="Cara a cara" :hint="h2hInfo ? `${h2hInfo.p1Wins}-${h2hInfo.p2Wins}` : 'nunca se han enfrentado'">
+            <div :title="h2hTitle">
+              <template v-if="h2hInfo">
+                {{ match.player1 }} <span class="font-semibold text-slate-900">{{ h2hInfo.p1Wins }}-{{ h2hInfo.p2Wins }}</span> {{ match.player2 }}
+                <span class="text-slate-500"> · último: {{ h2hInfo.last.tournament }} {{ h2hInfo.last.date.slice(0, 4) }},
+                  ganó {{ h2hInfo.last.winner === 'p1' ? match.player1 : match.player2 }}<template v-if="h2hInfo.last.sets">&nbsp;({{ h2hInfo.last.sets }})</template></span>
+              </template>
+              <span v-else class="text-slate-500">Nunca se han enfrentado (en los partidos guardados desde 2010).</span>
+            </div>
+          </CardSection>
 
-        <div v-if="firstGameLines.length" class="mt-1 text-xs text-slate-700" title="Primer game del primer set: quién lo sacó y quién lo ganó, en sus partidos de 2025 y 2026. Es información: no se ha medido contra la cuota, y quién saca primero se sortea.">
-          <div class="font-medium text-slate-800">1er game del 1er set</div>
-          <div v-for="l in firstGameLines" :key="l.player"><span class="font-medium">{{ l.player }}:</span> {{ l.text }}</div>
-        </div>
-        <div v-for="lv in levelLines" :key="lv.player" class="mt-1 text-xs" :class="LEVEL_CLASS[lv.r.level]" :title="lv.tip">
-          📊 <span class="font-medium">{{ lv.player }}:</span> {{ lv.r.headline }}
-        </div>
-        <details v-if="latestNews" class="mt-1 text-xs text-slate-700" @click.stop>
-          <summary class="cursor-pointer">📰 Últimas noticias de cada jugador ({{ latestNews.total }})</summary>
-          <div v-for="side in latestNews.sides" :key="side.key" class="mt-1">
-            <div class="font-medium text-slate-800">{{ side.name }}</div>
-            <p v-if="!side.items.length" class="text-slate-500">Sin noticias en los últimos 5 días.</p>
-            <ul v-else class="space-y-0.5">
-              <li v-for="it in side.items" :key="it.link">
-                <a :href="it.link" target="_blank" rel="noopener noreferrer" class="text-blue-700 hover:underline break-words">{{ it.headline }}</a>
-                <span class="text-slate-500"> · {{ it.source }} · {{ newsAgo(it.published) }}</span>
-              </li>
-            </ul>
-          </div>
-        </details>
+          <CardSection v-if="firstGameLines.length" title="Primer game del 1er set" :hint="firstGameHint">
+            <p class="text-slate-500">Quién lo sacó y quién lo ganó en sus partidos de 2025 y 2026. Quién saca primero se sortea.</p>
+            <div v-for="l in firstGameLines" :key="l.player"><span class="font-medium">{{ l.player }}:</span> {{ l.text }}</div>
+          </CardSection>
 
-        <div v-if="dogCase" class="mt-1 text-xs text-slate-700" :title="dogTitle">
-          🎯 <template v-if="dogCase.headline">{{ dogCase.headline.replace(/, ya que:$/, '') }} ({{ dogCase.reasons.length }} {{ dogCase.reasons.length === 1 ? 'argumento' : 'argumentos' }})</template><span v-else class="text-slate-500">No favorito: {{ dogCase.underdog }}<template v-if="dogCase.odds">&nbsp;a {{ dogCase.odds }}</template> · sin argumentos con datos a su favor</span>
-        </div>
+          <CardSection v-if="levelLines.length" title="Cómo vienen jugando" :hint="levelHint">
+            <div v-for="lv in levelLines" :key="lv.player" :class="LEVEL_CLASS[lv.r.level]" :title="lv.tip">
+              <span class="font-medium">{{ lv.player }}:</span> {{ lv.r.headline }}
+            </div>
+            <p class="text-slate-500">Comparado con su propio nivel (últimos 5 partidos contra los 30 anteriores).</p>
+          </CardSection>
 
-        <!-- Frozen games model (information; its lab is still collecting sample) -->
-        <div
-          v-if="gamesInfo"
-          class="mt-2 rounded border px-2 py-1.5 text-xs"
-          :class="gamesInfo.close ? 'border-sky-200 bg-sky-50 text-slate-700' : 'border-slate-200 bg-slate-50 text-slate-600'"
-          title="Modelo de games (saque y resto, juego a juego), congelado el 16-oct-2026. No ha demostrado ganarle a la casa: se está midiendo en Caja → Laboratorio."
-        >
-          <span v-if="gamesInfo.close" class="font-semibold text-sky-800">⚖ Partido reñido · </span>
-          <span class="font-medium">Modelo de games:</span>
-          ~{{ gamesInfo.g.expectedGames }} games · tiebreak {{ gamesInfo.tiebreak }}% · {{ gamesInfo.deciderLabel }} {{ gamesInfo.decider }}%
-          <template v-if="gamesInfo.g.line">
-            <span class="block">
-              Línea {{ gamesInfo.g.line.line }}: Más según el modelo {{ gamesInfo.modelOver }}% · según la casa {{ gamesInfo.marketOver }}%
-              (Más {{ gamesInfo.g.line.over.toFixed(2) }} / Menos {{ gamesInfo.g.line.under.toFixed(2) }})
-            </span>
-          </template>
-          <span v-if="gamesInfo.g.trust < 0.5" class="block text-slate-500">Poca historia de saque y resto de alguno de los dos.</span>
-        </div>
+          <CardSection v-if="streakRows.length" title="Rachas en el torneo" :hint="streakHint">
+            <div v-for="row in streakRows" :key="row.name" class="flex flex-wrap items-center gap-1">
+              <span class="font-medium text-slate-600">{{ row.name }}</span>
+              <span v-for="t in row.tags" :key="t.key" class="inline-flex items-center px-2 py-0.5 rounded-full font-medium" :class="t.cls" :title="t.title">{{ t.text }}</span>
+            </div>
+          </CardSection>
 
-        <!-- Prediction reliability by player on this surface -->
-        <div v-if="reliabilityRows.length" class="mt-2 space-y-0.5 text-xs">
-          <div v-for="row in reliabilityRows" :key="row.name" class="text-slate-500">
-            <span class="font-medium text-slate-600">{{ row.name }}</span>
-            <span v-if="row.best" class="text-green-700"> · ✓ {{ row.best.label }} {{ row.best.hitRate }}%</span>
-            <span v-if="row.worst" class="text-red-700"> · ✗ {{ row.worst.label }} {{ row.worst.hitRate }}%</span>
-            <span class="text-slate-500"> ({{ row.sampleTotal }} preds en {{ match.surface }})</span>
-          </div>
+          <CardSection v-if="newsCount || latestNews" title="Noticias" :hint="newsHint">
+            <div v-if="newsCount" title="Noticias fuera de la cancha de esta semana">
+              {{ newsCount }} {{ newsCount === 1 ? 'noticia' : 'noticias' }} a tener en cuenta<template v-if="newsNegative">&nbsp;· <span class="text-red-700 font-medium">{{ newsNegative }} {{ newsNegative === 1 ? 'negativa' : 'negativas' }} para un jugador</span></template>
+            </div>
+            <template v-if="latestNews"><div v-for="side in latestNews.sides" :key="side.key">
+              <div class="font-medium text-slate-800">{{ side.name }}</div>
+              <p v-if="!side.items.length" class="text-slate-500">Sin noticias en los últimos 5 días.</p>
+              <ul v-else class="space-y-0.5">
+                <li v-for="it in side.items" :key="it.link">
+                  <a :href="it.link" target="_blank" rel="noopener noreferrer" class="text-blue-700 hover:underline break-words" @click.stop>{{ it.headline }}</a>
+                  <span class="text-slate-500"> · {{ it.source }} · {{ newsAgo(it.published) }}</span>
+                </li>
+              </ul>
+            </div></template>
+          </CardSection>
+
+          <CardSection v-if="gamesInfo" title="Modelo de games" :hint="`~${gamesInfo.g.expectedGames} games · tiebreak ${gamesInfo.tiebreak}%`">
+            <div title="Modelo de games (saque y resto, juego a juego), congelado el 16-oct-2026. No ha demostrado ganarle a la casa: se está midiendo en Caja → Laboratorio.">
+              <span v-if="gamesInfo.close" class="font-semibold text-sky-800">Partido reñido · </span>
+              ~{{ gamesInfo.g.expectedGames }} games · tiebreak {{ gamesInfo.tiebreak }}% · {{ gamesInfo.deciderLabel }} {{ gamesInfo.decider }}%
+              <span v-if="gamesInfo.g.line" class="block">
+                Línea {{ gamesInfo.g.line.line }}: Más según el modelo {{ gamesInfo.modelOver }}% · según la casa {{ gamesInfo.marketOver }}%
+                (Más {{ gamesInfo.g.line.over.toFixed(2) }} / Menos {{ gamesInfo.g.line.under.toFixed(2) }})
+              </span>
+              <span v-if="gamesInfo.g.trust < 0.5" class="block text-slate-500">Poca historia de saque y resto de alguno de los dos.</span>
+            </div>
+          </CardSection>
+
+          <CardSection v-if="reliabilityRows.length" title="Aciertos de nuestro modelo" :hint="`en ${match.surface || 'esta superficie'}`">
+            <div v-for="row in reliabilityRows" :key="row.name">
+              <span class="font-medium text-slate-600">{{ row.name }}</span>
+              <span v-if="row.best" class="text-green-700"> · ✓ {{ row.best.label }} {{ row.best.hitRate }}%</span>
+              <span v-if="row.worst" class="text-red-700"> · ✗ {{ row.worst.label }} {{ row.worst.hitRate }}%</span>
+              <span class="text-slate-500"> ({{ row.sampleTotal }} preds en {{ match.surface }})</span>
+            </div>
+          </CardSection>
         </div>
-        </details>
       </div>
     </div>
   </router-link>
@@ -199,6 +204,7 @@ import { computed, ref } from 'vue'
 import { useComboStore, legKey } from '../stores/combo.js'
 import { formatDateTime, formatDate, formatTime } from '../utils/format.js'
 import { streakTags } from '../utils/streak.js'
+import CardSection from './CardSection.vue'
 
 const props = defineProps({
   match: {
@@ -445,16 +451,37 @@ const firstGameLines = computed(() => {
   return out
 })
 
-// Layer 3 teaser: what is inside "Más datos"
-const moreHint = computed(() => {
+// Sections: Apuestas and Datos, each with a count in its tab and a headline on every data row
+const shortName = (n) => String(n || '').split(' ')[0]
+const hasBets = computed(() => likelyPicks.value.length > 0 || !!dogCase.value)
+const betCount = computed(() => likelyPicks.value.length)
+const firstGameHint = computed(() => {
+  const fg = props.match.firstGame
+  if (!fg) return ''
+  const bits = []
+  if (fg.p1) bits.push(`${shortName(props.match.player1)} ${fg.p1.short.match(/\((\d+%)\)/)?.[1] || ''}`)
+  if (fg.p2) bits.push(`${shortName(props.match.player2)} ${fg.p2.short.match(/\((\d+%)\)/)?.[1] || ''}`)
+  return bits.join(' · ')
+})
+const LEVEL_WORD = { bien: 'por encima', mal: 'por debajo', mixto: 'mixto', leve: 'leve' }
+const levelHint = computed(() => levelLines.value.map((l) => `${shortName(l.player)} ${LEVEL_WORD[l.r.level] || l.r.level}`).join(' · '))
+const streakHint = computed(() => streakRows.value.map((r) => `${shortName(r.name)} ${r.tags[0].text.replace(/^\S*\s*(?=\d)/, '')}`).join(' · '))
+const newsHint = computed(() => {
   const t = []
-  if (h2hInfo.value) t.push(`H2H ${h2hInfo.value.p1Wins}-${h2hInfo.value.p2Wins}`)
-  if (latestNews.value) t.push(`${latestNews.value.total} noticias`)
-  if (firstGameLines.value.length) t.push('1er game')
-  if (levelLines.value.length) t.push('cómo vienen jugando')
-  if (dogCase.value) t.push('no favorito')
-  if (gamesInfo.value) t.push('modelo de games')
+  if (newsCount.value) t.push(`${newsCount.value} relevantes`)
+  if (latestNews.value) t.push(`${latestNews.value.total} titulares`)
   return t.join(' · ')
 })
-const hasMore = computed(() => props.sport === 'tennis' || streakRows.value.length > 0 || reliabilityRows.value.length > 0)
+const dataCount = computed(() => [
+  props.sport === 'tennis', firstGameLines.value.length, levelLines.value.length, streakRows.value.length,
+  newsCount.value || latestNews.value, gamesInfo.value, reliabilityRows.value.length
+].filter(Boolean).length)
+const hasData = computed(() => dataCount.value > 0)
+const tab = ref(null)
+// Bets first when there are any; otherwise the data
+const section = computed(() => {
+  if (tab.value === 'bets' && hasBets.value) return 'bets'
+  if (tab.value === 'data' && hasData.value) return 'data'
+  return hasBets.value ? 'bets' : hasData.value ? 'data' : null
+})
 </script>
