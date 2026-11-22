@@ -1096,6 +1096,12 @@ def get_router() -> APIRouter:
             out["userBets"] = settle_pending(db)
         except Exception as e:  # never let it fail the validation
             logging.warning("user bets settle failed: %s", e)
+        try:
+            # Keep the first game of set 1 of every finished match (one feed call).
+            from src.application.first_game_service import refresh_recent
+            out["firstGame"] = refresh_recent(db)
+        except Exception as e:
+            logging.warning("first game refresh failed: %s", e)
         return out
 
     @r.post("/predictions/progress")

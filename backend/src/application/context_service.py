@@ -18,6 +18,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session
 
+from src.application.first_game_service import first_game_item
 from src.domain.models import League, Match, MatchCompetitor, MatchScore
 
 INDOOR_YEARS = 3
@@ -334,7 +335,14 @@ def context_for_matches(db: Session, matches: Iterable[Match]) -> Dict[str, Dict
         return best[1] if best else None
 
     per_player: Dict[Any, List[Dict[str, Any]]] = {}
+    first_games: Dict[Any, List[Dict[str, Any]]] = {}
     for mc, m in links:
+        fg = ((m.extra_data or {}).get("score_stats") or {}).get("firstGame")
+        if fg and fg.get("server") and fg.get("winner"):
+            rv = next((o for o in opp.get(m.id, ()) if o.competitor_id != mc.competitor_id), None)
+            first_games.setdefault(mc.competitor_id, []).append({
+                "date": m.match_date, "served": fg["server"] == _side(mc), "won": fg["winner"] == _side(mc),
+                "rival": rv.competitor.name if rv else None, "tournament": leagues.get(m.league_id)})
         w = _winner_side(m, scores.get(m.id))
         if not w:
             continue
@@ -377,6 +385,9 @@ def context_for_matches(db: Session, matches: Iterable[Match]) -> Dict[str, Dict
             top = [r for r in rows if r["date"].year == year and r["rank"] and r["rank"] <= 10]
             opp_rank = rank_at(other.competitor_id, m.match_date, other.pre_match_ranking) if other else None
             it = top10_item(top, year, opp_rank)
+            if it:
+                items.append(it)
+            it = first_game_item([r for r in first_games.get(mc.competitor_id, []) if r["date"] < m.match_date])
             if it:
                 items.append(it)
             res[side] = {"player": mc.competitor.name, "items": items}

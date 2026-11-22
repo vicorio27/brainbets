@@ -1294,7 +1294,7 @@ const safeOfDay = computed(() => {
   const ctx = (betModes.value?.context || {})[pick.matchId] || {}
   const mine = pick.selector?.side || 'p1'
   const rival = mine === 'p1' ? 'p2' : 'p1'
-  const keys = ['stakes', 'stakes_news', 'coach', 'indoor', 'top10']
+  const keys = ['stakes', 'stakes_news', 'coach', 'indoor', 'top10', 'firstgame']
   const rows = keys.map((k) => {
     const a = (ctx[mine]?.items || []).find((it) => it.key === k)
     const b = (ctx[rival]?.items || []).find((it) => it.key === k)
