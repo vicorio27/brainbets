@@ -266,6 +266,28 @@
         750,
         700
       ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/matches/football/collect",
+        "sendQuery": false,
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "collect-football",
+      "name": "Collect Football",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "onError": "continueRegularOutput",
+      "position": [
+        950,
+        700
+      ]
     }
   ],
   "connections": {
@@ -387,6 +409,17 @@
       ]
     },
     "Refresh Player News": {
+      "main": [
+        [
+          {
+            "node": "Collect Football",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Football": {
       "main": [
         [
           {

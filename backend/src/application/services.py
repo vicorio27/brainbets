@@ -293,8 +293,21 @@ class DataService:
             awayOdds=float(away.pre_match_odds) if away and away.pre_match_odds is not None else None,
             drawOdds=float(meta.get('draw_odds')) if meta and meta.get('draw_odds') is not None else None,
             expertConsensus=meta.get("expert_consensus"),
+            oddsMarkets=meta.get("odds_markets"),
+            goalsTrend=self._goals_trend(match),
             features=match_features,
         )
+
+    def _goals_trend(self, match: Match) -> Optional[Dict[str, Any]]:
+        if match.status not in ("SCHEDULED", "LIVE"):
+            return None
+        try:
+            from src.application.goals_trend_service import trend_for_match
+
+            return trend_for_match(self.db, match)
+        except Exception as e:           # display-only: never break the match list
+            logging.warning("[goals-trend] %s", e)
+            return None
 
     def _tennis_recent_form(
         self,

@@ -1166,6 +1166,32 @@ def get_router() -> APIRouter:
         background_tasks.add_task(_run)
         return {"started": True}
 
+    @r.post("/matches/football/collect")
+    def collect_football_api(background_tasks: BackgroundTasks, wait: bool = False, db: Session = Depends(get_db)):
+        """La Liga and Premier League from API-Football: fixtures, results and prices.
+
+        Called hourly from `validation_db`. Paced and capped by the free plan's call
+        limit, so it runs in the background by default; `wait=true` runs it inline."""
+        from src.application.football_collect_service import run as football_run
+
+        storage = os.environ.get("STORAGE_PATH", "/storage")
+        if wait:
+            return football_run(db, _insert_match, storage)
+
+        def _run():
+            from src.infrastructure.database import SessionLocal
+
+            session = SessionLocal()
+            try:
+                logging.warning("[FOOTBALL] %s", football_run(session, _insert_match, storage))
+            except Exception as e:
+                logging.warning("[FOOTBALL] collect failed: %s", e)
+            finally:
+                session.close()
+
+        background_tasks.add_task(_run)
+        return {"started": True}
+
     @r.get("/cache")
     async def get_cached_response(
         url: str,

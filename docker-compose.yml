@@ -75,6 +75,8 @@ services:
       - FOOTBALL_DATA_ORG_TOKEN=${FOOTBALL_DATA_ORG_TOKEN:-}
       # Football is frozen. Set FOOTBALL_ENABLED=true in .env to collect it again.
       - FOOTBALL_ENABLED=${FOOTBALL_ENABLED:-false}
+      # La Liga + Premier League collection (football_collect_service)
+      - API_FOOTBALL_KEY=${API_FOOTBALL_KEY:-}
       - TENNIS_API_KEY=${TENNIS_API_KEY:-}
       # Player news summaries (player_news_service)
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}

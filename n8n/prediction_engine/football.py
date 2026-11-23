@@ -359,9 +359,10 @@ def predict_football(match: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     # Over/Under 2.5
     expected_total = ensemble['expected_home_goals'] + ensemble['expected_away_goals']
-    over_prob = sigmoid((expected_total - 2.5) * 2.0)
-    # Require a clear edge: predict Over only when expected total is well above 2.5.
-    over_25 = expected_total > 2.8
+    # Total goals of two independent Poissons is a Poisson of the summed mean:
+    # P(over 2.5) = 1 - P(0, 1 or 2 goals). (It was a logistic guess around 2.8.)
+    over_prob = 1.0 - sum(poisson_pmf(expected_total, k) for k in range(3))
+    over_25 = over_prob > 0.5
 
     # BTTS
     btts_prob = (
@@ -370,6 +371,17 @@ def predict_football(match: Dict[str, Any]) -> List[Dict[str, Any]]:
     )
     # Require a clear edge for Yes; default to No in low-information scenarios.
     btts = btts_prob > 0.58
+
+    # Reference prices of the book we collect (Over/Under 2.5, both teams score).
+    markets = match.get('oddsMarkets') or {}
+    ou = ((markets.get('overUnder') or {}).get('2.5')) or {}
+    over_odds, under_odds = ou.get('over'), ou.get('under')
+    bt = markets.get('btts') or {}
+    btts_yes_odds, btts_no_odds = bt.get('yes'), bt.get('no')
+    ou_chosen = over_odds if over_25 else under_odds
+    ou_ev = ev_and_kelly(over_prob if over_25 else 1.0 - over_prob, ou_chosen)
+    bt_chosen = btts_yes_odds if btts else btts_no_odds
+    bt_ev = ev_and_kelly(btts_prob if btts else 1.0 - btts_prob, bt_chosen)
 
     # Build local reasoning strings in Spanish
     data_quality = 'datos reales' if not fallback else 'datos limitados (fallback)'
@@ -463,6 +475,8 @@ def predict_football(match: Dict[str, Any]) -> List[Dict[str, Any]]:
             'market': 'Over/Under 2.5 Goals',
             'prediction': 'Over 2.5' if over_25 else 'Under 2.5',
             'confidence': confidence_from_prob(max(over_prob, 1.0 - over_prob)),
+            'expectedValue': ou_ev['expected_value'],
+            'kellyFraction': ou_ev['kelly_fraction'],
             'probabilities': format_probabilities({
                 'over': over_prob,
                 'under': 1.0 - over_prob,
@@ -470,14 +484,18 @@ def predict_football(match: Dict[str, Any]) -> List[Dict[str, Any]]:
             'modelContributions': {'poisson': 1.0},
             'reasoning': over_under_reasoning,
             'reasoningData': {
-                'model': 'poisson',
+                'model': 'poisson_total',
                 'expectedTotalGoals': round(expected_total, 2),
+                'oddsDecimal': {'over': over_odds, 'under': under_odds, 'chosen': ou_chosen}
+                if over_odds and under_odds else None,
             },
         },
         {
             'market': 'Both Teams To Score',
             'prediction': 'Yes' if btts else 'No',
             'confidence': confidence_from_prob(max(btts_prob, 1.0 - btts_prob)),
+            'expectedValue': bt_ev['expected_value'],
+            'kellyFraction': bt_ev['kelly_fraction'],
             'probabilities': format_probabilities({
                 'yes': btts_prob,
                 'no': 1.0 - btts_prob,
@@ -488,6 +506,8 @@ def predict_football(match: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'model': 'poisson',
                 'expectedHomeGoals': round(ensemble['expected_home_goals'], 2),
                 'expectedAwayGoals': round(ensemble['expected_away_goals'], 2),
+                'oddsDecimal': {'yes': btts_yes_odds, 'no': btts_no_odds, 'chosen': bt_chosen}
+                if btts_yes_odds and btts_no_odds else None,
             },
         },
     ]

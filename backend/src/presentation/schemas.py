@@ -103,6 +103,8 @@ class FootballMatch(BaseModel):
     drawOdds: Optional[float] = None
     awayOdds: Optional[float] = None
     expertConsensus: Optional[Dict[str, Any]] = None
+    goalsTrend: Optional[Dict[str, Any]] = None    # goals / over 2.5 / both-teams-score rate of each team's last matches
+    oddsMarkets: Optional[Dict[str, Any]] = None   # 1X2, Over/Under lines, both teams score (reference book)
     features: Optional[Dict[str, Any]] = None
 
 class MatchesResponse(BaseModel):

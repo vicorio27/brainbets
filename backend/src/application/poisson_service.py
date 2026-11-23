@@ -218,7 +218,19 @@ def expected_goals_for_fixture(
         )
         if league_id:
             query = query.filter(CompetitorStat.league_id == league_id)
-        return query.first()
+        found = query.first()
+        if found is not None or not season:
+            return found
+        # A team with no parameters yet this season (the season has just started, or
+        # the provider only gives us the last few days): use its latest earlier season.
+        prior = db.query(CompetitorStat).filter(
+            CompetitorStat.competitor_id == team_id,
+            CompetitorStat.season < season,
+            CompetitorStat.surface.is_(None),
+        )
+        if league_id:
+            prior = prior.filter(CompetitorStat.league_id == league_id)
+        return prior.order_by(CompetitorStat.season.desc()).first()
 
     home_stat = _team_params(home_team_id)
     away_stat = _team_params(away_team_id)
