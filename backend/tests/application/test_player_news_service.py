@@ -103,3 +103,16 @@ def test_latest_view_keeps_the_five_newest_headlines_newest_first():
     assert len(out) == LATEST == 5
     assert [o["headline"] for o in out] == ["t0", "t1", "t2", "t3", "t4"]
     assert out[0]["published"] == base.isoformat()
+
+
+def test_a_physical_problem_survives_a_flood_of_newer_headlines():
+    # 22-nov: Zverev's ankle (19-nov) was displaced by the newest headlines of final day
+    t0 = datetime(2026, 11, 22, 12, tzinfo=timezone.utc)
+    filler = [{"title": f"Zverev f{i}a f{i}b f{i}c", "source": "Tennis World", "link": "x",
+               "published": t0 - timedelta(minutes=i)} for i in range(80)]
+    ankle = {"title": "Alexander Zverev confirms he's picked up issue vs Fils: 'I started feeling my ankle again'",
+             "source": "Tennis.com", "link": "y", "published": t0 - timedelta(days=3)}
+    picked = pn.select_headlines(filler + [ankle], "Zverev A.")
+    assert ankle in picked and len(picked) == pn.MAX_HEADLINES
+    assert pn.is_injury("Zverev tiene molestias en el tobillo") and not pn.is_injury("Zverev gana a Fils")
+    assert not pn.is_noise("Zverev ankle pain: how to watch the final", "Tennis.com")

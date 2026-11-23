@@ -34,6 +34,7 @@ OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 LOOKBACK_DAYS = 5
 MAX_HEADLINES = 35            # per player, sent to the model
 MAX_STAKES = 12               # of which headlines about what is at stake go first
+MAX_INJURY = 8                # then headlines about an injury or a physical problem
 LATEST = 5                    # newest headlines per player shown as they are, AI or not
 HOURS_AHEAD = 18              # matches starting within this window get news
 STALE_MINUTES = 180           # refresh after this long...
@@ -57,6 +58,16 @@ STAKES = re.compile(
     r"n[uú]mero (1|uno)\b|n\.?\s?[ºo°]\s?1\b|\bno\.?\s?1\b|number one|world no|cima del (tenis|ranking)|"
     r"top[- ]?(5|10)\b|atp finals|nitto|tur[ií]n|\bfinals\b|clasific|qualif|race to|carrera a|"
     r"defend|defiende|defensor|campe[oó]n defensor|retir|farewell|despedida|[uú]ltimo torneo|last (match|tournament)",
+    re.I,
+)
+
+# A physical problem. On 22-nov Zverev's ankle ("I started feeling my ankle again", 19-nov, three days
+# before the Finals final) was in Google News but fell outside the 35 newest headlines of final day,
+# so nobody saw it. These go right after what is at stake and are never dropped as noise.
+INJURY = re.compile(
+    r"ankle|injur|tobillo|lesi[oó]n|lesionad|physio|fisio|medical timeout|pain|dolor|molest|hobbl|limp|"
+    r"fitness|illness|enferm|sick|withdr|knee|rodilla|shoulder|hombro|back (pain|issue|problem)|espalda|"
+    r"wrist|mu[nñ]eca|cramp|calambre|trainer|strapp|vendaje|problema f[ií]sico|physical (issue|problem)",
     re.I,
 )
 
@@ -84,6 +95,10 @@ def is_stakes(title: str) -> bool:
     return bool(STAKES.search(title or ""))
 
 
+def is_injury(title: str) -> bool:
+    return bool(INJURY.search(title or ""))
+
+
 def is_noise(title: str, source: str) -> bool:
     """Score pages, live feeds and betting markets. A headline about what is at stake stays
     even from a score site ("Landaluce ... ante el futuro número uno"), never from a market."""
@@ -91,7 +106,7 @@ def is_noise(title: str, source: str) -> bool:
     src = re.sub(r"^www\.|\.(com|es|net|org|co)$", "", src)
     if any(src.startswith(n) for n in MARKET_SOURCES) or re.search(r"prediction market", title or "", re.I):
         return True
-    if is_stakes(title) and not re.search(r"\bvs?\.?\s.*·|pron[oó]stico|prediction|odds|cuotas", title or "", re.I):
+    if (is_stakes(title) or is_injury(title)) and not re.search(r"\bvs?\.?\s.*·|pron[oó]stico|prediction|odds|cuotas", title or "", re.I):
         return False
     return bool(NOISE.search(title or "")) or any(src.startswith(n) for n in NOISE_SOURCES)
 
@@ -124,8 +139,12 @@ def headlines(name: str) -> List[Dict[str, Any]]:
     """Recent, de-duplicated, non-noise headlines mentioning the player's surname."""
     s = surname(name)
     items: List[Dict[str, Any]] = []
+    hurt = "ankle OR injury OR injured OR physio OR pain OR knee OR shoulder OR illness"
+    hurt_es = "tobillo OR lesión OR lesionado OR dolor OR molestias OR rodilla OR hombro OR enfermo"
     for query, hl, gl in ((f'"{s}" tennis when:{LOOKBACK_DAYS}d', "en-US", "US"),
-                          (f'"{s}" tenis when:{LOOKBACK_DAYS}d', "es-419", "CO")):
+                          (f'"{s}" tenis when:{LOOKBACK_DAYS}d', "es-419", "CO"),
+                          (f'"{s}" ({hurt}) when:{LOOKBACK_DAYS}d', "en-US", "US"),
+                          (f'"{s}" ({hurt_es}) when:{LOOKBACK_DAYS}d', "es-419", "CO")):
         try:
             items += _rss(query, hl, gl)
         except Exception as exc:  # network / XML: news is optional, never fail the caller
@@ -179,8 +198,10 @@ def select_headlines(items: List[Dict[str, Any]], name: str) -> List[Dict[str, A
         sigs.append(sig)
         kept.append(it)
     stakes = [it for it in kept if is_stakes(it["title"])][:MAX_STAKES]
-    rest = [it for it in kept if it not in stakes][: MAX_HEADLINES - len(stakes)]
-    return sorted(stakes + rest, key=lambda x: x["published"], reverse=True)
+    hurt = [it for it in kept if it not in stakes and is_injury(it["title"])][:MAX_INJURY]
+    first = stakes + hurt
+    rest = [it for it in kept if it not in first][: MAX_HEADLINES - len(first)]
+    return sorted(first + rest, key=lambda x: x["published"], reverse=True)
 
 
 SYSTEM_PROMPT = (
