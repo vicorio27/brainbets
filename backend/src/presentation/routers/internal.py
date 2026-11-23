@@ -1157,6 +1157,7 @@ def get_router() -> APIRouter:
         match_id: Optional[str] = None,
         force: bool = False,
         wait: bool = False,
+        prematch: bool = False,
         db: Session = Depends(get_db),
     ):
         """Fetch recent player news for upcoming tennis matches (missing or stale only).
@@ -1168,14 +1169,14 @@ def get_router() -> APIRouter:
         from src.application.player_news_service import refresh_news
 
         if wait:
-            return refresh_news(db, match_id=match_id, force=force)
+            return refresh_news(db, match_id=match_id, force=force, prematch=prematch)
 
         def _run():
             from src.infrastructure.database import SessionLocal
 
             session = SessionLocal()
             try:
-                logging.warning("[NEWS] %s", refresh_news(session, match_id=match_id, force=force))
+                logging.warning("[NEWS] %s", refresh_news(session, match_id=match_id, force=force, prematch=prematch))
             finally:
                 session.close()
 

@@ -116,3 +116,13 @@ def test_a_physical_problem_survives_a_flood_of_newer_headlines():
     assert ankle in picked and len(picked) == pn.MAX_HEADLINES
     assert pn.is_injury("Zverev tiene molestias en el tobillo") and not pn.is_injury("Zverev gana a Fils")
     assert not pn.is_noise("Zverev ankle pain: how to watch the final", "Tennis.com")
+
+
+def test_one_last_read_in_the_half_hour_before_the_start():
+    now = datetime(2026, 11, 24, 15, 0, tzinfo=timezone.utc)
+    soon, later = now + timedelta(minutes=20), now + timedelta(minutes=45)
+    assert pn.needs_prematch({"fetchedAt": "x"}, soon, now)
+    assert pn.needs_prematch(None, soon, now)
+    assert not pn.needs_prematch({"prematchAt": now.isoformat()}, soon, now)   # already done
+    assert not pn.needs_prematch({}, later, now)                                 # too early
+    assert not pn.needs_prematch({}, now - timedelta(minutes=1), now)           # already started

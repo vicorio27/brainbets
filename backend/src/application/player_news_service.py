@@ -40,6 +40,7 @@ HOURS_AHEAD = 18              # matches starting within this window get news
 STALE_MINUTES = 180           # refresh after this long...
 STALE_MINUTES_NEAR = 60       # ...or this long once the match is less than NEAR_HOURS away
 NEAR_HOURS = 4
+PREMATCH_MINUTES = 30         # one last read once a match is this close to starting (see needs_prematch)
 
 # Pages that only carry a score, a live feed, odds or a pick: never news.
 NOISE = re.compile(
@@ -347,19 +348,36 @@ def is_stale(news: Optional[Dict[str, Any]], starts_at: datetime, now: datetime)
     return now - fetched >= timedelta(minutes=limit)
 
 
+def needs_prematch(news: Optional[Dict[str, Any]], starts_at: datetime, now: datetime) -> bool:
+    """One last read shortly before the start, once per match: what a player says in the
+    hours before (an ankle, a bad night) is only in the news after the last hourly read."""
+    if not (timedelta(0) < starts_at - now <= timedelta(minutes=PREMATCH_MINUTES)):
+        return False
+    return not (news or {}).get("prematchAt")
+
+
 def refresh_news(db: Session, hours_ahead: int = HOURS_AHEAD, match_id: Optional[str] = None,
-                 force: bool = False) -> Dict[str, Any]:
-    """Fetch news for upcoming tennis matches whose stored news is missing or stale."""
+                 force: bool = False, prematch: bool = False) -> Dict[str, Any]:
+    """Fetch news for upcoming tennis matches whose stored news is missing or stale.
+    With `prematch`, only the matches about to start that have not had their last read."""
     now = datetime.now(timezone.utc)
     q = db.query(Match).join(Sport, Sport.id == Match.sport_id).filter(Sport.code == "tennis")
     if match_id:
         q = q.filter(Match.external_id == match_id)
+    elif prematch:
+        q = q.filter(Match.status == "SCHEDULED", Match.match_date > now,
+                     Match.match_date <= now + timedelta(minutes=PREMATCH_MINUTES))
     else:
         q = q.filter(Match.status == "SCHEDULED", Match.match_date > now,
                      Match.match_date <= now + timedelta(hours=hours_ahead))
     done = skipped = failed = 0
     for match in q.all():
-        if not force and not is_stale((match.extra_data or {}).get("player_news"), match.match_date, now):
+        old = (match.extra_data or {}).get("player_news")
+        if prematch:
+            if not needs_prematch(old, match.match_date, now):
+                skipped += 1
+                continue
+        elif not force and not is_stale(old, match.match_date, now):
             skipped += 1
             continue
         try:
@@ -370,6 +388,11 @@ def refresh_news(db: Session, hours_ahead: int = HOURS_AHEAD, match_id: Optional
         if news is None:
             failed += 1
             continue
+        # remember the last read happened, so an hourly refresh does not trigger it again
+        if prematch:
+            news["prematchAt"] = now.isoformat()
+        elif (old or {}).get("prematchAt"):
+            news["prematchAt"] = old["prematchAt"]
         match.extra_data = {**(match.extra_data or {}), "player_news": news}  # new dict: gotcha #43
         db.commit()
         done += 1
