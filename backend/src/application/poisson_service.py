@@ -72,6 +72,15 @@ def _load_football_matches(db: Session, sport_id) -> List[Tuple]:
     return rows
 
 
+SHRINK_MATCHES = 5.0
+
+
+def shrink(ratio: float, matches: int, k: float = SHRINK_MATCHES) -> float:
+    """Pull a strength ratio towards 1.0 (the league average) when it rests on few matches:
+    with 5 home games Brentford's defence read 0.38 and Everton was expected to score 0.3 goals."""
+    return (ratio * matches + k) / (matches + k)
+
+
 def compute_poisson_parameters(
     db: Session,
     sport_code: str = "football",
@@ -153,10 +162,10 @@ def compute_poisson_parameters(
         avgs = normalized_averages.get(avg_key, {"home_avg": DEFAULT_LEAGUE_AVG_HOME_GOALS, "away_avg": DEFAULT_LEAGUE_AVG_AWAY_GOALS})
 
         params = {
-            "home_attack": round(metric.home_attack(avgs["home_avg"]), 4),
-            "home_defense": round(metric.home_defense(avgs["home_avg"]), 4),
-            "away_attack": round(metric.away_attack(avgs["away_avg"]), 4),
-            "away_defense": round(metric.away_defense(avgs["away_avg"]), 4),
+            "home_attack": round(shrink(metric.home_attack(avgs["home_avg"]), metric.home_matches), 4),
+            "home_defense": round(shrink(metric.home_defense(avgs["home_avg"]), metric.home_matches), 4),
+            "away_attack": round(shrink(metric.away_attack(avgs["away_avg"]), metric.away_matches), 4),
+            "away_defense": round(shrink(metric.away_defense(avgs["away_avg"]), metric.away_matches), 4),
             "home_goals_avg": round(metric.home_goals_for / max(metric.home_matches, 1), 3),
             "away_goals_avg": round(metric.away_goals_for / max(metric.away_matches, 1), 3),
             "home_matches": metric.home_matches,
@@ -185,9 +194,9 @@ def compute_poisson_parameters(
             stat.goals_for = metric.home_goals_for + metric.away_goals_for
             stat.goals_against = metric.home_goals_against + metric.away_goals_against
             stat.expected_goals = params["home_attack"] * avgs["home_avg"]
-            extra = stat.extra_data or {}
-            extra["poisson"] = params
-            stat.extra_data = extra
+            # a NEW dict: mutating the JSON column in place is not detected, so retraining never
+            # saved the new parameters of a team that already had a row (gotcha #43)
+            stat.extra_data = {**(stat.extra_data or {}), "poisson": params}
             stat.calculated_at = now
 
         summary[metric.season][metric.league_id] = summary[metric.season].get(metric.league_id, 0) + 1

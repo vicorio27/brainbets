@@ -77,6 +77,8 @@ services:
       - FOOTBALL_ENABLED=${FOOTBALL_ENABLED:-false}
       # La Liga + Premier League collection (football_collect_service)
       - API_FOOTBALL_KEY=${API_FOOTBALL_KEY:-}
+      - API_FOOTBALL_DAILY_CAP=${API_FOOTBALL_DAILY_CAP:-90}
+      - API_FOOTBALL_MIN_GAP=${API_FOOTBALL_MIN_GAP:-6.5}
       - TENNIS_API_KEY=${TENNIS_API_KEY:-}
       # Player news summaries (player_news_service)
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}

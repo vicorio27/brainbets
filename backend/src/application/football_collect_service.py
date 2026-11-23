@@ -28,8 +28,9 @@ from src.timezone import BOGOTA_TZ
 
 BASE = "https://v3.football.api-sports.io"
 LEAGUES = {39: "Premier League", 140: "La Liga"}
-DAILY_CAP = 90                 # of the 100 the free plan allows
-MIN_GAP = 6.5                  # seconds between calls (10 a minute)
+# Free plan: 100 calls a day, ~10 a minute (defaults). Pro plan: set API_FOOTBALL_DAILY_CAP / API_FOOTBALL_MIN_GAP.
+DAILY_CAP = int(os.environ.get("API_FOOTBALL_DAILY_CAP", "90"))
+MIN_GAP = float(os.environ.get("API_FOOTBALL_MIN_GAP", "6.5"))      # seconds between calls
 CLOSING_MINUTES = 100          # price a match this close to its start as its "closing" price
 BOOK_PRIORITY = ["Pinnacle", "Bet365", "Marathonbet", "1xBet", "BetVictor", "William Hill", "Betfair", "SBO"]
 OU_LINES = ("1.5", "2.5", "3.5")
@@ -256,7 +257,8 @@ def plan(now: datetime, state: Dict[str, Any], in_progress: bool) -> Dict[str, A
     `in_progress` = some match of ours is under way or ended within the last 4 hours."""
     today = now.strftime("%Y-%m-%d")
     full = state.get("full_day") != today and now.hour >= 3
-    days = [(now + timedelta(days=d)).strftime("%Y-%m-%d") for d in (-1, 0, 1)] if full else (
+    ahead = 3 if DAILY_CAP > 500 else 1          # the free plan only serves one day ahead
+    days = [(now + timedelta(days=d)).strftime("%Y-%m-%d") for d in range(-1, ahead + 1)] if full else (
         [today] if in_progress else [])
     return {"full": full, "days": days, "today": today}
 
