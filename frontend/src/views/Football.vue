@@ -42,10 +42,13 @@
     </div>
 
     <template v-else>
-      <section v-for="g in groups" :key="g.title" class="mb-6">
-        <h2 class="mb-2 text-sm font-semibold text-slate-700">{{ g.title }} <span class="font-normal text-slate-500">({{ g.items.length }})</span></h2>
-        <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          <FootballCard v-for="m in g.items" :key="m.matchId" :match="m" :predictions="byMatch[m.matchId] || []" />
+      <section v-for="lg in leagues" :key="lg.name" class="mb-8">
+        <h2 class="mb-2 border-b border-slate-200 pb-1 text-base font-bold text-slate-900">{{ lg.name }}</h2>
+        <div v-for="g in lg.groups" :key="g.title" class="mb-4">
+          <h3 class="mb-2 text-sm font-semibold text-slate-700">{{ g.title }} <span class="font-normal text-slate-500">({{ g.items.length }})</span></h3>
+          <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <FootballCard v-for="m in g.items" :key="m.matchId" :match="m" :predictions="byMatch[m.matchId] || []" />
+          </div>
         </div>
       </section>
     </template>
@@ -97,12 +100,17 @@ const byMatch = computed(() => {
   return out
 })
 
-const groups = computed(() => {
-  const open = matches.value.filter((m) => m.status !== 'FINISHED' && m.status !== 'CANCELLED')
-  const done = matches.value.filter((m) => m.status === 'FINISHED').reverse()
+// One section per league (La Liga / Premier League), each with its own "por jugar" and "terminados".
+const groupsOf = (list) => {
+  const open = list.filter((m) => m.status !== 'FINISHED' && m.status !== 'CANCELLED')
+  const done = list.filter((m) => m.status === 'FINISHED').reverse()
   return [
     { title: 'Por jugar', items: open },
     { title: 'Terminados', items: done }
   ].filter((g) => g.items.length)
+}
+const leagues = computed(() => {
+  const names = [...new Set(matches.value.map((m) => m.league))].sort()
+  return names.map((name) => ({ name, groups: groupsOf(matches.value.filter((m) => m.league === name)) }))
 })
 </script>

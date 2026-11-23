@@ -21,6 +21,10 @@
       </div>
     </div>
 
+    <router-link :to="{ path: `/futbol/${match.matchId}`, query: { date: match.eventDate } }" class="mt-2 inline-block text-xs font-medium text-blue-700 hover:underline">
+      Entrar al partido · lo más probable →
+    </router-link>
+
     <div v-if="picks.length" class="mt-2 space-y-1">
       <div v-for="p in picks" :key="p.market" class="flex flex-wrap items-center justify-between gap-2 text-xs">
         <span><span class="text-slate-500">{{ MARKET[p.market] || p.market }}:</span> <b class="text-slate-900">{{ p.prediction }}</b></span>

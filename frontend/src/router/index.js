@@ -8,6 +8,7 @@ import Caja from '../views/Caja.vue'
 import MyBets from '../views/MyBets.vue'
 import Live from '../views/Live.vue'
 import Football from '../views/Football.vue'
+import FootballDetail from '../views/FootballDetail.vue'
 
 const routes = [
   { path: '/', component: Dashboard },
@@ -18,7 +19,8 @@ const routes = [
   { path: '/caja', component: Caja },
   { path: '/mis-apuestas', component: MyBets },
   { path: '/en-vivo', component: Live },
-  { path: '/futbol', component: Football }
+  { path: '/futbol', component: Football },
+  { path: '/futbol/:id', component: FootballDetail }
 ]
 
 const router = createRouter({

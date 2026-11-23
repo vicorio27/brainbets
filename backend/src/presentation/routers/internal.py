@@ -1209,6 +1209,27 @@ def get_router() -> APIRouter:
         background_tasks.add_task(_run)
         return {"started": True}
 
+    @r.post("/matches/football/stats-backfill")
+    def football_stats_backfill(background_tasks: BackgroundTasks, max_calls: int = 5000):
+        """Per-match team statistics (shots, possession, xG...) for finished PL/PD matches, 1 call each."""
+        from src.application.football_match_stats_service import run as stats_run
+
+        storage = os.environ.get("STORAGE_PATH", "/storage")
+
+        def _run():
+            from src.infrastructure.database import SessionLocal
+
+            session = SessionLocal()
+            try:
+                logging.warning("[FOOTBALL-STATS] %s", stats_run(session, storage, max_calls=max_calls))
+            except Exception as e:
+                logging.warning("[FOOTBALL-STATS] failed: %s", e)
+            finally:
+                session.close()
+
+        background_tasks.add_task(_run)
+        return {"started": True}
+
     @r.get("/cache")
     async def get_cached_response(
         url: str,
