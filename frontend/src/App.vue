@@ -10,8 +10,17 @@
               </div>
               <span class="text-xl font-bold text-white">BrainBets</span>
             </router-link>
+            <select
+              :value="sport"
+              @change="goSport($event.target.value)"
+              aria-label="Deporte"
+              class="ml-4 rounded-md border border-emerald-600 bg-emerald-700 py-1 pl-2 pr-7 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-white"
+            >
+              <option value="tennis">🎾 Tenis</option>
+              <option value="football">⚽ Fútbol</option>
+            </select>
           </div>
-          <div class="hidden sm:flex items-center gap-6">
+          <div v-if="sport === 'tennis'" class="hidden sm:flex items-center gap-6">
             <router-link to="/" class="text-sm font-medium text-emerald-50 hover:text-white">
               Dashboard
             </router-link>
@@ -33,8 +42,10 @@
             <router-link to="/en-vivo" class="text-sm font-medium text-emerald-50 hover:text-white">
               En vivo
             </router-link>
+          </div>
+          <div v-else class="hidden sm:flex items-center gap-6">
             <router-link to="/futbol" class="text-sm font-medium text-emerald-50 hover:text-white">
-              Fútbol
+              Partidos y predicciones
             </router-link>
           </div>
           <div class="flex items-center sm:hidden">
@@ -52,7 +63,7 @@
         </div>
       </div>
       <div v-if="mobileMenuOpen" class="sm:hidden border-t border-emerald-700">
-        <div class="px-2 pt-2 pb-3 space-y-1">
+        <div v-if="sport === 'tennis'" class="px-2 pt-2 pb-3 space-y-1">
           <router-link
             to="/"
             @click="mobileMenuOpen = false"
@@ -109,13 +120,14 @@
           >
             En vivo
           </router-link>
+        </div>
+        <div v-else class="px-2 pt-2 pb-3 space-y-1">
           <router-link
             to="/futbol"
             @click="mobileMenuOpen = false"
-            class="block px-3 py-2 rounded-md text-base font-medium text-emerald-50 hover:text-white hover:bg-emerald-700"
-            :class="{ 'bg-emerald-700 text-white': $route.path === '/futbol' }"
+            class="block px-3 py-2 rounded-md text-base font-medium text-white bg-emerald-700"
           >
-            Fútbol
+            Partidos y predicciones
           </router-link>
         </div>
       </div>
@@ -127,7 +139,16 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 const mobileMenuOpen = ref(false)
+const route = useRoute()
+const router = useRouter()
+// Tennis and football are two separate fronts: the selector switches between them.
+const sport = computed(() => (route.path.startsWith('/futbol') ? 'football' : 'tennis'))
+const goSport = (value) => {
+  mobileMenuOpen.value = false
+  router.push(value === 'football' ? '/futbol' : '/')
+}
 </script>

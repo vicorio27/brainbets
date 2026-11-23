@@ -8,7 +8,7 @@ for (const [name, width] of [['desktop', 1280], ['mobile', 390]]) {
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   await page.goto(base + '/', { waitUntil: 'networkidle' })
-  const footballOnDashboard = await page.getByText('⚽').count()
+  const footballOnDashboard = await page.locator('h2:has-text("Fútbol")').count()
   await page.goto(base + '/futbol', { waitUntil: 'networkidle' })
   const cards = await page.locator('h2').count()
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
