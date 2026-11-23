@@ -33,6 +33,9 @@
             <router-link to="/en-vivo" class="text-sm font-medium text-emerald-50 hover:text-white">
               En vivo
             </router-link>
+            <router-link to="/futbol" class="text-sm font-medium text-emerald-50 hover:text-white">
+              Fútbol
+            </router-link>
           </div>
           <div class="flex items-center sm:hidden">
             <button
@@ -105,6 +108,14 @@
             :class="{ 'bg-emerald-700 text-white': $route.path === '/en-vivo' }"
           >
             En vivo
+          </router-link>
+          <router-link
+            to="/futbol"
+            @click="mobileMenuOpen = false"
+            class="block px-3 py-2 rounded-md text-base font-medium text-emerald-50 hover:text-white hover:bg-emerald-700"
+            :class="{ 'bg-emerald-700 text-white': $route.path === '/futbol' }"
+          >
+            Fútbol
           </router-link>
         </div>
       </div>

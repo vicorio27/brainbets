@@ -202,20 +202,6 @@
           </CardSection>
 
 
-          <CardSection v-if="sport === 'football' && goalsRows.length" title="Goles" :hint="goalsHint">
-            <div v-if="goalsPrice" title="Cuota de la casa de referencia; el % es la probabilidad sin el margen">
-              Más de 2.5 a <span class="font-semibold text-slate-900">{{ goalsPrice.over }}</span> ({{ goalsPrice.overPct }}%)
-              · Menos de 2.5 a <span class="font-semibold text-slate-900">{{ goalsPrice.under }}</span> ({{ goalsPrice.underPct }}%)
-              <span v-if="goalsPrice.bttsYes"> · Ambos anotan {{ goalsPrice.bttsYes }} / {{ goalsPrice.bttsNo }}</span>
-            </div>
-            <div v-for="r in goalsRows" :key="r.team">
-              <span class="font-medium">{{ r.team }}:</span>
-              {{ r.goalsFor }} goles a favor y {{ r.goalsAgainst }} en contra por partido; más de 2.5 en {{ r.over25 }}% y ambos anotan en {{ r.btts }}% (últimos {{ r.n }})
-              <div v-for="n in r.notes" :key="n" class="text-amber-800">» {{ n }}</div>
-            </div>
-            <p class="text-slate-500">Hay equipos que reciben y marcan en casi todos sus partidos. Es información, no está medida contra la cuota.</p>
-          </CardSection>
-
           <CardSection v-if="gamesInfo" title="Modelo de games" :hint="`~${gamesInfo.g.expectedGames} games · tiebreak ${gamesInfo.tiebreak}%`">
             <div title="Modelo de games (saque y resto, juego a juego), congelado el 16-oct-2026. No ha demostrado ganarle a la casa: se está midiendo en Caja → Laboratorio.">
               <span v-if="gamesInfo.close" class="font-semibold text-sky-800">Partido reñido · </span>
@@ -515,33 +501,9 @@ const newsHint = computed(() => {
   if (latestNews.value) t.push(`${latestNews.value.total} titulares`)
   return t.join(' · ')
 })
-// Football: how many goals each team's matches carry, and the Over/Under 2.5 price
-const goalsRows = computed(() => {
-  const t = props.match.goalsTrend
-  if (props.sport !== 'football' || !t) return []
-  return [[props.match.homeTeam, t.home], [props.match.awayTeam, t.away]].filter(([, x]) => x).map(([team, x]) => ({
-    team, n: x.n, goalsFor: x.goalsFor, goalsAgainst: x.goalsAgainst,
-    over25: Math.round(x.over25 * 100), btts: Math.round(x.btts * 100), notes: x.notes || []
-  }))
-})
-const goalsPrice = computed(() => {
-  const m = props.match.oddsMarkets
-  const ou = m?.overUnder?.['2.5']
-  if (props.sport !== 'football' || !ou) return null
-  const fair = (1 / ou.over) / (1 / ou.over + 1 / ou.under)
-  return { over: ou.over.toFixed(2), under: ou.under.toFixed(2), overPct: Math.round(fair * 100), underPct: Math.round((1 - fair) * 100),
-    bttsYes: m.btts?.yes?.toFixed(2), bttsNo: m.btts?.no?.toFixed(2) }
-})
-const goalsHint = computed(() => {
-  const b = props.match.goalsTrend?.both
-  const bits = []
-  if (b) bits.push(`~${b.goals} goles por partido`)
-  if (goalsPrice.value) bits.push(`Más 2.5 ${goalsPrice.value.overPct}%`)
-  return bits.join(' · ')
-})
 const dataCount = computed(() => [
   props.sport === 'tennis', firstGameLines.value.length, levelLines.value.length, streakRows.value.length,
-  gamesInfo.value, reliabilityRows.value.length, goalsRows.value.length
+  gamesInfo.value, reliabilityRows.value.length
 ].filter(Boolean).length)
 const hasData = computed(() => dataCount.value > 0)
 const questions = computed(() => (props.sport === 'tennis' && props.match.questions) || [])

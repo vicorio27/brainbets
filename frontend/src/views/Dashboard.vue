@@ -995,7 +995,8 @@ const tennisMatches = computed(() => sortByConfidence(matchesStore.latest?.tenni
 const isDone = (m) => ['FINISHED', 'CANCELLED'].includes(m.status)
 const tennisOpen = computed(() => tennisMatches.value.filter((m) => !isDone(m)))
 const tennisDone = computed(() => tennisMatches.value.filter(isDone))
-const footballMatches = computed(() => sortByConfidence(matchesStore.latest?.football || []))
+// Football has its own page (/futbol); this dashboard is tennis only.
+const footballMatches = computed(() => [])
 
 // All matches (both sports) grouped by tournament / league name
 const tournamentGroups = computed(() => {
@@ -1007,7 +1008,6 @@ const tournamentGroups = computed(() => {
     groups[name].matches.push({ ...match, _sport: sport })
   }
   for (const m of matchesStore.latest?.tennis || []) addMatch(m, 'tennis')
-  for (const m of matchesStore.latest?.football || []) addMatch(m, 'football')
   return Object.values(groups)
     .map((g) => ({
       name: g.name,
