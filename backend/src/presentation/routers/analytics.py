@@ -29,6 +29,13 @@ def get_router() -> APIRouter:
     def get_dashboard(service: DataService = Depends(get_data_service)):
         return service.get_dashboard_summary()
 
+    @r.get("/football-lab")
+    def get_football_lab():
+        """Football Over/Under 2.5 shadow test (does the Poisson model add anything to the price?)."""
+        from src.application.football_lab_service import get_report
+
+        return get_report() or {"rows": 0, "verdict": {"level": "juntando_muestra", "matches": 0, "needed": 300}}
+
     @r.get("/lab")
     def get_lab():
         """Shadow models under test against the bookmaker (read from the
