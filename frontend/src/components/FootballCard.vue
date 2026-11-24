@@ -13,6 +13,8 @@
       <span class="text-right">{{ match.awayTeam }}</span>
     </div>
 
+    <FootballFlags :flags="match.flags" />
+
     <div v-if="price" class="mt-2 rounded border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs text-slate-800">
       <div class="font-medium text-emerald-800">Goles · cuota de la casa</div>
       <div>
@@ -36,6 +38,8 @@
     </div>
     <p v-else-if="match.status === 'SCHEDULED'" class="mt-2 text-xs text-slate-500">Sin predicción todavía.</p>
 
+    <FootballNews :news="match.teamNews" :home="match.homeTeam" :away="match.awayTeam" :status="match.status" />
+
     <details v-if="goalsRows.length" class="mt-2 rounded border border-slate-200">
       <summary class="cursor-pointer px-2.5 py-1.5 text-xs font-medium text-slate-800">
         Goles de cada equipo <span class="font-normal text-slate-500">· {{ goalsHint }}</span>
@@ -55,6 +59,8 @@
 <script setup>
 import { computed } from 'vue'
 import { betEdge, edgeLabel, formatEdge } from '../utils/edge.js'
+import FootballFlags from './FootballFlags.vue'
+import FootballNews from './FootballNews.vue'
 
 const props = defineProps({
   match: { type: Object, required: true },

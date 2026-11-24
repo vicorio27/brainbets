@@ -45,11 +45,7 @@
               </tbody>
             </table>
           </div>
-          <p class="mt-1 text-slate-500">
-            Goles esperados por tramo ({{ sim.minutes.matchesUsed.home }} y {{ sim.minutes.matchesUsed.away }} partidos con minutos de cada equipo).
-            «Liga» = qué parte de los goles cae en ese tramo en toda la liga.
-            <span v-if="Math.min(sim.minutes.matchesUsed.home, sim.minutes.matchesUsed.away) < 10">Hay pocos partidos con minutos: se parece mucho a la forma de la liga.</span>
-          </p>
+          <p class="mt-1 text-slate-500">{{ sim.minutes.note }} «Liga» = qué parte de los goles cae en ese tramo en toda la liga.</p>
         </section>
 
         <section v-if="sim.corners">

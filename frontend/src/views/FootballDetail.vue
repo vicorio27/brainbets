@@ -11,6 +11,8 @@
         {{ match.awayTeam }}
       </h1>
 
+      <FootballFlags :flags="match.flags" />
+
       <section class="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
         <h2 class="text-sm font-semibold text-emerald-900">Lo más probable</h2>
         <p v-if="!picks.length" class="mt-1 text-xs text-slate-600">Todavía no hay datos para este partido.</p>
@@ -45,6 +47,8 @@
         </p>
       </section>
 
+      <FootballNews :news="match.teamNews" :home="match.homeTeam" :away="match.awayTeam" :status="match.status" />
+
       <FootballSimulation :match-id="match.matchId" :key="match.matchId" />
 
       <section v-if="predictions.length" class="mt-4 rounded-lg border border-slate-200 bg-white p-3 text-sm">
@@ -74,6 +78,8 @@ import { likelyPicks } from '../utils/footballPicks.js'
 import { useFootballComboStore, legKey } from '../stores/combo.js'
 import ComboBar from '../components/ComboBar.vue'
 import FootballSimulation from '../components/FootballSimulation.vue'
+import FootballFlags from '../components/FootballFlags.vue'
+import FootballNews from '../components/FootballNews.vue'
 
 const route = useRoute()
 const match = ref(null)

@@ -3,8 +3,8 @@
 For a fixture it assembles, with numbers only and always "from earlier matches":
 - goals: expected goals of each side (the Poisson model), the 1X2, over/under and both-teams-score
   probabilities and the likeliest scorelines (exact, from the Poisson grid);
-- goal minutes: when each side scores and concedes, by 15-minute band, from each team's recent matches
-  shrunk toward the league's own shape (`goals` events, see `football_events_service`);
+- goal minutes: the expected goals of each side spread over 15-minute bands with the LEAGUE's own shape (`goals`
+  events, see `football_events_service`). A team's own profile was tested and predicts worse, so it is not used;
 - corners: expected corners of each side and the chance of going over a few lines (the corners model
   frozen for the corners lab);
 - H2H: the recent meetings, as information (adding it to the model did not improve any forecast).
@@ -213,15 +213,15 @@ def simulate(db: Session, external_id: str) -> Optional[Dict[str, Any]]:
         "goals": goal_markets(lh, la),
     }
     shape = _league_shape(db, m.league_id, m.match_date)
-    hrows, arows = _team_matches(db, home_id, m.match_date, TEAM_MATCHES), _team_matches(db, away_id, m.match_date, TEAM_MATCHES)
-    h_sc, h_co, hn = _profile(hrows)
-    a_sc, a_co, an = _profile(arows)
+    # Each team's own minute profile was tested walk-forward on 2,626 matches (2026-11-24) and predicts WHEN goals fall
+    # WORSE than the league's shape (log-score of the goal's band -0.004 to -0.016, interval below zero), so every team
+    # gets the league's shape: only the number of expected goals differs between teams.
     out["minutes"] = {
-        "bands": minute_view(lh, la, shares(h_sc, shape), shares(h_co, shape), shares(a_sc, shape), shares(a_co, shape)),
+        "bands": minute_view(lh, la, shape, shape, shape, shape),
         "leagueShape": [round(x, 3) for x in shape],
-        "matchesUsed": {"home": hn, "away": an},
-        "note": "Reparto de los goles esperados por tramo de minutos, con lo que cada equipo marca y recibe en sus últimos partidos, "
-                "acercado a la forma de la liga.",
+        "note": "Reparto de los goles esperados por tramo con la forma de los goles de esta liga. Probado en 2.626 partidos: el patrón "
+                "de minutos propio de cada equipo NO predice mejor que el de la liga (peor, con intervalo por debajo de cero), "
+                "así que no se usa; lo que cambia de un equipo a otro es cuántos goles se esperan, no cuándo caen.",
     }
     out["corners"] = corners_view(db, m, home_id, away_id)
     out["h2h"] = h2h_view(db, m, home_id, away_id)

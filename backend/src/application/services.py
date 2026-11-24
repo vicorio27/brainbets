@@ -296,8 +296,20 @@ class DataService:
             oddsMarkets=meta.get("odds_markets"),
             oddsExtra=meta.get("odds_extra"),
             goalsTrend=self._goals_trend(match),
+            flags=self._football_flags(match, home, away, expected_home, expected_away),
+            teamNews=meta.get("team_news"),
             features=match_features,
         )
+
+    def _football_flags(self, match, home, away, expected_home, expected_away):
+        """Data-quality labels for the card (never breaks the match view)."""
+        try:
+            from src.application.football_flags_service import flags_for
+
+            return flags_for(self.db, match, home.competitor_id, away.competitor_id, home.competitor.name,
+                             away.competitor.name, expected_home, expected_away)
+        except Exception:
+            return []
 
     def _goals_trend(self, match: Match) -> Optional[Dict[str, Any]]:
         if match.status not in ("SCHEDULED", "LIVE"):

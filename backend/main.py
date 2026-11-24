@@ -35,6 +35,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+def _start_football_news() -> None:
+    if os.environ.get("FOOTBALL_NEWS", "true").lower() == "true":
+        from src.application.football_news_service import start_scheduler
+
+        start_scheduler()
+
+
 # Include routers
 app.include_router(matches.get_router(), prefix="/api/v1")
 app.include_router(predictions.get_router(), prefix="/api/v1")

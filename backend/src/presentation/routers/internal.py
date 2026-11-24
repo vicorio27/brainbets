@@ -1199,6 +1199,14 @@ def get_router() -> APIRouter:
         background_tasks.add_task(_run)
         return {"started": True}
 
+    @r.post("/matches/football/news/refresh")
+    def refresh_football_team_news(match_id: Optional[str] = None, force: bool = False, prematch: bool = False,
+                                   db: Session = Depends(get_db)):
+        """Team news for upcoming football matches (also runs by itself every 10 minutes inside the backend)."""
+        from src.application.football_news_service import refresh_news as football_news
+
+        return football_news(db, match_id=match_id, force=force, prematch=prematch)
+
     @r.post("/matches/football/collect")
     def collect_football_api(background_tasks: BackgroundTasks, wait: bool = False, db: Session = Depends(get_db)):
         """La Liga and Premier League from API-Football: fixtures, results and prices.
