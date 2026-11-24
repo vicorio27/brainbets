@@ -32,7 +32,7 @@
     <details v-if="lab"class="mb-4 rounded-lg border border-slate-200 bg-white">
       <summary class="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
         <span class="font-medium text-slate-800">Laboratorio · Más/Menos 2.5 goles</span>
-        <span class="text-xs text-slate-600">{{ verdictText }}</span>
+        <span class="text-xs text-slate-600">{{ verdictText(lab) }}</span>
       </summary>
       <div class="space-y-1 border-t border-slate-100 px-3 py-2 text-xs text-slate-700">
         <p>
@@ -51,6 +51,31 @@
           <span v-if="lab.postFreeze.bets">Apostando donde el modelo discrepa 3 puntos o más: {{ lab.postFreeze.bets }} apuestas, rendimiento {{ lab.postFreeze.yield }}%.</span>
         </p>
         <p class="text-slate-500">No hay histórico de cuotas anterior al 23-nov, así que la muestra solo crece con los días. Reporta, no cambia ninguna predicción.</p>
+      </div>
+    </details>
+
+    <details v-if="corners" class="mb-4 rounded-lg border border-slate-200 bg-white">
+      <summary class="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
+        <span class="font-medium text-slate-800">Laboratorio · Córners totales</span>
+        <span class="text-xs text-slate-600">{{ verdictText(corners) }}</span>
+      </summary>
+      <div class="space-y-1 border-t border-slate-100 px-3 py-2 text-xs text-slate-700">
+        <p>
+          Pregunta: ¿un modelo de córners aporta algo que la cuota no tenga? La base es la probabilidad de la casa sin margen en la
+          línea de córners más equilibrada; el modelo (equipos a favor y en contra frente al promedio de la liga, solo con partidos
+          anteriores) solo puede moverla. Congelado el {{ corners.frozenAt }}. Se mira cuando haya {{ corners.verdict.needed }}
+          partidos nuevos y el intervalo de la mejora no incluya el cero.
+        </p>
+        <p>Partidos con cuota de córners y estadísticas: <b>{{ corners.rows }}</b></p>
+        <p v-if="corners.marketCheck && corners.marketCheck.matches">
+          En esos partidos la casa daba Más al {{ pct(corners.marketCheck.marketOver) }}%, el modelo al {{ pct(corners.marketCheck.modelOver) }}%
+          y salió el {{ pct(corners.marketCheck.actualOver) }}%.
+        </p>
+        <p v-if="corners.postFreeze && corners.postFreeze.matches">
+          Probado hacia adelante en {{ corners.postFreeze.matches }} partidos: mejora del log-loss {{ corners.postFreeze.improvement }}
+          (intervalo {{ corners.postFreeze.improvementCiLow }} a {{ corners.postFreeze.improvementCiHigh }}).
+        </p>
+        <p class="text-slate-500">Las cuotas de córners existen desde el 24-nov, así que la muestra solo crece con los días. Reporta, no cambia ninguna predicción.</p>
       </div>
     </details>
 
@@ -85,6 +110,7 @@ import { pickOfDay } from '../utils/footballPicks.js'
 const matches = ref([])
 const preds = ref([])
 const lab = ref(null)
+const corners = ref(null)
 const loading = ref(true)
 const error = ref('')
 
@@ -101,6 +127,7 @@ onMounted(async () => {
     matches.value = (m.data.football || []).slice().sort((a, b) => `${a.eventDate} ${a.eventTime}`.localeCompare(`${b.eventDate} ${b.eventTime}`))
     preds.value = p.data.predictions || []
     try { lab.value = (await api.get('/analytics/football-lab')).data } catch (e) { lab.value = null }
+    try { corners.value = (await api.get('/analytics/football-corners-lab')).data } catch (e) { corners.value = null }
   } catch (e) {
     error.value = e.response?.data?.detail || e.message
   } finally {
@@ -109,12 +136,12 @@ onMounted(async () => {
 })
 
 const pct = (x) => Math.round((x ?? 0) * 100)
-const verdictText = computed(() => {
-  const v = lab.value?.verdict
+const verdictText = (report) => {
+  const v = report?.verdict
   if (!v) return ''
   const words = { juntando_muestra: `juntando muestra: ${v.matches} de ${v.needed}`, no_demostrado: 'no demostrado', demostrado: 'demostrado', descartado: 'descartado' }
   return words[v.level] || v.level
-})
+}
 
 const nowBogota = () => new Date().toLocaleString('sv-SE', { timeZone: 'America/Bogota' }).slice(0, 16)
 const pod = computed(() => pickOfDay(matches.value, nowBogota()))
