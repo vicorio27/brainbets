@@ -36,6 +36,13 @@ def get_router() -> APIRouter:
 
         return get_report() or {"rows": 0, "verdict": {"level": "juntando_muestra", "matches": 0, "needed": 300}}
 
+    @r.get("/football-corners-lab")
+    def get_football_corners_lab():
+        """Football total-corners shadow test (does a corners model add anything to the price?)."""
+        from src.application.football_corners_lab_service import get_report
+
+        return get_report() or {"rows": 0, "verdict": {"level": "juntando_muestra", "matches": 0, "needed": 300}}
+
     @r.get("/lab")
     def get_lab():
         """Shadow models under test against the bookmaker (read from the

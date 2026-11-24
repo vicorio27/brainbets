@@ -919,6 +919,15 @@ def get_router() -> APIRouter:
             except Exception as e:
                 logging.exception("[train] football lab failed")
                 result["football_lab"] = {"status": "error", "error": str(e)}
+        if payload.get("run_football_corners_lab", True):
+            from src.application.football_corners_lab_service import run_lab as run_corners_lab
+
+            try:
+                cl = run_corners_lab(db)
+                result["football_corners_lab"] = {k: cl[k] for k in ("rows", "postFreeze", "verdict")}
+            except Exception as e:
+                logging.exception("[train] football corners lab failed")
+                result["football_corners_lab"] = {"status": "error", "error": str(e)}
         if payload.get("run_ensemble_weights", True):
             from src.application.ensemble_weights_service import train_ensemble_weights
 
@@ -961,6 +970,13 @@ def get_router() -> APIRouter:
         from src.application.football_lab_service import run_lab as run_football_lab
 
         return run_football_lab(db)
+
+    @r.post("/train/football-corners-lab")
+    def run_football_corners_lab_endpoint(db: Session = Depends(get_db)):
+        """Re-run the football total-corners shadow test. Reports only; serves nothing."""
+        from src.application.football_corners_lab_service import run_lab as run_corners_lab
+
+        return run_corners_lab(db)
 
     @r.post("/train/market-anchor")
     def train_market_anchor_endpoint(
