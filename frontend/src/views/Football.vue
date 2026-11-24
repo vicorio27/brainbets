@@ -71,6 +71,7 @@
         </div>
       </section>
     </template>
+    <ComboBar sport="football" />
   </div>
 </template>
 
@@ -78,6 +79,7 @@
 import { computed, onMounted, ref } from 'vue'
 import api from '../stores/api.js'
 import FootballCard from '../components/FootballCard.vue'
+import ComboBar from '../components/ComboBar.vue'
 import { pickOfDay } from '../utils/footballPicks.js'
 
 const matches = ref([])

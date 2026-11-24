@@ -7,11 +7,12 @@
 
     <p v-if="combo.justSaved && !combo.legs.length" class="mt-2 text-green-700">
       Registrada. Se liquida sola cuando terminen los partidos:
-      <router-link to="/mis-apuestas" class="font-semibold underline">ver Mis apuestas</router-link>
+      <router-link :to="football ? '/mis-apuestas?sport=football' : '/mis-apuestas'" class="font-semibold underline">ver Mis apuestas</router-link>
     </p>
     <p v-if="!combo.legs.length" class="mt-2 text-slate-600">
-      Agrega apuestas con el botón <span class="font-semibold">+</span> en «Lo más probable» de cada partido (pestaña Hoy).
-      Una por partido.
+      <template v-if="football">Agrega apuestas con el botón <span class="font-semibold">+</span> en «Lo más probable» de cada partido (entra al partido desde Fútbol). Una por partido.</template>
+      <template v-else>Agrega apuestas con el botón <span class="font-semibold">+</span> en «Lo más probable» de cada partido (pestaña Hoy).
+      Una por partido.</template>
     </p>
 
     <template v-else>
@@ -88,10 +89,12 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { useComboStore, comboNumbers } from '../stores/combo.js'
+import { useComboStore, useFootballComboStore, comboNumbers } from '../stores/combo.js'
 import { useMyBetsStore } from '../stores/mybets.js'
 
-const combo = useComboStore()
+const props = defineProps({ sport: { type: String, default: 'tennis' } })
+const football = props.sport === 'football'
+const combo = football ? useFootballComboStore() : useComboStore()
 const myBets = useMyBetsStore()
 const numbers = computed(() => comboNumbers(combo.legs, combo.amount))
 

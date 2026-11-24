@@ -5,16 +5,18 @@ import api from './api.js'
 export const useMyBetsStore = defineStore('mybets', {
   state: () => ({
     data: null,
+    sport: 'tennis',
     loading: false,
     error: null
   }),
   actions: {
-    async fetch() {
+    async fetch(sport) {
+      if (sport) this.sport = sport
       this.loading = true
       this.error = null
       try {
         // Never from the GET cache: a bet registered a second ago must show up.
-        const { data } = await api.get('/my-bets', { noCache: true })
+        const { data } = await api.get('/my-bets', { noCache: true, params: { sport: this.sport } })
         this.data = data
       } catch (err) {
         this.error = err.response?.data?.detail || err.message

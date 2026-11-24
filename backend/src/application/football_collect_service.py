@@ -375,6 +375,18 @@ def run(db, insert_fn: Callable[..., Optional[str]], storage: str, now: Optional
             if fid in closing_ids and priced.get(fid):
                 extra["odds_markets_closing"] = priced[fid]
                 extra["odds_markets_closing_at"] = datetime.now(timezone.utc).isoformat()
+            if raw["status"] == "FINISHED":
+                # What the user's football bets settle on: the half-time score and the match statistics (corners).
+                ht = (fx.get("score") or {}).get("halftime") or {}
+                if ht.get("home") is not None and ht.get("away") is not None:
+                    extra["halftime"] = {"home": int(ht["home"]), "away": int(ht["away"])}
+                if "team_stats" not in extra:
+                    from src.application import football_match_stats_service as fms
+                    d = prov.get("fixtures/statistics", {"fixture": fid})
+                    if d is not None:
+                        extra["team_stats"] = fms.parse_stats(
+                            d.get("response") or [], (fx["teams"]["home"] or {}).get("id"), (fx["teams"]["away"] or {}).get("id")) or {}
+                        extra["af_fixture"] = fid
             match.extra_data = extra
             if fx["league"].get("season"):
                 match.season = season_code(int(fx["league"]["season"]))

@@ -16,14 +16,29 @@
         <p v-if="!picks.length" class="mt-1 text-xs text-slate-600">Todavía no hay datos para este partido.</p>
         <ul v-else class="mt-2 space-y-1">
           <li v-for="p in picks" :key="p.key" class="flex flex-wrap items-center justify-between gap-2 text-sm">
-            <span class="text-slate-900">{{ p.text }}</span>
+            <span class="flex items-center gap-2 text-slate-900">
+              <button
+                v-if="canBet && p.kind"
+                class="h-6 w-6 shrink-0 rounded-full border text-sm font-bold leading-none"
+                :class="combo.has(pickKey(p)) ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-emerald-300 bg-white text-emerald-800 hover:bg-emerald-100'"
+                :aria-label="combo.has(pickKey(p)) ? `Quitar de mi combinada: ${p.text}` : `Agregar a mi combinada: ${p.text}`"
+                @click="toggle(p)"
+              >{{ combo.has(pickKey(p)) ? '✓' : '+' }}</button>
+              {{ p.text }}
+            </span>
             <span class="text-xs text-slate-700">
               <b class="tabular-nums">{{ Math.round(p.prob * 100) }}%</b>
               <span v-if="p.odds"> · cuota {{ p.odds.toFixed(2) }}</span>
+              <span v-else class="text-amber-800"> · sin cuota de la casa (≈{{ estimate(p).toFixed(2) }})</span>
               <span class="ml-1 rounded px-1.5 py-0.5" :class="p.source === 'casa' ? 'bg-white text-emerald-800' : 'bg-amber-100 text-amber-900'">{{ p.source === 'casa' ? 'según la casa' : 'según el modelo' }}</span>
             </span>
           </li>
         </ul>
+        <p v-if="clash" class="mt-2 rounded bg-amber-50 px-2 py-1 text-xs text-amber-900">
+          Ya tienes «{{ clash.current.label }}» de este partido: dos apuestas del mismo partido dependen una de la otra.
+          <button class="font-semibold underline" @click="replaceClash">Cambiarla por «{{ clash.leg.label }}»</button>
+        </p>
+        <p v-if="!canBet" class="mt-2 text-xs text-slate-600">El partido ya empezó o terminó: solo se registran apuestas antes del inicio.</p>
         <p class="mt-2 text-xs text-slate-600">
           Lo que más probablemente pasa, no lo que más paga: las más seguras pagan poco. Con la casa = su probabilidad sin margen;
           con el modelo = Poisson, que todavía no se ha medido contra la cuota. En la base, Más de 0.5 sale 93% y Más de 1.5 75%.
@@ -45,6 +60,7 @@
         </template>
       </section>
     </template>
+    <ComboBar sport="football" />
   </div>
 </template>
 
@@ -53,6 +69,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '../stores/api.js'
 import { likelyPicks } from '../utils/footballPicks.js'
+import { useFootballComboStore, legKey } from '../stores/combo.js'
+import ComboBar from '../components/ComboBar.vue'
 
 const route = useRoute()
 const match = ref(null)
@@ -70,4 +88,32 @@ onMounted(async () => {
 })
 
 const picks = computed(() => (match.value ? likelyPicks(match.value) : []))
+
+// Registering a bet ("Mis apuestas"), football side: its own combo, never mixed with tennis.
+const combo = useFootballComboStore()
+const clash = ref(null)
+const nowBogota = () => new Date().toLocaleString('sv-SE', { timeZone: 'America/Bogota' }).slice(0, 16)
+const canBet = computed(() => !!match.value && match.value.status === 'SCHEDULED' && `${match.value.eventDate} ${match.value.eventTime}` > nowBogota())
+const pickKey = (p) => legKey(match.value.matchId, p.text)
+// Without the house price the odds are an estimate (1 / (probability x 1.07)); the panel asks to confirm it.
+const estimate = (p) => Math.max(1.01, 1 / (p.prob * 1.07))
+function pickLeg(p) {
+  const odds = p.odds || estimate(p)
+  return {
+    key: pickKey(p), matchId: match.value.matchId, match: `${match.value.homeTeam} vs ${match.value.awayTeam}`,
+    eventDate: match.value.eventDate, eventTime: match.value.eventTime,
+    label: `${p.text} (${match.value.homeTeam} vs ${match.value.awayTeam})`, kind: p.kind, selector: p.selector,
+    probability: p.prob, odds, oddsKind: p.odds ? 'directa' : 'aprox', bestOdds: odds, bestBook: null, bestNeedsCheck: false
+  }
+}
+function toggle(p) {
+  clash.value = null
+  if (combo.has(pickKey(p))) { combo.remove(pickKey(p)); return }
+  const current = combo.add(pickLeg(p))
+  if (current) clash.value = { current, leg: pickLeg(p) }
+}
+function replaceClash() {
+  combo.replace(clash.value.leg)
+  clash.value = null
+}
 </script>

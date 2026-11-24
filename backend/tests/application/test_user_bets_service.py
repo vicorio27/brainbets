@@ -87,3 +87,39 @@ def test_games_in_the_match_and_tiebreaks():
     assert settle_leg("tiebreak", {"pick": "no"}, "FINISHED", 1, 2, False, rows) == "LOST"
     assert settle_leg("tiebreak", {"pick": "si"}, "FINISHED", 1, 2, False, rows[:2]) is None   # a set row missing
     assert valid_selector("tiebreak", {"pick": "si"}) and valid_selector("gamesMatch", {"line": 22.5, "pick": "menos"})
+
+
+def test_football_legs_settle_from_the_score_halftime_and_corners():
+    from src.application.user_bets_service import settle_football_leg as sf
+    extra = {"halftime": {"home": 1, "away": 0}, "team_stats": {"home": {"corner_kicks": 6}, "away": {"corner_kicks": 5}}}
+    # 2-1 final: 3 goals, 1 in the first half and 2 in the second, 11 corners
+    assert sf("fGoals", {"line": 2.5, "pick": "mas"}, "FINISHED", 2, 1) == "WON"
+    assert sf("fGoals", {"line": 3.5, "pick": "mas"}, "FINISHED", 2, 1) == "LOST"
+    assert sf("fBtts", {"pick": "si"}, "FINISHED", 2, 1) == "WON"
+    assert sf("fBtts", {"pick": "si"}, "FINISHED", 2, 0) == "LOST"
+    assert sf("fScores", {"side": "away"}, "FINISHED", 2, 0) == "LOST"
+    assert sf("fResult", {"pick": "1X"}, "FINISHED", 2, 1) == "WON"
+    assert sf("fResult", {"pick": "X2"}, "FINISHED", 2, 1) == "LOST"
+    assert sf("fResult", {"pick": "X2"}, "FINISHED", 1, 1) == "WON"     # a draw is covered by X2
+    assert sf("fHalf", {"half": 1, "line": 0.5, "pick": "mas"}, "FINISHED", 2, 1, extra) == "WON"
+    assert sf("fHalf", {"half": 2, "line": 1.5, "pick": "mas"}, "FINISHED", 2, 1, extra) == "WON"   # 3 - 1 = 2 goals after the break
+    assert sf("fCorners", {"line": 10.5, "pick": "mas"}, "FINISHED", 2, 1, extra) == "WON"
+    assert sf("fCorners", {"line": 11.5, "pick": "mas"}, "FINISHED", 2, 1, extra) == "LOST"
+
+
+def test_football_legs_wait_for_the_data_and_void_when_cancelled():
+    from src.application.user_bets_service import settle_football_leg as sf
+    assert sf("fGoals", {"line": 2.5, "pick": "mas"}, "SCHEDULED", None, None) is None
+    assert sf("fHalf", {"half": 1, "line": 0.5, "pick": "mas"}, "FINISHED", 1, 0, {}) is None       # no half-time score yet
+    assert sf("fCorners", {"line": 9.5, "pick": "mas"}, "FINISHED", 1, 0, {"team_stats": {}}) is None
+    assert sf("fGoals", {"line": 2.5, "pick": "mas"}, "CANCELLED", None, None) == "VOID"
+    assert sf("fGoals", {"line": 2.5, "pick": "mas"}, "POSTPONED", None, None) is None
+
+
+def test_football_selectors_only_accept_half_lines():
+    assert valid_selector("fGoals", {"line": 2.5, "pick": "mas"})
+    assert not valid_selector("fGoals", {"line": 2.0, "pick": "mas"})        # whole lines can refund the stake
+    assert not valid_selector("fHalf", {"line": 0.5, "pick": "mas"})         # needs the half
+    assert valid_selector("fHalf", {"half": 2, "line": 0.5, "pick": "menos"})
+    assert valid_selector("fResult", {"pick": "12"})
+    assert not valid_selector("fResult", {"pick": "3"})

@@ -4,8 +4,9 @@
       <div>
         <h1 class="text-2xl font-bold text-slate-900">Mis apuestas</h1>
         <p class="text-sm text-slate-600">
-          Las que registraste desde la calculadora (botón + en «Lo más probable»). Se liquidan solas con el resultado,
-          cada hora junto a la validación o al abrir esta página.
+          <template v-if="isFootball">Apuestas de fútbol: las que registraste con el botón + de «Lo más probable» en cada partido.</template>
+          <template v-else>Las que registraste desde la calculadora (botón + en «Lo más probable»).</template>
+          Se liquidan solas con el resultado, cada hora junto a la validación o al abrir esta página.
         </p>
       </div>
       <button
@@ -52,7 +53,7 @@
 
     <div v-if="store.data && !shown.length" class="rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
       <template v-if="!store.data.bets.length">
-        Aún no registras apuestas. Arma una en el Dashboard con el botón <span class="font-semibold">+</span> de «Lo más probable»
+        Aún no registras apuestas<template v-if="isFootball"> de fútbol. Entra a un partido en Fútbol, usa el botón <span class="font-semibold">+</span> de «Lo más probable»</template><template v-else>. Arma una en el Dashboard con el botón <span class="font-semibold">+</span> de «Lo más probable»</template>
         y toca «Registrar» en Mi combinada.
       </template>
       <template v-else>No hay apuestas en este filtro.</template>
@@ -92,10 +93,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useMyBetsStore } from '../stores/mybets.js'
 
 const store = useMyBetsStore()
+const route = useRoute()
+const isFootball = computed(() => store.sport === 'football')
 const filter = ref('all')
 const groups = [
   { key: 'all', title: 'Todas' },
@@ -144,5 +148,6 @@ async function remove(b) {
   }
 }
 
-onMounted(() => store.fetch())
+onMounted(() => store.fetch(route.query.sport === 'football' ? 'football' : 'tennis'))
+watch(() => route.query.sport, (v) => store.fetch(v === 'football' ? 'football' : 'tennis'))
 </script>

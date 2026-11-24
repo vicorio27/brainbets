@@ -24,6 +24,11 @@ from sqlalchemy.orm import Session, joinedload
 from src.domain.models import Match, MatchScore, UserBet, UserBetLeg
 
 KINDS = {"partido", "set1", "unSet", "sinCeder", "sets", "gamesSet", "gamesMatch", "tiebreak"}
+# Football legs (all lines are x.5, so nothing is ever refunded or split):
+#   fGoals {line, pick: mas|menos} total goals; fHalf {half: 1|2, line, pick} goals in one half;
+#   fCorners {line, pick} total corners; fBtts {pick: si|no}; fScores {side: home|away} the team scores;
+#   fResult {pick: 1|X|2|1X|X2|12}.
+FOOTBALL_KINDS = {"fGoals", "fHalf", "fCorners", "fBtts", "fScores", "fResult"}
 MAX_LEGS = 10
 
 
@@ -31,9 +36,24 @@ class BetError(ValueError):
     """A bet that cannot be registered; the message is shown to the user."""
 
 
+def _line_ok(selector: Dict[str, Any]) -> bool:
+    line = selector.get("line")
+    return isinstance(line, (int, float)) and line % 1 == 0.5 and selector.get("pick") in ("mas", "menos")
+
+
 def valid_selector(kind: str, selector: Any) -> bool:
     if not isinstance(selector, dict):
         return False
+    if kind in ("fGoals", "fCorners"):
+        return _line_ok(selector)
+    if kind == "fHalf":
+        return _line_ok(selector) and selector.get("half") in (1, 2)
+    if kind == "fBtts":
+        return selector.get("pick") in ("si", "no")
+    if kind == "fScores":
+        return selector.get("side") in ("home", "away")
+    if kind == "fResult":
+        return selector.get("pick") in ("1", "X", "2", "1X", "X2", "12")
     if kind == "sets":
         return selector.get("sets") in ("corridos", "largo")
     if kind == "tiebreak":
@@ -105,6 +125,43 @@ def settle_leg(kind: str, selector: Dict[str, Any], status: Optional[str], home:
     else:
         return None
     return "WON" if won else "LOST"
+
+
+def settle_football_leg(kind: str, selector: Dict[str, Any], status: Optional[str], home: Optional[int],
+                        away: Optional[int], extra: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """WON / LOST / VOID, or None while the result (or a statistic it needs) is not in yet."""
+    if status in ("CANCELLED", "ABANDONED"):
+        return "VOID"
+    if status != "FINISHED" or home is None or away is None:
+        return None
+    extra = extra or {}
+    over = lambda value: "WON" if (value > float(selector["line"])) == (selector.get("pick") == "mas") else "LOST"
+    if kind == "fGoals":
+        return over(home + away)
+    if kind == "fBtts":
+        return "WON" if (home > 0 and away > 0) == (selector.get("pick") == "si") else "LOST"
+    if kind == "fScores":
+        return "WON" if (home if selector.get("side") == "home" else away) > 0 else "LOST"
+    if kind == "fResult":
+        result = "1" if home > away else "2" if away > home else "X"
+        return "WON" if result in selector.get("pick", "") else "LOST"
+    if kind == "fHalf":
+        ht = extra.get("halftime") or {}
+        if ht.get("home") is None or ht.get("away") is None:
+            return None
+        first = int(ht["home"]) + int(ht["away"])
+        return over(first if selector.get("half") == 1 else home + away - first)
+    if kind == "fCorners":
+        ts = extra.get("team_stats") or {}
+        c_h, c_a = (ts.get("home") or {}).get("corner_kicks"), (ts.get("away") or {}).get("corner_kicks")
+        if c_h is None or c_a is None:
+            return None
+        return over(float(c_h) + float(c_a))
+    return None
+
+
+def sport_of_kind(kind: str) -> str:
+    return "football" if kind in FOOTBALL_KINDS else "tennis"
 
 
 def settle_live_leg(kind: str, selector: Dict[str, str], live_home: Optional[int],
@@ -194,6 +251,8 @@ def create_bet(db: Session, payload: Dict[str, Any]) -> UserBet:
     legs_in = payload.get("legs") or []
     if not 1 <= len(legs_in) <= MAX_LEGS:
         raise BetError(f"Una apuesta lleva entre 1 y {MAX_LEGS} selecciones.")
+    if len({sport_of_kind(str(l.get("kind"))) for l in legs_in}) > 1:
+        raise BetError("No mezcles tenis y fútbol en la misma combinada: cada deporte va aparte.")
     externals = [str(l.get("matchId") or "") for l in legs_in]
     if len(set(externals)) != len(externals):
         raise BetError("Hay dos selecciones del mismo partido: dependen una de la otra.")
@@ -267,6 +326,13 @@ def settle_pending(db: Session) -> Dict[str, int]:
             if leg.status != "PENDING":
                 continue
             sc = scores.get(leg.match_id)
+            if leg.kind in FOOTBALL_KINDS:
+                result = settle_football_leg(leg.kind, leg.selector or {}, leg.match.status,
+                                             sc.home_score if sc else None, sc.away_score if sc else None,
+                                             leg.match.extra_data)
+                if result:
+                    leg.status, leg.settled_at = result, now
+                continue
             result = settle_leg(leg.kind, leg.selector or {}, leg.match.status,
                                 sc.home_score if sc else None, sc.away_score if sc else None,
                                 _first_set_p1(leg.match),
@@ -288,6 +354,9 @@ def settle_pending(db: Session) -> Dict[str, int]:
     return {"settled": settled, "pending": len([b for b in bets if b.status == "PENDING"])}
 
 
+_SIDE_ORDER = {"home": 0, "player1": 0, "away": 1, "player2": 1}
+
+
 def _bet_view(bet: UserBet) -> Dict[str, Any]:
     return {
         "id": str(bet.id),
@@ -300,6 +369,7 @@ def _bet_view(bet: UserBet) -> Dict[str, Any]:
         "profit": float(bet.profit) if bet.profit is not None else None,
         "settledAt": bet.settled_at.isoformat() if bet.settled_at else None,
         "type": "sola" if len(bet.legs) == 1 else "combinada",
+        "sport": sport_of_kind(bet.legs[0].kind) if bet.legs else "tennis",
         "legs": [{
             "label": l.label,
             "kind": l.kind,
@@ -308,14 +378,14 @@ def _bet_view(bet: UserBet) -> Dict[str, Any]:
             "probability": float(l.probability) if l.probability is not None else None,
             "status": l.status,
             "matchId": l.match.external_id if l.match else None,
-            "match": " vs ".join(mc.competitor.name for mc in sorted(l.match.competitors, key=lambda c: c.side)
+            "match": " vs ".join(mc.competitor.name for mc in sorted(l.match.competitors, key=lambda c: _SIDE_ORDER.get(c.side, 9))
                                  if mc.competitor) if l.match else None,
             "matchDate": l.match.match_date.isoformat() if l.match and l.match.match_date else None,
         } for l in bet.legs],
     }
 
 
-def list_bets(db: Session) -> Dict[str, Any]:
+def list_bets(db: Session, sport: Optional[str] = None) -> Dict[str, Any]:
     from src.domain.models import MatchCompetitor
     settle_pending(db)
     bets = (
@@ -326,6 +396,8 @@ def list_bets(db: Session) -> Dict[str, Any]:
         .all()
     )
     views = [_bet_view(b) for b in bets]
+    if sport in ("tennis", "football"):
+        views = [v for v in views if v["sport"] == sport]
     return {
         "bets": views,
         "summary": {

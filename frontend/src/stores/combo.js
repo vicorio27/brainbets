@@ -3,8 +3,9 @@ import { defineStore } from 'pinia'
 // The user's own parlay, built from the "Lo más probable" picks of each match.
 // Kept in this browser only (localStorage), so it survives a reload.
 const KEY = 'brainbets.combo.v1'
+const FOOTBALL_KEY = 'brainbets.combo.football.v1'   // football keeps its own combo: the two sports are never mixed
 
-function load() {
+function load(KEY) {
   try {
     const raw = localStorage.getItem(KEY)
     const data = raw ? JSON.parse(raw) : null
@@ -17,8 +18,8 @@ export function legKey(matchId, label) {
   return `${matchId}|${label}`
 }
 
-export const useComboStore = defineStore('combo', {
-  state: () => ({ ...load(), open: false, justSaved: false }),
+const build = (id, KEY) => defineStore(id, {
+  state: () => ({ ...load(KEY), open: false, justSaved: false }),
   getters: {
     has: (state) => (key) => state.legs.some((l) => l.key === key),
     count: (state) => state.legs.length
@@ -64,6 +65,9 @@ export const useComboStore = defineStore('combo', {
     }
   }
 })
+
+export const useComboStore = build('combo', KEY)
+export const useFootballComboStore = build('comboFootball', FOOTBALL_KEY)
 
 // Numbers of a combo, pure so the panel and the bar agree.
 export function comboNumbers(legs, amount) {

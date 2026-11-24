@@ -1,7 +1,7 @@
 <template>
   <div v-if="combo.count || combo.justSaved" class="fixed inset-x-0 bottom-0 z-40 border-t border-emerald-300 bg-white shadow-[0_-4px_12px_rgba(0,0,0,0.08)]">
     <div v-if="combo.open" class="mx-auto max-h-[70vh] max-w-3xl overflow-y-auto px-4 py-3">
-      <ComboPanel />
+      <ComboPanel :sport="sport" />
     </div>
     <button
       class="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 px-4 py-2.5 text-sm"
@@ -20,10 +20,11 @@
 
 <script setup>
 import { computed } from 'vue'
-import { useComboStore, comboNumbers } from '../stores/combo.js'
+import { useComboStore, useFootballComboStore, comboNumbers } from '../stores/combo.js'
 import ComboPanel from './ComboPanel.vue'
 
-const combo = useComboStore()
+const props = defineProps({ sport: { type: String, default: 'tennis' } })
+const combo = props.sport === 'football' ? useFootballComboStore() : useComboStore()
 const numbers = computed(() => comboNumbers(combo.legs, combo.amount))
 function toggle() {
   combo.open = !combo.open

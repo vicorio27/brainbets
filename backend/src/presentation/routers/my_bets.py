@@ -34,9 +34,9 @@ def get_router() -> APIRouter:
     r = APIRouter(prefix="/my-bets", tags=["my-bets"])
 
     @r.get("")
-    def list_bets(db: Session = Depends(get_db)) -> Dict[str, Any]:
-        """Every registered bet, settled against results first, with a summary."""
-        return user_bets_service.list_bets(db)
+    def list_bets(sport: Optional[str] = None, db: Session = Depends(get_db)) -> Dict[str, Any]:
+        """Every registered bet (optionally one sport), settled against results first, with a summary."""
+        return user_bets_service.list_bets(db, sport)
 
     @r.post("")
     def create_bet(payload: BetIn, db: Session = Depends(get_db)) -> Dict[str, Any]:

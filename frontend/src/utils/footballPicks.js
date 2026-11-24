@@ -30,45 +30,46 @@ export function likelyPicks(match) {
   const om = match.oddsMarkets || {}
   const ou = om.overUnder || {}
   const out = []
-  const add = (key, text, house, model, odds) => {
+  // kind + selector say how the bet settles (user_bets_service): the picks can be registered in "Mis apuestas".
+  const add = (key, text, house, model, odds, kind, selector) => {
     const p = house ?? model
     if (p == null) return
-    out.push({ key, text, prob: p, source: house != null ? 'casa' : 'modelo', odds: odds || null })
+    out.push({ key, text, prob: p, source: house != null ? 'casa' : 'modelo', odds: odds || null, kind, selector })
   }
   for (const line of ['1.5', '2.5', '3.5']) {
     const l = ou[line]
     if (!l) continue
     const o = fair2(l.over, l.under)
     const mk = m ? m['over' + line.replace('.', '')] : null
-    add('o' + line, `Más de ${line} goles`, o, mk, l.over)
-    add('u' + line, `Menos de ${line} goles`, o == null ? null : 1 - o, mk == null ? null : 1 - mk, l.under)
+    add('o' + line, `Más de ${line} goles`, o, mk, l.over, 'fGoals', { line: +line, pick: 'mas' })
+    add('u' + line, `Menos de ${line} goles`, o == null ? null : 1 - o, mk == null ? null : 1 - mk, l.under, 'fGoals', { line: +line, pick: 'menos' })
   }
   if (m) {
-    add('o0.5', 'Más de 0.5 goles', null, m.over05)
-    add('u4.5', 'Menos de 4.5 goles', null, 1 - m.over45)
-    add('homeScores', `${match.homeTeam} marca`, null, m.homeScores)
-    add('awayScores', `${match.awayTeam} marca`, null, m.awayScores)
+    add('o0.5', 'Más de 0.5 goles', null, m.over05, null, 'fGoals', { line: 0.5, pick: 'mas' })
+    add('u4.5', 'Menos de 4.5 goles', null, 1 - m.over45, null, 'fGoals', { line: 4.5, pick: 'menos' })
+    add('homeScores', `${match.homeTeam} marca`, null, m.homeScores, null, 'fScores', { side: 'home' })
+    add('awayScores', `${match.awayTeam} marca`, null, m.awayScores, null, 'fScores', { side: 'away' })
   }
   // Extra markets the collect stores (display only): goals on every line, by half, corners.
   const ex = match.oddsExtra || {}
-  const lineOf = (group, key, line, text, over = true, under = true) => {
+  const lineOf = (group, key, line, text, kind, base = {}) => {
     const l = group?.[line]
     if (!l) return
     const f = fair2(l.over, l.under)
-    if (over) add(`${key}o${line}`, `Más de ${line} ${text}`, f, null, l.over)
-    if (under) add(`${key}u${line}`, `Menos de ${line} ${text}`, f == null ? null : 1 - f, null, l.under)
+    add(`${key}o${line}`, `Más de ${line} ${text}`, f, null, l.over, kind, { ...base, line: +line, pick: 'mas' })
+    add(`${key}u${line}`, `Menos de ${line} ${text}`, f == null ? null : 1 - f, null, l.under, kind, { ...base, line: +line, pick: 'menos' })
   }
-  for (const line of ['0.5', '4.5']) lineOf(ex.goals, 'g', line, 'goles')
-  for (const line of ['0.5', '1.5']) lineOf(ex.firstHalf, 'h1', line, 'goles en el 1T')
-  for (const line of ['0.5', '1.5']) lineOf(ex.secondHalf, 'h2', line, 'goles en el 2T')
-  for (const line of Object.keys(ex.corners || {})) lineOf(ex.corners, 'c', line, 'córners')
+  for (const line of ['0.5', '4.5']) lineOf(ex.goals, 'g', line, 'goles', 'fGoals')
+  for (const line of ['0.5', '1.5']) lineOf(ex.firstHalf, 'h1', line, 'goles en el 1T', 'fHalf', { half: 1 })
+  for (const line of ['0.5', '1.5']) lineOf(ex.secondHalf, 'h2', line, 'goles en el 2T', 'fHalf', { half: 2 })
+  for (const line of Object.keys(ex.corners || {})) lineOf(ex.corners, 'c', line, 'córners', 'fCorners')
   if (om.btts) {
     const b = fair2(om.btts.yes, om.btts.no)
-    add('bttsY', 'Ambos anotan', b, m ? m.btts : null, om.btts.yes)
-    add('bttsN', 'No anotan ambos', b == null ? null : 1 - b, m ? 1 - m.btts : null, om.btts.no)
+    add('bttsY', 'Ambos anotan', b, m ? m.btts : null, om.btts.yes, 'fBtts', { pick: 'si' })
+    add('bttsN', 'No anotan ambos', b == null ? null : 1 - b, m ? 1 - m.btts : null, om.btts.no, 'fBtts', { pick: 'no' })
   } else if (m) {
-    add('bttsY', 'Ambos anotan', null, m.btts)
-    add('bttsN', 'No anotan ambos', null, 1 - m.btts)
+    add('bttsY', 'Ambos anotan', null, m.btts, null, 'fBtts', { pick: 'si' })
+    add('bttsN', 'No anotan ambos', null, 1 - m.btts, null, 'fBtts', { pick: 'no' })
   }
   const mw = om.matchWinner
   let ph, pd, pa
@@ -78,7 +79,7 @@ export function likelyPicks(match) {
     ph = 1 / mw.home / s; pd = 1 / mw.draw / s; pa = 1 / mw.away / s
   } else if (m) { ph = m.home; pd = m.draw; pa = m.away }
   if (ph != null) {
-    const dc = (key, text, p) => out.push({ key, text, prob: p, source: fromHouse ? 'casa' : 'modelo', odds: ex.doubleChance?.[key] || null })
+    const dc = (key, text, p) => out.push({ key, text, prob: p, source: fromHouse ? 'casa' : 'modelo', odds: ex.doubleChance?.[key] || (key === '1' ? mw?.home : key === '2' ? mw?.away : null) || null, kind: 'fResult', selector: { pick: key } })
     dc('1X', `Doble oportunidad: ${match.homeTeam} o empate`, ph + pd)
     dc('X2', `Doble oportunidad: ${match.awayTeam} o empate`, pa + pd)
     dc('12', 'Doble oportunidad: no hay empate', ph + pa)

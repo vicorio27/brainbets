@@ -47,6 +47,9 @@
             <router-link to="/futbol" class="text-sm font-medium text-emerald-50 hover:text-white">
               Partidos y predicciones
             </router-link>
+            <router-link to="/mis-apuestas?sport=football" class="text-sm font-medium text-emerald-50 hover:text-white">
+              Mis apuestas
+            </router-link>
           </div>
           <div class="flex items-center sm:hidden">
             <button
@@ -129,6 +132,13 @@
           >
             Partidos y predicciones
           </router-link>
+          <router-link
+            to="/mis-apuestas?sport=football"
+            @click="mobileMenuOpen = false"
+            class="block px-3 py-2 rounded-md text-base font-medium text-emerald-50 hover:text-white hover:bg-emerald-700"
+          >
+            Mis apuestas
+          </router-link>
         </div>
       </div>
     </nav>
@@ -146,7 +156,7 @@ const mobileMenuOpen = ref(false)
 const route = useRoute()
 const router = useRouter()
 // Tennis and football are two separate fronts: the selector switches between them.
-const sport = computed(() => (route.path.startsWith('/futbol') ? 'football' : 'tennis'))
+const sport = computed(() => (route.path.startsWith('/futbol') || (route.path === '/mis-apuestas' && route.query.sport === 'football') ? 'football' : 'tennis'))
 const goSport = (value) => {
   mobileMenuOpen.value = false
   router.push(value === 'football' ? '/futbol' : '/')
