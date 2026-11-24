@@ -114,6 +114,45 @@ def book_prices(odds_item: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+EXTRA_OU = {
+    "Goals Over/Under": "goals",
+    "Goals Over/Under First Half": "firstHalf",
+    "Goals Over/Under - Second Half": "secondHalf",
+    "Corners Over Under": "corners",
+}
+DC_KEYS = {"home/draw": "1X", "draw/away": "X2", "home/away": "12"}
+
+
+def extra_prices(odds_item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Markets we store only to measure them (never sent to the engine): double chance, goals over/under
+    on every line (0.5 to 4.5), goals by half and total corners. One reference book per market (BOOK_PRIORITY).
+    -> {doubleChance: {1X, X2, 12}, goals|firstHalf|secondHalf|corners: {line: {over, under}}, book: {market: name}}"""
+    books = (odds_item or {}).get("bookmakers") or []
+    order = sorted(books, key=lambda b: BOOK_PRIORITY.index(b.get("name")) if b.get("name") in BOOK_PRIORITY else 99)
+    out: Dict[str, Any] = {}
+    for bk in order:
+        for bet in bk.get("bets") or []:
+            name, vals = bet.get("name"), bet.get("values") or []
+            if name == "Double Chance" and "doubleChance" not in out:
+                dc = {DC_KEYS[str(v.get("value", "")).lower()]: _f(v.get("odd")) for v in vals if str(v.get("value", "")).lower() in DC_KEYS}
+                if len(dc) == 3 and all(dc.values()):
+                    out["doubleChance"] = dc
+                    out.setdefault("book", {})["doubleChance"] = bk.get("name")
+            elif name in EXTRA_OU and EXTRA_OU[name] not in out:
+                lines: Dict[str, Dict[str, float]] = {}
+                for v in vals:
+                    parts = str(v.get("value", "")).split()
+                    p = _f(v.get("odd"))
+                    # only x.5 lines: whole and quarter lines (Pinnacle's) can refund or split the stake
+                    if len(parts) == 2 and parts[0] in ("Over", "Under") and p and parts[1].endswith(".5"):
+                        lines.setdefault(parts[1], {})["over" if parts[0] == "Over" else "under"] = p
+                lines = {k: v for k, v in lines.items() if "over" in v and "under" in v}
+                if lines:
+                    out[EXTRA_OU[name]] = lines
+                    out.setdefault("book", {})[EXTRA_OU[name]] = bk.get("name")
+    return out or None
+
+
 def pick_markets(books: Dict[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """One reference price per market: the first book (in BOOK_PRIORITY) that has it.
     `books` keeps every book for the markets we care about (kept apart from the engine payload)."""
@@ -287,6 +326,7 @@ def run(db, insert_fn: Callable[..., Optional[str]], storage: str, now: Optional
 
     closing = set(state.get("closing", []))
     priced: Dict[int, Optional[Dict[str, Any]]] = {}
+    extras: Dict[int, Optional[Dict[str, Any]]] = {}
     closing_ids: List[int] = []
     for fx in fixtures:
         fid = fx["fixture"]["id"]
@@ -300,6 +340,7 @@ def run(db, insert_fn: Callable[..., Optional[str]], storage: str, now: Optional
         if p["full"] or near:
             item = prov.odds(fid)
             priced[fid] = pick_markets(book_prices(item)) if item else None
+            extras[fid] = extra_prices(item) if item else None
             if near:
                 closing_ids.append(fid)
 
@@ -324,6 +365,13 @@ def run(db, insert_fn: Callable[..., Optional[str]], storage: str, now: Optional
         if match is not None:
             extra = dict(match.extra_data or {})
             extra["season_api"] = fx["league"].get("season")
+            if extras.get(fid):
+                if fid in closing_ids:
+                    extra["odds_extra_closing"] = extras[fid]
+                    extra.setdefault("odds_extra", extras[fid])     # never replace the earlier pre-match price
+                else:
+                    extra["odds_extra"] = extras[fid]
+                    extra["odds_extra_at"] = datetime.now(timezone.utc).isoformat()
             if fid in closing_ids and priced.get(fid):
                 extra["odds_markets_closing"] = priced[fid]
                 extra["odds_markets_closing_at"] = datetime.now(timezone.utc).isoformat()

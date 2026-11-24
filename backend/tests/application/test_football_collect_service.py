@@ -71,3 +71,17 @@ def test_plan_full_once_a_day_then_only_when_something_is_on():
     assert not again["full"] and again["days"] == []
     assert fc.plan(t, {"full_day": "2026-11-24"}, True)["days"] == ["2026-11-24"]
     assert not fc.plan(datetime(2026, 11, 24, 1, 0, tzinfo=BOGOTA_TZ), {}, False)["full"]   # before 03:00
+
+
+def test_extra_prices_keep_double_chance_halves_and_corners():
+    from src.application.football_collect_service import extra_prices
+    item = {"bookmakers": [{"name": "Bet365", "bets": [
+        {"name": "Double Chance", "values": [{"value": "Home/Draw", "odd": "1.36"}, {"value": "Home/Away", "odd": "1.30"}, {"value": "Draw/Away", "odd": "1.57"}]},
+        {"name": "Goals Over/Under First Half", "values": [{"value": "Over 0.5", "odd": "1.36"}, {"value": "Under 0.5", "odd": "3.00"}]},
+        {"name": "Corners Over Under", "values": [{"value": "Over 10.5", "odd": "1.82"}, {"value": "Under 10.5", "odd": "1.98"}]},
+    ]}]}
+    out = extra_prices(item)
+    assert out["doubleChance"] == {"1X": 1.36, "12": 1.3, "X2": 1.57}
+    assert out["firstHalf"]["0.5"] == {"over": 1.36, "under": 3.0}
+    assert out["corners"]["10.5"]["over"] == 1.82
+    assert extra_prices({"bookmakers": []}) is None
