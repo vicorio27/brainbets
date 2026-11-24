@@ -294,6 +294,7 @@ class DataService:
             drawOdds=float(meta.get('draw_odds')) if meta and meta.get('draw_odds') is not None else None,
             expertConsensus=meta.get("expert_consensus"),
             oddsMarkets=meta.get("odds_markets"),
+            oddsExtra=meta.get("odds_extra"),
             goalsTrend=self._goals_trend(match),
             features=match_features,
         )

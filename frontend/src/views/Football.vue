@@ -3,14 +3,33 @@
   <div>
     <div class="mb-2 flex flex-wrap items-baseline justify-between gap-2">
       <h1 class="text-2xl font-bold text-slate-900">Fútbol</h1>
-      <span class="text-xs text-slate-500">La Liga y Premier League · mercado principal: Más/Menos 2.5 goles</span>
+      <span class="text-xs text-slate-500">La Liga, Premier League y Champions League · mercado principal: Más/Menos 2.5 goles</span>
     </div>
     <p class="mb-4 text-xs text-slate-500">
       Las cuotas se guardan desde el 23-nov: todavía no hay muestra para saber si el modelo le gana a la casa,
       por eso casi todo sale "sin valor" (el modelo no pesa en el edge hasta demostrarlo).
     </p>
 
-    <details v-if="lab" class="mb-4 rounded-lg border border-slate-200 bg-white">
+    <section v-if="pod" class="mb-4 rounded-lg border-l-4 border-emerald-600 bg-white p-3 shadow-sm">
+      <div class="text-xs font-semibold uppercase tracking-wide text-emerald-800">
+        Apuesta del día · la más probable con cuota de la casa
+      </div>
+      <div class="mt-1 text-base font-bold text-slate-900">{{ pod.pick.text }}</div>
+      <div class="text-sm text-slate-700">
+        {{ pod.match.homeTeam }} vs {{ pod.match.awayTeam }} · {{ pod.match.league }} · {{ pod.match.eventDate }} {{ pod.match.eventTime }}
+      </div>
+      <div class="mt-1 text-sm text-slate-800">
+        Probabilidad <b>{{ Math.round(pod.pick.prob * 100) }}%</b> (casa, sin margen) · cuota <b>{{ pod.pick.odds.toFixed(2) }}</b>
+        · paga {{ Math.round((pod.pick.odds - 1) * 100) }} por cada 100
+      </div>
+      <router-link :to="{ path: `/futbol/${pod.match.matchId}`, query: { date: pod.match.eventDate } }" class="mt-1 inline-block text-xs font-medium text-blue-700 hover:underline">Ver el partido →</router-link>
+      <p class="mt-1 text-xs text-slate-500">
+        Es lo que más probablemente pasa, no lo que más paga, y todavía no hay muestra que diga si le gana a la cuota.
+        Se calcula con los mercados de la casa (goles, doble oportunidad, córners, mitades); sin cuota no entra.
+      </p>
+    </section>
+
+    <details v-if="lab"class="mb-4 rounded-lg border border-slate-200 bg-white">
       <summary class="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
         <span class="font-medium text-slate-800">Laboratorio · Más/Menos 2.5 goles</span>
         <span class="text-xs text-slate-600">{{ verdictText }}</span>
@@ -59,6 +78,7 @@
 import { computed, onMounted, ref } from 'vue'
 import api from '../stores/api.js'
 import FootballCard from '../components/FootballCard.vue'
+import { pickOfDay } from '../utils/footballPicks.js'
 
 const matches = ref([])
 const preds = ref([])
@@ -71,7 +91,7 @@ const day = (offset) => new Date(Date.now() + offset * 86400000).toLocaleDateStr
 onMounted(async () => {
   try {
     const from = day(-1)
-    const to = day(2)
+    const to = day(3)
     const [m, p] = await Promise.all([
       api.get('/matches/by-date', { params: { from, to } }),
       api.get('/predictions/history', { params: { sport: 'football', from, to, limit: 200 } })
@@ -93,6 +113,9 @@ const verdictText = computed(() => {
   const words = { juntando_muestra: `juntando muestra: ${v.matches} de ${v.needed}`, no_demostrado: 'no demostrado', demostrado: 'demostrado', descartado: 'descartado' }
   return words[v.level] || v.level
 })
+
+const nowBogota = () => new Date().toLocaleString('sv-SE', { timeZone: 'America/Bogota' }).slice(0, 16)
+const pod = computed(() => pickOfDay(matches.value, nowBogota()))
 
 const byMatch = computed(() => {
   const out = {}

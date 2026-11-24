@@ -105,6 +105,7 @@ class FootballMatch(BaseModel):
     expertConsensus: Optional[Dict[str, Any]] = None
     goalsTrend: Optional[Dict[str, Any]] = None    # goals / over 2.5 / both-teams-score rate of each team's last matches
     oddsMarkets: Optional[Dict[str, Any]] = None   # 1X2, Over/Under lines, both teams score (reference book)
+    oddsExtra: Optional[Dict[str, Any]] = None     # double chance, goals by half, corners, O/U 0.5-4.5 (display only)
     features: Optional[Dict[str, Any]] = None
 
 class MatchesResponse(BaseModel):

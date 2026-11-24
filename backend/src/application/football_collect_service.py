@@ -27,7 +27,7 @@ import requests
 from src.timezone import BOGOTA_TZ
 
 BASE = "https://v3.football.api-sports.io"
-LEAGUES = {39: "Premier League", 140: "La Liga"}
+LEAGUES = {39: "Premier League", 140: "La Liga", 2: "Champions League"}
 # Free plan: 100 calls a day, ~10 a minute (defaults). Pro plan: set API_FOOTBALL_DAILY_CAP / API_FOOTBALL_MIN_GAP.
 DAILY_CAP = int(os.environ.get("API_FOOTBALL_DAILY_CAP", "90"))
 MIN_GAP = float(os.environ.get("API_FOOTBALL_MIN_GAP", "6.5"))      # seconds between calls

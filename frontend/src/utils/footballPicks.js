@@ -49,6 +49,19 @@ export function likelyPicks(match) {
     add('homeScores', `${match.homeTeam} marca`, null, m.homeScores)
     add('awayScores', `${match.awayTeam} marca`, null, m.awayScores)
   }
+  // Extra markets the collect stores (display only): goals on every line, by half, corners.
+  const ex = match.oddsExtra || {}
+  const lineOf = (group, key, line, text, over = true, under = true) => {
+    const l = group?.[line]
+    if (!l) return
+    const f = fair2(l.over, l.under)
+    if (over) add(`${key}o${line}`, `Más de ${line} ${text}`, f, null, l.over)
+    if (under) add(`${key}u${line}`, `Menos de ${line} ${text}`, f == null ? null : 1 - f, null, l.under)
+  }
+  for (const line of ['0.5', '4.5']) lineOf(ex.goals, 'g', line, 'goles')
+  for (const line of ['0.5', '1.5']) lineOf(ex.firstHalf, 'h1', line, 'goles en el 1T')
+  for (const line of ['0.5', '1.5']) lineOf(ex.secondHalf, 'h2', line, 'goles en el 2T')
+  for (const line of Object.keys(ex.corners || {})) lineOf(ex.corners, 'c', line, 'córners')
   if (om.btts) {
     const b = fair2(om.btts.yes, om.btts.no)
     add('bttsY', 'Ambos anotan', b, m ? m.btts : null, om.btts.yes)
@@ -65,12 +78,37 @@ export function likelyPicks(match) {
     ph = 1 / mw.home / s; pd = 1 / mw.draw / s; pa = 1 / mw.away / s
   } else if (m) { ph = m.home; pd = m.draw; pa = m.away }
   if (ph != null) {
-    const dc = (key, text, p) => out.push({ key, text, prob: p, source: fromHouse ? 'casa' : 'modelo', odds: null })
+    const dc = (key, text, p) => out.push({ key, text, prob: p, source: fromHouse ? 'casa' : 'modelo', odds: ex.doubleChance?.[key] || null })
     dc('1X', `Doble oportunidad: ${match.homeTeam} o empate`, ph + pd)
     dc('X2', `Doble oportunidad: ${match.awayTeam} o empate`, pa + pd)
     dc('12', 'Doble oportunidad: no hay empate', ph + pa)
     dc('1', `Gana ${match.homeTeam}`, ph)
     dc('2', `Gana ${match.awayTeam}`, pa)
   }
-  return out.filter((p) => p.prob >= 0.5).sort((x, y) => y.prob - x.prob)
+  const seen = new Map()
+  for (const p of out) {                       // the same text can come from the house and the model: keep the house
+    const q = seen.get(p.text)
+    if (!q || (q.source !== 'casa' && p.source === 'casa')) seen.set(p.text, p)
+  }
+  return [...seen.values()].filter((p) => p.prob >= 0.5).sort((x, y) => y.prob - x.prob)
+}
+
+const MIN_ODDS = 1.1   // below this the pick pays nothing worth the risk (same floor as tennis)
+
+// "Apuesta del día": of the matches not yet started today (else the next day with matches), the most likely
+// pick that the house really prices (odds >= MIN_ODDS, source "casa"). Most likely, not best value.
+export function pickOfDay(matches, nowBogota) {
+  const upcoming = matches
+    .filter((m) => m.status === 'SCHEDULED' && `${m.eventDate} ${m.eventTime}` > nowBogota)
+    .sort((a, b) => `${a.eventDate} ${a.eventTime}`.localeCompare(`${b.eventDate} ${b.eventTime}`))
+  if (!upcoming.length) return null
+  const day = upcoming[0].eventDate
+  let best = null
+  for (const m of upcoming.filter((x) => x.eventDate === day)) {
+    for (const p of likelyPicks(m)) {
+      if (p.source !== 'casa' || !p.odds || p.odds < MIN_ODDS) continue
+      if (!best || p.prob > best.pick.prob) best = { match: m, pick: p }
+    }
+  }
+  return best ? { ...best, day } : null
 }

@@ -58,6 +58,8 @@ def build_rows(db: Session) -> List[Dict[str, Any]]:
                                       Match.external_id.like("FOOTBALL-AF-%")).order_by(Match.match_date).all())
     rows: List[Dict[str, Any]] = []
     for m in matches:
+        if not m.league or m.league.name not in ("La Liga", "Premier League"):
+            continue                    # the lab was frozen for the two domestic leagues; cups stay out of it
         ou = (((m.extra_data or {}).get("odds_markets") or {}).get("overUnder") or {}).get("2.5") or {}
         p_market = fair_over(ou.get("over"), ou.get("under"))
         if p_market is None or not m.match_date:
