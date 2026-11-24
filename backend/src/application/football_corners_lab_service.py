@@ -75,8 +75,8 @@ def main_line(lines: Dict[str, Any]) -> Optional[Tuple[float, float, float, floa
     return None if best is None else best[1:]
 
 
-def expected_corners(hist_h, hist_a, lg_h: float, lg_a: float) -> Optional[float]:
-    """Expected total corners of a match from both teams' recent (for, against) pairs, newest last."""
+def corners_split(hist_h, hist_a, lg_h: float, lg_a: float) -> Optional[Tuple[float, float]]:
+    """Expected corners (home, away) from both teams' recent (for, against) pairs, newest last."""
     m = (lg_h + lg_a) / 2
 
     def rating(hist):
@@ -95,7 +95,13 @@ def expected_corners(hist_h, hist_a, lg_h: float, lg_a: float) -> Optional[float
     rh, ra = rating(hist_h), rating(hist_a)
     if rh is None or ra is None:
         return None
-    return lg_h * (rh[0] / m) * (ra[1] / m) + lg_a * (ra[0] / m) * (rh[1] / m)
+    return lg_h * (rh[0] / m) * (ra[1] / m), lg_a * (ra[0] / m) * (rh[1] / m)
+
+
+def expected_corners(hist_h, hist_a, lg_h: float, lg_a: float) -> Optional[float]:
+    """Expected total corners of a match."""
+    split = corners_split(hist_h, hist_a, lg_h, lg_a)
+    return None if split is None else split[0] + split[1]
 
 
 def p_over(mean: float, line: float) -> float:

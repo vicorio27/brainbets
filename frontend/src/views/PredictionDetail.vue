@@ -244,6 +244,8 @@
               </div>
             </div>
 
+            <TennisSimulation v-if="tennisMatchId" :match-id="tennisMatchId" :key="tennisMatchId" />
+
             <!-- Surface stats (tennis) -->
             <div v-if="surfaceStatsPlayers.length" class="mt-6">
               <h3 class="text-lg font-semibold text-slate-900 mb-1">Rendimiento por superficie</h3>
@@ -511,6 +513,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { usePredictionsStore } from '../stores/predictions.js'
 import { formatDateTimeIso } from '../utils/format.js'
+import TennisSimulation from '../components/TennisSimulation.vue'
 import { betEdge, betKelly, modelEdge, isSuspicious, edgeBadgeClass, formatEdge } from '../utils/edge.js'
 
 const route = useRoute()
@@ -531,6 +534,10 @@ const props = defineProps({
 
 const predictionsStore = usePredictionsStore()
 const activeTab = ref('simple')
+const tennisMatchId = computed(() => {
+  const p = predictionsStore.detail?.prediction
+  return p?.sport === 'tennis' && p?.matchId ? p.matchId : null
+})
 
 const latestSnapshot = computed(() => {
   const snapshots = predictionsStore.progress?.snapshots || []

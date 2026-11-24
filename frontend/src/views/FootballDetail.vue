@@ -45,6 +45,8 @@
         </p>
       </section>
 
+      <FootballSimulation :match-id="match.matchId" :key="match.matchId" />
+
       <section v-if="predictions.length" class="mt-4 rounded-lg border border-slate-200 bg-white p-3 text-sm">
         <h2 class="text-sm font-semibold text-slate-800">Predicciones del modelo</h2>
         <div v-for="p in predictions" :key="p.predictionId" class="mt-1 flex justify-between text-xs">
@@ -71,6 +73,7 @@ import api from '../stores/api.js'
 import { likelyPicks } from '../utils/footballPicks.js'
 import { useFootballComboStore, legKey } from '../stores/combo.js'
 import ComboBar from '../components/ComboBar.vue'
+import FootballSimulation from '../components/FootballSimulation.vue'
 
 const route = useRoute()
 const match = ref(null)

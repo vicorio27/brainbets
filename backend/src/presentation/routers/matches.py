@@ -21,6 +21,26 @@ def get_router() -> APIRouter:
             raise HTTPException(status_code=404, detail="No matches data available")
         return data
 
+    @r.get("/{match_id}/football-simulation")
+    def get_football_simulation(match_id: str, service: DataService = Depends(get_data_service)):
+        """How a football match should go: goals, goal minutes, corners and H2H, from earlier matches only."""
+        from src.application.football_simulation_service import simulate
+
+        data = simulate(service.db, match_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Match not found")
+        return data
+
+    @r.get("/{match_id}/tennis-simulation")
+    def get_tennis_simulation(match_id: str, service: DataService = Depends(get_data_service)):
+        """How a tennis match still to play should unfold set by set (point model; information, not a signal)."""
+        from src.application.tennis_simulation_service import simulate
+
+        data = simulate(service.db, match_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Match not found")
+        return data
+
     @r.get("/{match_id}/surface-stats")
     def get_match_surface_stats(match_id: str, service: DataService = Depends(get_data_service)):
         """Career per-surface stats (hard/clay/grass W-L, win rate, Elo) for both
