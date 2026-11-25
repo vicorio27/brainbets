@@ -113,3 +113,29 @@ export function pickOfDay(matches, nowBogota) {
   }
   return best ? { ...best, day } : null
 }
+
+// Conservative mode (football): the same idea as the tennis one, with numbers only. Per match not yet started,
+// the most likely pick the house really prices (odds >= MIN_ODDS); "safe" from 75%, "very safe" from 85%.
+// Combos: pairs of different matches by the chance that both come in. No measured edge behind any of it.
+export const SAFE = 0.75
+export const VERY_SAFE = 0.85
+export const MAX_COMBOS = 5
+
+export function conservativeModes(matches, nowBogota) {
+  const upcoming = matches.filter((m) => m.status === 'SCHEDULED' && `${m.eventDate} ${m.eventTime}` > nowBogota)
+  const singles = []
+  for (const m of upcoming) {
+    const best = likelyPicks(m).filter((p) => p.source === 'casa' && p.odds && p.odds >= MIN_ODDS && p.prob >= SAFE)[0]
+    if (best) singles.push({ match: m, pick: best, level: best.prob >= VERY_SAFE ? 'muy segura' : 'segura' })
+  }
+  singles.sort((a, b) => b.pick.prob - a.pick.prob)
+  const combos = []
+  for (let i = 0; i < singles.length; i++) {
+    for (let j = i + 1; j < singles.length; j++) {
+      const a = singles[i], b = singles[j]
+      combos.push({ legs: [a, b], prob: a.pick.prob * b.pick.prob, odds: a.pick.odds * b.pick.odds })
+    }
+  }
+  combos.sort((x, y) => y.prob - x.prob)
+  return { singles, combos: combos.slice(0, MAX_COMBOS) }
+}

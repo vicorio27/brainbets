@@ -29,7 +29,9 @@
       </p>
     </section>
 
-    <details v-if="lab"class="mb-4 rounded-lg border border-slate-200 bg-white">
+    <FootballBetModes v-if="!loading" :matches="matches" :now="nowBogota()" />
+
+    <details v-if="lab" class="mb-4 rounded-lg border border-slate-200 bg-white">
       <summary class="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
         <span class="font-medium text-slate-800">Laboratorio · Más/Menos 2.5 goles</span>
         <span class="text-xs text-slate-600">{{ verdictText(lab) }}</span>
@@ -105,6 +107,7 @@ import { computed, onMounted, ref } from 'vue'
 import api from '../stores/api.js'
 import FootballCard from '../components/FootballCard.vue'
 import ComboBar from '../components/ComboBar.vue'
+import FootballBetModes from '../components/FootballBetModes.vue'
 import { pickOfDay } from '../utils/footballPicks.js'
 
 const matches = ref([])
