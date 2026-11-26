@@ -1,0 +1,75 @@
+{
+  "id": "football_pipeline",
+  "name": "BrainBets - Football Pipeline (collect football, then predict football only)",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/api/v1/internal/matches/football/collect?wait=true",
+        "sendQuery": false,
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\", \"X-Internal-Api-Key\": \"__INTERNAL_API_KEY__\"}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "collect-football",
+      "name": "Collect Football",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "onError": "continueRegularOutput",
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://n8n:5678/webhook/predictions-db?sport=football&from=' + new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) + '&to=' + new Date(Date.now() + 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) }}",
+        "sendBody": false,
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "predict-football",
+      "name": "Predict Football",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [750, 300]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{ "node": "Collect Football", "type": "main", "index": 0 }]]
+    },
+    "Collect Football": {
+      "main": [[{ "node": "Predict Football", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "error_notifier"
+  },
+  "staticData": null,
+  "tags": []
+}
