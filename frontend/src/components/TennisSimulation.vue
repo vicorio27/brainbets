@@ -2,13 +2,14 @@
   <details class="mt-6 rounded-lg border border-slate-200 bg-white" @toggle="onToggle">
     <summary class="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
       <span class="font-semibold text-slate-800">Simulación del partido</span>
-      <span class="text-xs text-slate-600">set por set, saque y breaks</span>
+      <span class="text-xs text-slate-600">jugarlo punto por punto, set por set, saque y breaks</span>
     </summary>
     <div class="space-y-3 border-t border-slate-100 px-3 py-3 text-xs text-slate-700">
       <p v-if="loading" class="text-slate-500">Calculando…</p>
       <p v-else-if="error" class="text-amber-800">No se pudo calcular: {{ error }}</p>
       <p v-else-if="sim && !sim.available" class="text-slate-600">{{ sim.reason }}</p>
       <template v-else-if="sim">
+        <TennisPlay :names="[sim.player1, sim.player2]" :pa="sim.servePointsWon.p1" :pb="sim.servePointsWon.p2" :best-of="sim.bestOf" />
         <section>
           <h3 class="mb-1 text-sm font-semibold text-slate-800">El partido</h3>
           <p>
@@ -68,6 +69,7 @@
 <script setup>
 import { ref } from 'vue'
 import api from '../stores/api.js'
+import TennisPlay from './TennisPlay.vue'
 
 const props = defineProps({ matchId: { type: String, required: true } })
 const sim = ref(null)
