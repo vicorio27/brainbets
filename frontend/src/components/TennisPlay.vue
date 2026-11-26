@@ -1,9 +1,10 @@
 <template>
   <section class="rounded-lg border border-emerald-200 bg-emerald-50/40 p-3">
-    <h3 class="mb-1 text-sm font-semibold text-slate-800">Jugar el partido antes de que empiece</h3>
+    <h3 class="mb-1 text-sm font-semibold text-slate-800">{{ start ? 'Jugar el resto del partido desde el marcador real' : 'Jugar el partido antes de que empiece' }}</h3>
     <p class="mb-2 text-slate-600">
       Quién gana cada punto lo sortea el modelo con la probabilidad de ganar un punto al saque de cada uno
       ({{ names[0] }} {{ pct(pa) }}% · {{ names[1] }} {{ pct(pb) }}%), al mejor de {{ bestOf }}.
+      <template v-if="start">Parte del marcador real de ahora: lo que pase aquí es una simulación, no lo que va a pasar.</template>
       La bola de la cancha es solo para verlo: cuántos golpes tuvo el punto y cómo acabó se dibuja al azar y no aporta información.
     </p>
 
@@ -34,7 +35,7 @@
       <button class="rounded bg-emerald-700 px-2 py-1 text-white disabled:opacity-40" :disabled="m.over || busy || auto" @click="step('set')">Set</button>
       <button class="rounded bg-emerald-700 px-2 py-1 text-white disabled:opacity-40" :disabled="m.over || busy || auto" @click="step('match')">Partido</button>
       <button class="rounded border border-emerald-700 px-2 py-1 text-emerald-800 disabled:opacity-40" :disabled="m.over" @click="toggleAuto">{{ auto ? 'Pausar' : 'Auto' }}</button>
-      <button class="rounded border border-slate-300 px-2 py-1 text-slate-700" @click="reset">Reiniciar</button>
+      <button class="rounded border border-slate-300 px-2 py-1 text-slate-700" @click="reset">{{ start ? 'Partir del marcador real' : 'Reiniciar' }}</button>
       <label class="ml-auto flex items-center gap-1 text-slate-600">Velocidad
         <select v-model.number="speed" class="rounded border border-slate-300 bg-white px-1 py-0.5" aria-label="Velocidad de la animación">
           <option :value="0.6">lenta</option><option :value="1">normal</option><option :value="2">rápida</option><option :value="4">turbo</option>
@@ -83,18 +84,20 @@
 <script setup>
 import { computed, onBeforeUnmount, reactive, ref } from 'vue'
 import TennisCourt from './TennisCourt.vue'
-import { monteCarlo, newMatch, playPoint, pointText, serverNow } from '../utils/tennisSim.js'
+import { cloneMatch, monteCarlo, newMatch, playPoint, pointText, serverNow } from '../utils/tennisSim.js'
 import { KIND_TEXT, makeRally } from '../utils/rally.js'
 
 const props = defineProps({
   names: { type: Array, required: true },
   pa: { type: Number, required: true },
   pb: { type: Number, required: true },
-  bestOf: { type: Number, default: 3 }
+  bestOf: { type: Number, default: 3 },
+  start: { type: Object, default: null } // optional state to start from (live mode: the real score)
 })
 const WINDOW = 10
 const pct = (x) => Math.round((x ?? 0) * 100)
-const m = reactive(newMatch(props.bestOf))
+const fresh = () => (props.start ? cloneMatch(props.start) : newMatch(props.bestOf))
+const m = reactive(fresh())
 const log = ref([])
 const mc = ref(null)
 const auto = ref(false)
@@ -192,14 +195,14 @@ function reset() {
   run += 1
   auto.value = false
   busy.value = false
-  Object.assign(m, newMatch(props.bestOf))
+  Object.assign(m, fresh())
   Object.assign(tally, blank())
   recent.value = []
   log.value = []
   court.value?.reset()
 }
 
-function runMany() { mc.value = monteCarlo(props.bestOf, props.pa, props.pb, 2000) }
+function runMany() { mc.value = monteCarlo(props.bestOf, props.pa, props.pb, 2000, Math.random, props.start) }
 onBeforeUnmount(() => { run += 1 })
 void KIND_TEXT
 </script>

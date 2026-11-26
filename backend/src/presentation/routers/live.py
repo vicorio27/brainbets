@@ -17,6 +17,16 @@ MAX_LIVE = timedelta(hours=6)        # and stop this long after it (a stale "sch
 SHOW_FINISHED = timedelta(hours=3)   # a match that ended stays on the page this long
 
 
+def _model_view(m, points, gms):
+    """Serve-point probabilities of the point model (frozen before the match) to read the live score against."""
+    view = points.get(m.external_id) if points else None
+    if not view or "pa" not in view:
+        return None
+    league = ((m.league.name if m.league else "") or "").lower()
+    best_of = 5 if gms and any(x in league for x in gms.SLAMS) else 3
+    return {"pa": round(view["pa"], 4), "pb": round(view["pb"], 4), "bestOf": best_of, "trust": round(view["trust"], 2)}
+
+
 def get_router() -> APIRouter:
     r = APIRouter(prefix="/live", tags=["live"])
 
@@ -46,6 +56,12 @@ def get_router() -> APIRouter:
                                  for s, x in rep.items()}
         except Exception:
             usual_by = {}
+        try:
+            from src.application import games_model_service as gms
+            from src.application.point_model_service import upcoming_set_probabilities
+            points = upcoming_set_probabilities(service.db)
+        except Exception:
+            gms, points = None, {}
         out = []
         for m in shown:
             names = {("p1" if c.side in ("home", "player1") else "p2"): c.competitor.name for c in m.competitors}
@@ -63,6 +79,7 @@ def get_router() -> APIRouter:
                 "date": when.strftime("%Y-%m-%d") if when else None,
                 "time": when.strftime("%H:%M") if when else None,
                 "state": "terminado" if finished else "en vivo" if event else "esperando el feed",
+                "model": _model_view(m, points, gms),
                 **view,
             })
         today = datetime.now(BOGOTA_TZ).date()

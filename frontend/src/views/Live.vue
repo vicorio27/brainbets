@@ -80,6 +80,9 @@
             </table>
           </div>
         </details>
+
+        <LiveVersus v-if="m.model" :match="m" />
+        <p v-else class="mt-3 text-xs text-slate-500">Sin estadísticas de saque suficientes de estos jugadores: no hay simulación contra el marcador real.</p>
       </template>
       <p v-else class="mt-2 text-sm text-slate-500">
         Todavía no aparece en el feed en vivo.
@@ -98,6 +101,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import api from '../stores/api.js'
+import LiveVersus from '../components/LiveVersus.vue'
 
 const STATE_CLASS = {
   'en vivo': 'bg-red-100 text-red-800',

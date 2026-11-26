@@ -4,12 +4,21 @@ export const COURT = { left: 50, right: 750, top: 60, bottom: 360, net: 400, mid
 
 const rnd = (rng, a, b) => a + (b - a) * rng()
 
-export function makeRally(r, parity, rng = Math.random) {
+// `force`: how the REAL point ended when it is known (live mode): 'ace' | 'doublefault' | 'winner' | 'error' | 'rally'
+// ('rally' = the feed only says who won). Only the shots are drawn; the way it ended is the real one.
+export function makeRally(r, parity, rng = Math.random, force = null) {
   const { server, winner } = r
   let n = 1
-  if (rng() > 0.1) {
+  if (force === 'ace' || force === 'doublefault') n = 1
+  else if (force || rng() > 0.1) {
     n = 2
     while (rng() < 0.78 && n < 20) n++
+    if (force) {
+      // the last hitter must be the winner for a winner and the loser for an error: fix the parity of the rally
+      const lastWins = (n % 2 === 1 ? server : 1 - server) === winner
+      const wantWin = force === 'winner' || (force === 'rally' && lastWins)
+      if (lastWins !== wantWin) n += 1
+    }
   }
   const last = n % 2 === 1 ? server : 1 - server
   let kind

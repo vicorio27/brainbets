@@ -23,6 +23,33 @@ export function pointText(m) {
   return `${POINT_LABELS[Math.min(a, 3)]}-${POINT_LABELS[Math.min(b, 3)]}`
 }
 
+// Closes a game (or tiebreak) won by `w` while `s` served: updates games, sets, next server and tiebreak.
+// Returns '' | 'game' | 'break' | 'set' | 'match'.
+export function finishGame(m, w, s) {
+  m.cur[w] += 1
+  let event = w !== s && !m.tb ? 'break' : 'game'
+  const wasTb = m.tb
+  m.pts = [0, 0]
+  m.tb = false
+  const [g, h] = m.cur
+  const setDone = wasTb || (g >= 6 && g - h >= 2) || (h >= 6 && h - g >= 2)
+  if (setDone) {
+    m.sets.push([...m.cur])
+    m.setsWon[w] += 1
+    m.cur = [0, 0]
+    event = 'set'
+    if (m.setsWon[w] === Math.ceil(m.bestOf / 2)) { m.over = true; m.winner = w; event = 'match' }
+  }
+  if (!m.over) {
+    // next game is served by the other player (after a tiebreak, the one who received first)
+    m.server = wasTb ? 1 - m.tbFirst : 1 - s
+    if (m.cur[0] === 6 && m.cur[1] === 6) { m.tb = true; m.tbFirst = m.server }
+  }
+  return event
+}
+
+export const cloneMatch = (m) => ({ ...m, sets: m.sets.map((x) => [...x]), cur: [...m.cur], pts: [...m.pts], setsWon: [...m.setsWon] })
+
 // Plays one point. Returns {winner, server, event} where event is '' | 'game' | 'set' | 'match' | 'break'.
 export function playPoint(m, pa, pb, rng = Math.random) {
   if (m.over) return null
@@ -35,27 +62,7 @@ export function playPoint(m, pa, pb, rng = Math.random) {
   const [a, b] = m.pts
   const need = m.tb ? 7 : 4
   const won = m.pts[w] >= need && m.pts[w] - m.pts[1 - w] >= 2
-  if (won) {
-    m.cur[w] += 1
-    event = w !== s && !m.tb ? 'break' : 'game'
-    const wasTb = m.tb
-    m.pts = [0, 0]
-    m.tb = false
-    const [g, h] = m.cur
-    const setDone = wasTb || (g >= 6 && g - h >= 2) || (h >= 6 && h - g >= 2)
-    if (setDone) {
-      m.sets.push([...m.cur])
-      m.setsWon[w] += 1
-      m.cur = [0, 0]
-      event = 'set'
-      if (m.setsWon[w] === Math.ceil(m.bestOf / 2)) { m.over = true; m.winner = w; event = 'match' }
-    }
-    if (!m.over) {
-      // the game just finished: next game is served by the other player (after a tiebreak, the one who received first)
-      m.server = wasTb ? 1 - m.tbFirst : 1 - s
-      if (m.cur[0] === 6 && m.cur[1] === 6) { m.tb = true; m.tbFirst = m.server }
-    }
-  }
+  if (won) event = finishGame(m, w, s)
   return { winner: w, server: s, event, a, b }
 }
 
@@ -70,12 +77,13 @@ export function playUntil(m, pa, pb, stop, rng = Math.random) {
   return log
 }
 
-export function monteCarlo(bestOf, pa, pb, n = 2000, rng = Math.random) {
+// `from`: optional match state to start from (the real score) instead of 0-0.
+export function monteCarlo(bestOf, pa, pb, n = 2000, rng = Math.random, from = null) {
   let p1 = 0, tb = 0, games = 0, decider = 0
   const scores = {}
   for (let i = 0; i < n; i++) {
-    const m = newMatch(bestOf, rng)
-    let hadTb = false
+    const m = from ? cloneMatch(from) : newMatch(bestOf, rng)
+    let hadTb = m.sets.some((x) => x[0] + x[1] === 13)
     while (!m.over) {
       if (m.tb) hadTb = true
       playPoint(m, pa, pb, rng)
